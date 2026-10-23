@@ -1,0 +1,83 @@
+"""恢复 CubeMX 生成后的 Keil 工具链和手写文件清单，不改外设源码。"""
+from pathlib import Path
+import sys
+import xml.etree.ElementTree as ET
+
+ROOT = Path(__file__).resolve().parents[1]
+PROJECT = ROOT / "firmware/MDK-ARM/Car.uvprojx"
+
+
+def put(parent, path, value):
+    node = parent
+    for name in path.split("/"):
+        child = node.find(name)
+        node = child if child is not None else ET.SubElement(node, name)
+    node.text = str(value)
+
+
+def sync():
+    tree = ET.parse(PROJECT)
+    targets = tree.findall("./Targets/Target")
+    if len(targets) != 1 or targets[0].findtext("TargetName") != "Car":
+        raise ValueError("必须只有一个 Car Target")
+    target = targets[0]
+    # 工具链元数据紧跟 ToolsetName，兼容本机 Keil MDK 5.24。
+    for tag, value in (("pCCUsed", r"6070000::V6.7::.\ARMCLANG"), ("uAC6", "1")):
+        existing = target.find(tag)
+        if existing is not None:
+            target.remove(existing)
+        node = ET.Element(tag)
+        node.text = value
+        target.insert(list(target).index(target.find("TargetOption")), node)
+    common = target.find("./TargetOption/TargetCommonOption")
+    put(common, "Device", "STM32F407ZG")
+    put(common, "Cpu", 'IRAM(0x20000000,0x20000) IROM(0x08000000,0x100000) CPUTYPE("Cortex-M4") FPU2 CLOCK(120000000) ELITTLE')
+    put(common, "OutputDirectory", ".\\Objects\\")
+    put(common, "ListingPath", ".\\Listings\\")
+    put(common, "OutputName", "Car")
+    put(common, "CreateHexFile", "1")
+    # 构建不执行用户命令、不下载、不自动进入调试。
+    for node in target.iter():
+        if node.tag.startswith("RunUserProg") or node.tag in (
+            "RunDebugAfterBuild", "UpdateFlashBeforeDebugging", "LoadApplicationAtStartup", "RunToMain"
+        ):
+            node.text = "0"
+    ads = target.find("./TargetOption/TargetArmAds")
+    for key, value in {"v6Lang": 3, "v6LangP": 3, "vShortEn": 1,
+                       "vShortWch": 1, "v6Lto": 0, "v6WtE": 0, "v6Rtti": 0,
+                       "wLevel": 3}.items():
+        put(ads, "Cads/" + key, value)
+    put(ads, "Aads/uClangAs", "0")
+    for region, kind, address, size in (
+        ("IRAM", 0, "0x20000000", "0x20000"),
+        ("IROM", 1, "0x08000000", "0x100000"),
+        ("OCR_RVCT4", 1, "0x08000000", "0x100000"),
+        ("OCR_RVCT9", 0, "0x20000000", "0x20000"),
+    ):
+        for key, value in (("Type", kind), ("StartAddress", address), ("Size", size)):
+            put(ads, "ArmAdsMisc/OnChipMemories/" + region + "/" + key, value)
+    include = ads.find("Cads/VariousControls/IncludePath")
+    paths = [p for p in (include.text or "").split(";") if p and not p.startswith("../User/")]
+    paths.extend("../User/" + name for name in ("App", "Board", "Comm", "Device", "Control", "Config"))
+    include.text = ";".join(paths)
+    groups = target.find("Groups")
+    for group in list(groups):
+        if group.findtext("GroupName") == "User/App":
+            groups.remove(group)
+    group = ET.SubElement(groups, "Group")
+    put(group, "GroupName", "User/App")
+    files = ET.SubElement(group, "Files")
+    for filename, filetype in (("app.c", 1), ("app.h", 5)):
+        entry = ET.SubElement(files, "File")
+        put(entry, "FileName", filename)
+        put(entry, "FileType", filetype)
+        put(entry, "FilePath", "../User/App/" + filename)
+    ET.indent(tree, space="  ")
+    tree.write(PROJECT, encoding="utf-8", xml_declaration=True)
+    print("PASS: Keil ARM Compiler 6.7、单 Target 和空应用入口已同步")
+
+
+if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    sync()
