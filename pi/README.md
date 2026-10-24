@@ -111,6 +111,6 @@ $env:PYTHONPATH = Join-Path (Get-Location) 'pi'
 
 ## 统一坐标与导航巡回
 
-当前本机8000使用`--mode sim --route-library output/native/speed.dll --route-speed .30 --runtime output/preview`，启停区1车头+X、启停区2车头−X、扫码+X，默认区域返航、朝向自由。上面各模型接入段落为历史记录，以本节为现行入口。构建：`python -B tools/build_odom.py --output output/native/speed.dll`；独立回放：`python -B -m robot.route_sim --library output/native/speed.dll --cruise-m-s .30 --start start_1`。均用根目录虚拟环境并设置PYTHONPATH=pi，详情见[提速与区域返航](../docs/speed.md)。
+当前本机8000使用`--mode sim --route-library output/native/corners.dll --route-speed .30 --runtime output/preview`，默认新转姿窗口、1.2rad/s弯道/窗口角速及区域返航。启停区1车头+X、启停区2车头−X、扫码+X。上面模型接入段落为历史记录，以本节为现行入口。构建：`python -B tools/build_odom.py --output output/native/corners.dll`；独立回放：`python -B -m robot.route_sim --library output/native/corners.dll --cruise-m-s .30 --start start_1`。均用虚拟环境并设置PYTHONPATH=pi，详情见[弯道与转姿](../docs/corners.md)。
 
-新页面显示名义地图、车身、轨迹、分段类型、轮速峰值、区域停车政策及未验证项。默认8段两批跨区，不推进扫码/搬运账本。起点1的0.30档94.77s、0.36档91.69s，起点2的0.30档100.33s，尚未满足完整60秒，工位内移位和视觉修正仍缺。`--fixed-return-position --fixed-return-heading`保留历史固定姿态对照；多档工具为`tools/tune_nav.py`，旧同速工具保留。模型与独立odom/track标志互斥，真实模式拒绝加载或使用`--route-speed`；Pi8080和本机8001未改动。
+新页显示名义地图、轨迹、轮速与角速上限、区域停车及未验证项。起点1模型84.29s、起点2模型89.41s，尚未满足完整60秒，工位内移位和视觉修正仍缺。`--legacy-corners`保留旧窗口/曲率策略，`--turn-rate`仅模拟角速；本轮同速工具为`tools/tune_corners.py`。模型与独立odom/track互斥，真实模式拒绝加载或使用`--route-speed`；不推进扫码/搬运账本，Pi8080和本机8001未改动。

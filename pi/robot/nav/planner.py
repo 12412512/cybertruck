@@ -29,7 +29,8 @@ class Segment:
 
 
 class Planner:
-    def __init__(self, library, geometry, field=None, max_rpm=100, cruise_m_s=CRUISE_M_S):
+    def __init__(self, library, geometry, field=None, max_rpm=100, cruise_m_s=CRUISE_M_S,
+                 lookahead=True,turn_rate_rad_s=1.2):
         self.library, self.geometry = library, geometry
         self.field = field or Field()
         self.data = self.field.data
@@ -38,6 +39,10 @@ class Planner:
         if not math.isfinite(cruise_m_s) or not 0 < cruise_m_s <= 2:
             raise ValueError('模拟巡航速度必须为(0,2]m/s；不代表实车许可值')
         self.cruise_m_s = cruise_m_s
+        self.lookahead = lookahead
+        if not math.isfinite(turn_rate_rad_s) or not 0 < turn_rate_rad_s <= 2:
+            raise ValueError('模拟转姿角速上限必须为(0,2]rad/s')
+        self.turn_rate_rad_s = turn_rate_rad_s
         if (geometry.layout != 1 or any(not math.isfinite(v) or v <= 0 for v in
                 (geometry.radius_m, geometry.half_length_m, geometry.half_width_m, max_rpm))):
             raise ValueError('规划器需要显式有效的合成轮参数')
@@ -54,8 +59,9 @@ class Planner:
     def pose(self, node, heading):
         return Pose(*self.nodes[node], heading * math.pi / 2)
 
-    def make(self, kind, start, end, road, allowed_start, reverse=False, radius=.1, corner=None, window_m=.08):
-        key = (kind, start, end, allowed_start, reverse, radius, corner, window_m)
+    def make(self, kind, start, end, road, allowed_start, reverse=False, radius=.1, corner=None,
+             window_m=.08,head_pad_m=0):
+        key = (kind, start, end, allowed_start, reverse, radius, corner, window_m,head_pad_m)
         if key in self.cache:
             segment, errors = self.cache[key]
             return (replace(segment,road=road) if segment else None), errors
@@ -67,7 +73,8 @@ class Planner:
             terminal = self.field.compact(end,allowed_start)
             if kind in ('POSE','FLOW','WINDOW') or (terminal and kind in ('LINE','DIAGONAL')):
                 spec = flow_specification(self.library,kind,start,end,corner,radius,terminal,window_m,
-                                          velocity=self.cruise_m_s)
+                                          velocity=self.cruise_m_s,lookahead=self.lookahead,head_pad_m=head_pad_m,
+                                          turn_rate_rad_s=self.turn_rate_rad_s)
             else:
                 spec = specification(kind,start,end,radius,reverse,self.cruise_m_s)
             for attempt in range(4):
@@ -214,17 +221,19 @@ class Planner:
                                 last_bearing = math.atan2(end.y_m-middle.y_m,end.x_m-middle.x_m)
                                 bend = angle(last_bearing-first_bearing)
                                 if abs(bend) < 1e-5 and final_heading != heading and nxt == 'center':
-                                    for width in (.08,.04,.02,.01,.006):
+                                    widths = (.50,.40,.30,.20,.12,.08,.04,.02,.01,.006) if self.lookahead else (.08,.04,.02,.01,.006)
+                                    for width in widths:
                                         window, _ = self.make('WINDOW',pose,end,roads_used,allowed,corner=middle,window_m=width)
                                         if window:
                                             candidates.append(((final,final_heading),window,window.cost_s))
                                 elif abs(abs(bend)-math.pi/2) < 1e-5:
                                     best_curve = None
                                     for radius in (.04,.08,.12,.16,.20):
-                                        curve, _ = self.make('FLOW',pose,end,roads_used,allowed,
-                                                             radius=radius,corner=middle)
-                                        if curve and (best_curve is None or curve.cost_s < best_curve.cost_s):
-                                            best_curve = curve
+                                        for pad in ((.04,.12,.24) if self.lookahead and final_heading != heading else (0,)):
+                                            curve, _ = self.make('FLOW',pose,end,roads_used,allowed,
+                                                                 radius=radius,corner=middle,head_pad_m=pad)
+                                            if curve and (best_curve is None or curve.cost_s < best_curve.cost_s):
+                                                best_curve = curve
                                     if best_curve:
                                         candidates.append(((final,final_heading),best_curve,best_curve.cost_s))
             for nxt, segment, edge_cost in candidates:
@@ -278,9 +287,10 @@ class Planner:
                 if abs(start.x_m-end.x_m)>.08 and abs(start.y_m-end.y_m)>.08:
                     for corner in (Pose(start.x_m,end.y_m,start.yaw_rad),Pose(end.x_m,start.y_m,start.yaw_rad)):
                         for radius in (.04,.08,.12,.16,.20):
-                            curve,_=self.make('FLOW',start,end,roads,allowed,corner=corner,radius=radius)
-                            if curve and (move is None or curve.cost_s<move.cost_s):
-                                move=curve
+                            for pad in ((.04,.12,.24) if self.lookahead and abs(end.yaw_rad-start.yaw_rad)>.001 else (0,)):
+                                curve,_=self.make('FLOW',start,end,roads,allowed,corner=corner,radius=radius,head_pad_m=pad)
+                                if curve and (move is None or curve.cost_s<move.cost_s):
+                                    move=curve
                 gain=sum(s.cost_s for s in group)-move.cost_s if move else 0
                 if gain>1e-6 and (selected is None or gain>selected[0]):
                     selected=gain,last,move

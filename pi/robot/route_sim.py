@@ -22,7 +22,8 @@ def odom_pose(values):
 
 class RouteSimulation:
     def __init__(self, library, *, blocked=(), start='start_1', flow=True, scope='two_batch',
-                 cruise_m_s=CRUISE_M_S, return_heading_free=True, return_region=True, compare_baseline=True):
+                 cruise_m_s=CRUISE_M_S, return_heading_free=True, return_region=True, compare_baseline=True,
+                 lookahead=True,turn_rate_rad_s=1.2):
         preparation_started = time.monotonic()
         if any(type(value) is not bool for value in (return_heading_free,return_region,compare_baseline)):
             raise ValueError('返航朝向及基准比较开关必须为布尔值')
@@ -30,7 +31,8 @@ class RouteSimulation:
         config.position_tol_m, config.yaw_tol_rad = .003, .012
         self.model = ClosedLoop(library, config=config, auto_start=False)
         self.planner = Planner(self.model.native.lib, self.model.calibration.geometry,
-                               max_rpm=self.model.config.max_rpm,cruise_m_s=cruise_m_s)
+                               max_rpm=self.model.config.max_rpm,cruise_m_s=cruise_m_s,
+                               lookahead=lookahead,turn_rate_rad_s=turn_rate_rad_s)
         self.field = self.planner.field
         self.start = start
         self.return_heading_free = return_heading_free
@@ -214,6 +216,8 @@ class RouteSimulation:
             self.trace_count = len(self.raw_trace)
         return dict(domain='simulation', frame_id='map', start=self.start, status=self.status, executable=False,
                     budget_scope=self.scope,flow=self.flow,budget_s=60,
+                    lookahead=self.planner.lookahead,
+                    turn_rate_rad_s=self.planner.turn_rate_rad_s if self.planner.lookahead else .7,
                     return_heading_free=self.return_heading_free,
                     return_region=self.return_region,
                     return_target=self.actions[-1][1].reference.end.values() if self.actions else None,
@@ -279,11 +283,14 @@ def main():
     parser.add_argument('--cruise-m-s',type=float,default=CRUISE_M_S,help='仅模拟巡航档，不写实车参数')
     parser.add_argument('--fixed-return-heading',action='store_true',help='历史固定朝向对照')
     parser.add_argument('--fixed-return-position',action='store_true',help='历史固定中心点对照')
+    parser.add_argument('--legacy-corners',action='store_true',help='同速旧弯道与转姿窗口对照')
+    parser.add_argument('--turn-rate',type=float,default=1.2,help='仅模拟弯道/窗口转姿角速上限rad/s')
     parser.add_argument('--stopped',action='store_true',help='同朝向同速度的逐段停车基准')
     args = parser.parse_args()
     report = RouteSimulation(args.library,blocked=args.blocked,start=args.start,scope=args.scope,flow=not args.stopped,
                              cruise_m_s=args.cruise_m_s,return_heading_free=not args.fixed_return_heading,
-                             return_region=not args.fixed_return_position).run()
+                             return_region=not args.fixed_return_position,lookahead=not args.legacy_corners,
+                             turn_rate_rad_s=args.turn_rate).run()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps({key:report[key] for key in ('status','reason','completed','actions','elapsed_ms','estimate_s','origin_consistent')},ensure_ascii=False))

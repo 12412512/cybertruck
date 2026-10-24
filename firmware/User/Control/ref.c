@@ -137,6 +137,67 @@ int Ref_TurnSpeed(const RefPlan *plan, double *velocity_m_s)
     return isfinite(*velocity_m_s);
 }
 
+int Ref_Curve(const RefPlan *plan, CurveLimit limit, double *velocity_m_s, double *length_m)
+{
+    unsigned cell;
+    unsigned order;
+    unsigned power;
+    unsigned factor;
+    double width;
+    double dx;
+    double dy;
+    double rate;
+    double bound[3] = {0, 0, 0};
+    double speed;
+    if (!plan || !plan->valid || !velocity_m_s || !length_m ||
+        (plan->spec.kind != 3 && plan->spec.kind != 4) ||
+        !isfinite(limit.velocity) || limit.velocity <= 0 ||
+        !isfinite(limit.acceleration) || limit.acceleration <= 0 ||
+        !isfinite(limit.jerk) || limit.jerk <= 0)
+    {
+        return 0;
+    }
+    /* 每格局部参数在[0,1]，导数系数绝对值和覆盖整个区间。
+     * 弯段为常标量速度：a=r''v²，j=r'''v³；首末加减速仍在直线段。 */
+    for (cell = 0; cell < PATH_CELLS; cell++)
+    {
+        width = cell < PATH_RAMP_CELLS || cell >= PATH_RAMP_CELLS + PATH_ARC_CELLS ?
+            plan->spec.path.blend_m / PATH_RAMP_CELLS : plan->path.arc_length / PATH_ARC_CELLS;
+        for (order = 1; order <= 3; order++)
+        {
+            dx = dy = 0;
+            for (power = order; power <= 7; power++)
+            {
+                factor = power;
+                if (order >= 2)
+                {
+                    factor *= power - 1;
+                }
+                if (order == 3)
+                {
+                    factor *= power - 2;
+                }
+                rate = factor / pow(width, (double)order);
+                dx += rate * fabs(plan->path.cell[cell].cx[power - 1]);
+                dy += rate * fabs(plan->path.cell[cell].cy[power - 1]);
+            }
+            bound[order - 1] = fmax(bound[order - 1], hypot(dx, dy));
+        }
+    }
+    speed = limit.velocity / fmax(1, bound[0]);
+    if (bound[1] > 0)
+    {
+        speed = fmin(speed, sqrt(limit.acceleration / bound[1]));
+    }
+    if (bound[2] > 0)
+    {
+        speed = fmin(speed, pow(limit.jerk / bound[2], 1.0 / 3.0));
+    }
+    *velocity_m_s = speed * 0.995;
+    *length_m = plan->path.length_m;
+    return isfinite(*velocity_m_s) && *velocity_m_s > 0;
+}
+
 static void Transform(const RefPlan *plan, RefPoint *point)
 {
     double cosine = cos(plan->origin[2]);
@@ -251,6 +312,22 @@ static int ExtendedAt(const RefPlan *plan, double seconds, RefPoint *point)
         hypot(point->jx_m_s3, point->jy_m_s3) <= plan->spec.linear.jerk * 1.0003;
 }
 
+static int TimeMake(RefPlan *plan, CurveLimit slow, double distance, double lead, double tail,
+                    double heading_begin, double heading_end)
+{
+    if (!Curve_TimeMake(&plan->timing, (float)distance, (float)lead, (float)tail, slow,
+        plan->spec.linear.velocity, 0.0f, plan->spec.tail_velocity_m_s > 0 ?
+        plan->spec.tail_velocity_m_s : plan->spec.linear.velocity))
+    {
+        return 0;
+    }
+    plan->position_time_s = plan->duration_s = plan->timing.total;
+    plan->heading_begin_s = Curve_TimeFind(&plan->timing, fmin(heading_begin, plan->timing.distance));
+    plan->heading_end_s = Curve_TimeFind(&plan->timing, fmin(heading_end, plan->timing.distance));
+    return plan->heading_begin_s >= 0 && plan->heading_end_s > plan->heading_begin_s &&
+        plan->heading.total <= (plan->heading_end_s - plan->heading_begin_s) * 1.000001;
+}
+
 static int ExtendedMake(RefPlan *plan)
 {
     const RefSpec *input = &plan->spec;
@@ -259,6 +336,12 @@ static int ExtendedMake(RefPlan *plan)
     double lead;
     double tail;
     double core;
+    double heading_begin;
+    double heading_end;
+    double low;
+    double high;
+    double middle;
+    unsigned index;
     if (input->tangent || !Curve_Make(&plan->heading, input->yaw_rad, input->angular))
     {
         return 0;
@@ -301,21 +384,55 @@ static int ExtendedMake(RefPlan *plan)
         return 0;
     }
     slow.velocity = input->curve_velocity_m_s;
+    heading_begin = lead;
+    heading_end = distance - tail;
+    if (input->kind == 4 && (input->yaw_begin_m != 0 || input->yaw_end_m != 0))
+    {
+        heading_begin = input->yaw_begin_m;
+        heading_end = input->yaw_end_m;
+        if (heading_begin < 0 || heading_begin > lead + 1e-6 ||
+            heading_end < distance - tail - 1e-6 || heading_end > distance + 1e-6)
+        {
+            return 0;
+        }
+        /* 先按几何限速构建；转姿可利用入弯/出弯直线，不再一律压慢整弯。
+         * 若时长不足，有界搜索并且只保留实际满足转姿时间的速度。 */
+        if (TimeMake(plan, slow, distance, lead, tail, heading_begin, heading_end))
+        {
+            return 1;
+        }
+        if (plan->heading.total == 0)
+        {
+            return 0;
+        }
+        high = slow.velocity;
+        low = fmin(high, core / (plan->heading.total * 1.001));
+        slow.velocity = (float)low;
+        if (!TimeMake(plan, slow, distance, lead, tail, heading_begin, heading_end))
+        {
+            return 0;
+        }
+        for (index = 0; index < 12; index++)
+        {
+            middle = (low + high) / 2;
+            slow.velocity = (float)middle;
+            if (TimeMake(plan, slow, distance, lead, tail, heading_begin, heading_end))
+            {
+                low = middle;
+            }
+            else
+            {
+                high = middle;
+            }
+        }
+        slow.velocity = (float)low;
+        return TimeMake(plan, slow, distance, lead, tail, heading_begin, heading_end);
+    }
     if (plan->heading.total > 0)
     {
         slow.velocity = (float)fmin(slow.velocity, core / (plan->heading.total * 1.001));
     }
-    if (!Curve_TimeMake(&plan->timing, (float)distance, (float)lead, (float)tail, slow,
-        input->linear.velocity, 0.0f,
-        input->tail_velocity_m_s > 0 ? input->tail_velocity_m_s : input->linear.velocity))
-    {
-        return 0;
-    }
-    plan->position_time_s = plan->duration_s = plan->timing.total;
-    plan->heading_begin_s = Curve_TimeFind(&plan->timing, lead);
-    plan->heading_end_s = Curve_TimeFind(&plan->timing, distance - tail);
-    return plan->heading_begin_s >= 0 && plan->heading_end_s > plan->heading_begin_s &&
-        plan->heading.total <= (plan->heading_end_s - plan->heading_begin_s) * 1.000001;
+    return TimeMake(plan, slow, distance, lead, tail, heading_begin, heading_end);
 }
 
 int Ref_At(const RefPlan *plan, double seconds, RefPoint *point)

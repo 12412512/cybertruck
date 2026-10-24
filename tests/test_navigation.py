@@ -229,6 +229,52 @@ class NavigationTests(unittest.TestCase):
         self.assertGreater(actual*planned,0)
         self.assertAlmostEqual(actual,planned-1e-5,delta=1e-6)
 
+    def test_expanded_heading_window_preserves_all_dynamics_limits(self):
+        start,end,corner = Pose(0,0,0),Pose(1.2,1.0,math.pi/2),Pose(1.2,0,0)
+        improved = []
+        for radius in (.04,.08,.16,.20):
+            spec = flow_specification(self.lib,'FLOW',start,end,corner,radius=radius,
+                                      velocity=.3,lookahead=True,head_pad_m=.12)
+            ref = NativeReference(self.lib,start,spec)
+            old = flow_specification(self.lib,'FLOW',start,end,corner,radius=radius,velocity=.3)
+            improved.append(ref.duration_s < NativeReference(self.lib,start,old).duration_s)
+            for i in range(3001):
+                p = ref.point(ref.duration_s*i/3000)
+                self.assertLessEqual(math.hypot(p.vx_m_s,p.vy_m_s),.3001)
+                self.assertLessEqual(math.hypot(p.ax_m_s2,p.ay_m_s2),.25008)
+                self.assertLessEqual(math.hypot(p.jx_m_s3,p.jy_m_s3),.80025)
+                self.assertLessEqual(abs(p.wz_rad_s),.7001)
+                self.assertLessEqual(abs(p.angular_accel_rad_s2),2.0001)
+                self.assertLessEqual(abs(p.angular_jerk_rad_s3),12.001)
+            self.assertAlmostEqual(ref.end.x_m,end.x_m,delta=2e-6)
+            self.assertAlmostEqual(ref.end.y_m,end.y_m,delta=2e-6)
+            bad = ref.spec
+            bad.yaw_begin_m = -1
+            with self.assertRaises(ValueError):NativeReference(self.lib,start,bad)
+        self.assertTrue(any(improved))
+
+    def test_wider_rotation_window_is_checked_for_full_body_sweep(self):
+        start,end,corner = Pose(.34,1.2,math.pi/2),Pose(2,1.2,3*math.pi/2),Pose(1.2,1.2,0)
+        unsafe,errors = self.planner.make('WINDOW',start,end,'test',None,corner=corner,window_m=.65)
+        self.assertIsNone(unsafe)
+        self.assertTrue(errors)
+
+    def test_corner_turn_rate_keeps_acceleration_and_jerk_limits(self):
+        start,end,corner = Pose(0,0,0),Pose(1.2,1.0,math.pi/2),Pose(1.2,0,0)
+        for turn_rate in (1.2,1.5):
+            spec = flow_specification(self.lib,'FLOW',start,end,corner,radius=.16,
+                velocity=.3,lookahead=True,head_pad_m=.12,turn_rate_rad_s=turn_rate)
+            reference = NativeReference(self.lib,start,spec)
+            for i in range(3001):
+                point = reference.point(reference.duration_s*i/3000)
+                self.assertLessEqual(abs(point.wz_rad_s),turn_rate*1.0001)
+                self.assertLessEqual(abs(point.angular_accel_rad_s2),2.0001)
+                self.assertLessEqual(abs(point.angular_jerk_rad_s3),12.001)
+                self.assertLessEqual(math.hypot(point.ax_m_s2,point.ay_m_s2),.25008)
+                self.assertLessEqual(math.hypot(point.jx_m_s3,point.jy_m_s3),.80025)
+        for invalid in (0,-1,float('nan'),3):
+            with self.assertRaises(ValueError):Planner(self.lib,self.geometry,turn_rate_rad_s=invalid)
+
     def test_missing_full_envelope_remains_a_blocker(self):
         result=self.planner.plan('start_1','qr',roads=self.open_roads)
         self.assertFalse(self.planner.data['body']['complete'])

@@ -62,7 +62,8 @@ export function renderNavigation(nav) {
         nav.return_heading_free===false?`固定朝向对照：${returnYaw}`:'等待新版模拟核心');
     const rpm=value=>Number.isFinite(value)?value.toFixed(1):'待接入';
     set('nav-speed',`${nav.cruise_m_s.toFixed(2)} m/s，仅模拟档；轮目标峰值${rpm(nav.peak_rpm)} RPM / 模型反馈峰值${rpm(nav.peak_actual_rpm)} RPM；目标上限${rpm(nav.max_rpm)} RPM`);
-    set('nav-turns',`独立停车转向${nav.inplace_actions}次；模型低速近原地转姿${(nav.inplace_turn_ms/1000).toFixed(2)} s，移动转姿${(nav.moving_turn_ms/1000).toFixed(2)} s；累计行程${nav.travel_m.toFixed(2)} m`);
+    const turnRate=Number.isFinite(nav.turn_rate_rad_s)?`弯道/窗口角速上限${nav.turn_rate_rad_s.toFixed(2)} rad/s；`:'';
+    set('nav-turns',`${turnRate}独立停车转向${nav.inplace_actions}次；模型低速近原地转姿${(nav.inplace_turn_ms/1000).toFixed(2)} s，移动转姿${(nav.moving_turn_ms/1000).toFixed(2)} s；累计行程${nav.travel_m.toFixed(2)} m`);
     set('nav-origin',`${nav.origin_ms??'待建立'} ms / ${nav.origin_consistent?'全程未清零':'发生改变'}`);
     set('nav-conditions',`实车执行关闭；道路开放为合成场景；待验：${nav.assumptions.join('、')}`);
     set('nav-reason',nav.reason||'—');

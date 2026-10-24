@@ -32,7 +32,8 @@ def specification(kind, start, end, radius=.1, reverse=False, velocity=CRUISE_M_
 
 
 def flow_specification(library, kind, start, end, corner=None, radius=.1, terminal=False,
-                       window_m=.08, velocity=CRUISE_M_S):
+                       window_m=.08, velocity=CRUISE_M_S, lookahead=False, head_pad_m=0,
+                       turn_rate_rad_s=.7):
     """位置曲线与车身朝向解耦；内部低速区不创建第二个动作或停车状态。"""
     local = relative(start, end)
     spec = specification('LINE', start, end, velocity=velocity)
@@ -49,7 +50,8 @@ def flow_specification(library, kind, start, end, corner=None, radius=.1, termin
             raise ValueError('当前平滑几何仅支持90度连接')
         measure = specification('ARC',Pose(0,0,0),Pose(0,0,turn),radius)
         measure.tangent = 0
-        displacement = abs(NativeReference(library,Pose(0,0,0),measure).end.x_m)
+        geometry = NativeReference(library,Pose(0,0,0),measure)
+        displacement = abs(geometry.end.x_m)
         lead = math.dist(start.values()[:2],corner.values()[:2])-displacement
         tail = math.dist(end.values()[:2],corner.values()[:2])-displacement
         if min(lead,tail) <= .02:
@@ -59,6 +61,11 @@ def flow_specification(library, kind, start, end, corner=None, radius=.1, termin
         spec.path_heading_rad = angle(incoming-start.yaw_rad)
         # 巡航档由规划实例冻结，弯道仍受向心加速度与曲率jerk限制。
         spec.curve_velocity_m_s = min(velocity,math.sqrt(.125*radius),(.4*radius*radius/4.5)**(1/3))
+        if lookahead:
+            speed,core_length = geometry.curve_limits(spec.linear)
+            spec.curve_velocity_m_s = speed
+            spec.yaw_begin_m = max(0,lead-head_pad_m)
+            spec.yaw_end_m = min(lead+core_length+tail,lead+core_length+head_pad_m)
         spec.tail_velocity_m_s = min(DOCK_M_S,velocity) if terminal else velocity
     elif kind == 'WINDOW':
         if corner is None:
@@ -80,6 +87,8 @@ def flow_specification(library, kind, start, end, corner=None, radius=.1, termin
             spec.yaw_begin_m, spec.yaw_end_m = distance-.05, distance-.03
             spec.curve_velocity_m_s = min(DOCK_M_S,velocity)
             spec.tail_velocity_m_s = min(DOCK_M_S,velocity)
+    if lookahead and kind in ('FLOW','WINDOW'):
+        spec.angular.velocity = turn_rate_rad_s
     return spec
 
 
@@ -115,6 +124,16 @@ class NativeReference:
     @property
     def spec(self):
         return Spec.from_buffer_copy(self._spec)
+
+    def curve_limits(self,limit):
+        try:
+            self.lib.Ref_Curve.argtypes = [c.c_void_p,Limit,c.POINTER(c.c_double),c.POINTER(c.c_double)]
+        except AttributeError as exc:
+            raise ValueError('弯道模型库版本不匹配，请重新构建主机库') from exc
+        speed,length = c.c_double(),c.c_double()
+        if not self.lib.Ref_Curve(self.storage,limit,c.byref(speed),c.byref(length)):
+            raise ValueError('无法证明弯道常速区的V/A/J限制')
+        return speed.value,length.value
 
     def at(self, seconds):
         point = self.point(seconds)

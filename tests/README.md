@@ -21,3 +21,5 @@
 连续导航节点更新起点1/2为0/180°，默认两批8段跨区；导航现有24项、跟踪19项、轨迹9项，合计154项主机回归通过，818项静态检查通过。增加正式C分段变速边界V/A连续、末端档位、移姿/弯道/转姿窗口的笛卡尔与角V/A/J、±π方向保持、长侧移、重叠道路保守状态、关闭走廊禁止捷径和新参考丢ACK超时。最终日志`output/flow/release-tests.log`，同速四场景A/B见`output/flow/release/comparison.json`及`docs/flow.md`，未包含真实串口或物理动作。
 
 提速与区域返航节点合计159项完整回归、818项静态检查通过。新增正式C转姿区间速率界与4001点逆运动学核对、速度实例隔离、受轮速限制时降档保留候选、自由返航朝向及两区主体投影停放；真实模式拒绝模拟速度参数。日志`output/speed/region-tests.log`，六场景哈希一致的对照见`output/speed/region/summary.json`，详见`docs/speed.md`。
+
+弯道节点162项完整回归、818项静态检查通过。新增几何导数界限速、扩大转姿范围后的3001点全V/A/J、过宽窗口碰撞拒绝，以及1.2/1.5角速档不提高A/J的核对。日志output/corners/release-tests.log，同速六场景output/corners/release/summary.json；仍只有合成车体证据。实测入口见docs/field_test.md。

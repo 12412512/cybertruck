@@ -73,5 +73,7 @@ REF_API int Ref_At(const RefPlan *plan, double seconds, RefPoint *point);
 REF_API int Ref_Bounds(const RefPlan *plan, double *velocity_m_s, double *yaw_rad_s);
 /* 航向变化期间的平移速率界，避免叠加不同时间的线速/角速峰值。 */
 REF_API int Ref_TurnSpeed(const RefPlan *plan, double *velocity_m_s);
+/* 已构建曲线的几何常速上限及长度，仅用于几何弯段，不替代完整参考检查。 */
+REF_API int Ref_Curve(const RefPlan *plan, CurveLimit limit, double *velocity_m_s, double *length_m);
 
 #endif

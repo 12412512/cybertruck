@@ -77,3 +77,5 @@ $taskPython = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-ru
 连续导航节点改用`output/native/flow.dll`，C与ctypes结构需一起重建。`python -B tools/compare_nav.py --library output/native/flow.dll --output output/flow/release`直接调用正式模型，对照起点1停车/连续、起点2连续和五站巡回，保存源码/配置/库哈希及完整失败/成功结果；不接设备。`robot.route_sim`默认two_batch，支持`--scope tour`、`--start start_2`、`--stopped`。范围、未建模项和预算见`docs/flow.md`。
 
 提速节点须重建到`output/native/speed.dll`以取得正式C转姿区间上界。`tools/tune_nav.py --library output/native/speed.dll --output output/speed/region`对照六场景；`--case`选择单个或多个，`--collect`核对版本并汇总，支持不同case并行留证。当前区域返航不要求原中心或朝向，历史对照可传`--fixed-return-position --fixed-return-heading`，详见`docs/speed.md`。
+
+弯道版改建`output/native/corners.dll`，新增正式几何导数限速查询。`tools/tune_corners.py --library output/native/corners.dll --output output/corners/release`固定0.30m/s对照旧策略、窗口优化、转姿角速及两起点；case可并行，collect核对哈希/数据域/同速口径。独立回放可用`--legacy-corners`与`--turn-rate`，仅模拟，不改实车配置。上电只读留证继续复用`inspect_can.py`，见`docs/field_test.md`。
