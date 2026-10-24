@@ -124,6 +124,8 @@ class ClosedLoop:
         self.elapsed_ms = -10
         self.sequence = self.request = self.frames = 0
         self.started = False
+        # 工作台点动只驱动合成车体；默认None保持原闭环测试行为。
+        self.manual_rpm = None
         self.auto_start = auto_start
         self.pending = []
         self.last_output = 0
@@ -203,7 +205,12 @@ class ClosedLoop:
             self.transitions.append(dict(at_ms=tick, state=STATES[output['state']]))
         if output['reference']['done'] and self.reference_end_ms is None:
             self.reference_end_ms = tick
-        if output['state'] in (5, 6):
+        if self.manual_rpm is not None:
+            self.pending.clear()
+            rate = self.config.slew_rpm_s * .01
+            self.plant.targets[:] = [old + min(rate, max(-rate, new - old))
+                                    for old, new in zip(self.plant.targets, self.manual_rpm)]
+        elif output['state'] in (5, 6):
             self.pending.clear()
             self.plant.targets[:] = [0] * 4
         elif output['output_id'] != self.last_output:

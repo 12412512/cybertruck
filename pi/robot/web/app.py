@@ -1,4 +1,4 @@
-"""FastAPI只读总览。控制核心和网页为不同进程，通过快照交换状态。"""
+"""Web工作台网关与只读诊断；控制核心独立运行，网页不占用设备。"""
 
 import argparse
 import asyncio
@@ -15,13 +15,19 @@ DEFAULT_RUNTIME = Path(__file__).resolve().parents[3] / 'output/runtime'
 STATIC = Path(__file__).with_name('static')
 
 
-def create_app(runtime=DEFAULT_RUNTIME):
-    app = FastAPI(title='智能搬运小车只读工作台', docs_url=None, redoc_url=None)
+def create_app(runtime=DEFAULT_RUNTIME, core_client=None):
+    from .workbench import CoreClient, router
+    app = FastAPI(title='智能搬运小车工作台', docs_url=None, redoc_url=None)
+    app.include_router(router(core_client or CoreClient()))
     snapshot = Path(runtime) / 'state.json'
     app.mount('/static', StaticFiles(directory=STATIC), name='static')
 
     @app.get('/')
     def index():
+        return FileResponse(STATIC / 'workbench.html')
+
+    @app.get('/diagnostics')
+    def diagnostics():
         return FileResponse(STATIC / 'index.html')
 
     @app.get('/api/state')
@@ -61,6 +67,24 @@ def create_app(runtime=DEFAULT_RUNTIME):
         return (state.get('navigation') or {}).get('execution_package') or dict(
             available=False, domain='simulation', executable=False)
 
+    @app.get('/api/site/start1-qr')
+    def site_readiness():
+        from ..nav.site import read_site, readiness
+        site = read_site()
+        return dict(readiness(site), measurements=site)
+
+    @app.get('/api/site/start1-qr/preview')
+    def site_preview():
+        from ..nav.site import read_site, site_digest
+        path = DEFAULT_RUNTIME.parent / 'start1-qr/preview.json'
+        try:
+            report = json.loads(path.read_text(encoding='utf-8'))
+            if report['site_sha256'] != site_digest(read_site()):
+                raise ValueError('现场配置已变化')
+            return dict(report, available=True, executable=False)
+        except (OSError, ValueError, KeyError):
+            return dict(available=False, executable=False, domain='simulation')
+
     @app.websocket('/ws')
     async def stream(socket: WebSocket):
         await socket.accept()
@@ -76,7 +100,7 @@ def create_app(runtime=DEFAULT_RUNTIME):
 
 def main():
     import uvicorn
-    parser = argparse.ArgumentParser(description='只读Web，不占用串口')
+    parser = argparse.ArgumentParser(description='工作台与只读诊断，不占用串口')
     parser.add_argument('--runtime', type=Path, default=DEFAULT_RUNTIME)
     parser.add_argument('--host', default='127.0.0.1')
     parser.add_argument('--port', type=int, default=8000)

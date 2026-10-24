@@ -50,7 +50,10 @@ def main():
     parser.add_argument('--expect-sha')
     parser.add_argument('--expect-uid')
     parser.add_argument('--expect-backup-sha', help='重试前核对Flash仍与原始备份一致')
+    parser.add_argument('--frequency', type=int, default=1000000, help='SWD时钟Hz，不改变连接或擦写策略')
     args = parser.parse_args()
+    if args.frequency not in (100000, 500000, 1000000):
+        parser.error('SWD时钟只允许100k/500k/1MHz')
     if args.program and not all((args.hex, args.expect_sha, args.expect_uid)):
         parser.error('烧录必须提供HEX、明确SHA256和已只读确认的芯片UID')
     args.output.mkdir(parents=True, exist_ok=False)
@@ -62,7 +65,7 @@ def main():
         manifest.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding='utf-8')
 
     options = dict(pack=str(args.pack.resolve()), target_override='stm32f407zg',
-                   frequency=1000000, connect_mode='attach', resume_on_disconnect=False,
+                   frequency=args.frequency, connect_mode='attach', resume_on_disconnect=False,
                    auto_unlock=False, config_file=None)
     save()
     try:

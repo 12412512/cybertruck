@@ -22,7 +22,7 @@ from robot.track_sim import Plant
 from robot.web.app import create_app
 from robot.runtime import save_snapshot, load_snapshot
 from robot.device.feedback import Feedback, FEEDBACK
-from robot.device.tracking import Reference
+from robot.device.tracking import Reference, Goal
 
 
 def profile():
@@ -300,6 +300,281 @@ class ExecutionTests(unittest.TestCase):
         self.assertAlmostEqual(transport.plant.yaw, math.pi / 2, delta=math.radians(2))
         self.assertEqual(sum(v.kind == GOAL for v in transport.requests), 1)
         self.assertTrue(next(v for v in records if v['kind'] == 'stop_result')['confirmed'])
+
+    def test_old_check_time_reproduces_stale_and_freezes_trigger(self):
+        import struct
+        self.device.arm()
+        tick=self.device.tick
+        self.lib.Device_PosTime(tick+1,tick+1,tick)
+        reply=self.device.call(37)
+        self.assertEqual(reply.payload[0],p.OK)
+        record=struct.unpack('<24Iqq',reply.payload[1:])
+        self.assertEqual(record[:4],(1,4,1,tick))
+        self.assertEqual(record[5:10],(0x36,1,tick+1,tick+1,tick+1))
+        self.lib.Device_PosTime(tick+2,tick+2,tick+2)
+        self.assertEqual(self.device.call(37).payload,reply.payload)
+        state=STATUS_DATA.unpack(self.device.call(STATUS).payload[1:])
+        self.assertEqual(state[1],1)
+
+    def test_fresh_check_time_accepts_same_cross_millisecond_frame(self):
+        import struct
+        self.device.arm()
+        tick=self.device.tick
+        self.lib.Device_PosTime(tick+1,tick+1,tick+1)
+        record=struct.unpack('<24Iqq',self.device.call(37).payload[1:])
+        self.assertEqual(record[0],0)
+        state=STATUS_DATA.unpack(self.device.call(STATUS).payload[1:])
+        self.assertEqual(state[1],0)
+
+    def test_true_250ms_age_remains_rejected_with_trigger_record(self):
+        import struct
+        self.device.arm()
+        tick=self.device.tick
+        self.lib.Device_PosTime(tick,tick,tick+250)
+        record=struct.unpack('<24Iqq',self.device.call(37).payload[1:])
+        self.assertEqual(record[:4],(1,4,1,tick+250))
+
+    def test_two_batch_nine_goals_preserve_order_and_stop(self):
+        plan=json.loads((ROOT/'config/batch_route.json').read_text())
+        high=profile();high.update(version=5,max_rpm=100)
+        transport=SimTransport(self.lib)
+        records=[]
+        with tempfile.TemporaryDirectory() as directory:
+            result=run_trial(transport,high,'straight',directory,
+                lambda kind,**v:records.append(dict(kind=kind,**v)),clock=lambda:transport.now,
+                sleep=transport.sleep,route=plan,simulation=True)
+        self.assertTrue(result['controller_complete'])
+        goals=[v for v in transport.requests if v.kind==GOAL]
+        self.assertEqual([int.from_bytes(v.payload[:4],'little') for v in goals],list(range(1,10)))
+        self.assertEqual(len({(v.boot,v.session) for v in goals}),1)
+        self.assertEqual(sum(v.kind==CONFIG for v in transport.requests),1)
+        self.assertEqual(sum(v.kind==ARM for v in transport.requests),1)
+        self.assertTrue(next(v for v in records if v['kind']=='stop_result')['confirmed'])
+        end=plan['boundaries'][-1]
+        self.assertLess(math.hypot(transport.plant.x-end[0],transport.plant.y-end[1]),.01)
+        self.assertLess(abs(transport.plant.yaw-end[2]),.03)
+        (ROOT/'output/two-batch/execution.json').write_text(json.dumps(dict(result=result,
+            records=records,elapsed_s=transport.now,truth=[transport.plant.x,transport.plant.y,transport.plant.yaw],
+            domain='simulation'),indent=2),encoding='utf-8')
+
+    def test_batch_repeated_geometry_cannot_skip_first_batch(self):
+        plan=json.loads((ROOT/'config/batch_route.json').read_text())
+        high=profile();high.update(version=5,max_rpm=100)
+        self.device.open()
+        self.device.assert_ok(self.device.call(CONFIG,config_payload(high)))
+        for _ in range(8):self.device.step()
+        self.device.assert_ok(self.device.call(ARM))
+        for _ in range(8):self.device.step()
+        self.assertNotEqual(self.device.call(GOAL,bytes.fromhex(plan['goals'][5])).payload[0],p.OK)
+        self.assertEqual(self.device.call(GOAL,bytes.fromhex(plan['goals'][0])).payload[0],p.OK)
+        self.assertNotEqual(self.device.call(GOAL,bytes.fromhex(plan['goals'][1+1])).payload[0],p.OK)
+
+    def test_tour_six_goals_complete_with_continuous_odom(self):
+        plan=json.loads((ROOT/'config/tour_route.json').read_text())
+        high=profile(); high.update(version=4,max_rpm=100)
+        transport=SimTransport(self.lib)
+        records=[]
+        with tempfile.TemporaryDirectory() as directory:
+            result=run_trial(transport,high,'straight',directory,
+                lambda kind,**v:records.append(dict(kind=kind,**v)),clock=lambda:transport.now,
+                sleep=transport.sleep,route=plan,simulation=True)
+        self.assertTrue(result['controller_complete'])
+        goals=[v for v in transport.requests if v.kind==GOAL]
+        self.assertEqual([int.from_bytes(v.payload[:4],'little') for v in goals],list(range(1,7)))
+        self.assertEqual(len({(v.boot,v.session) for v in goals}),1)
+        self.assertEqual(sum(v.kind==CONFIG for v in transport.requests),1)
+        self.assertEqual(sum(v.kind==ARM for v in transport.requests),1)
+        self.assertTrue(next(v for v in records if v['kind']=='stop_result')['confirmed'])
+        self.assertLess(math.hypot(transport.plant.x-.001,transport.plant.y+.011),.01)
+        self.assertLess(abs(transport.plant.yaw-math.pi),.03)
+        (ROOT/'output/full-route/execution.json').write_text(json.dumps(dict(result=result,
+            records=records,elapsed_s=transport.now,truth=[transport.plant.x,transport.plant.y,transport.plant.yaw],
+            domain='simulation'),indent=2),encoding='utf-8')
+
+    def test_tour_order_and_adjustment_limits(self):
+        plan=json.loads((ROOT/'config/tour_route.json').read_text())
+        high=profile();high.update(version=4,max_rpm=100)
+        self.device.open()
+        self.device.assert_ok(self.device.call(CONFIG,config_payload(high)))
+        for _ in range(8):self.device.step()
+        self.device.assert_ok(self.device.call(ARM))
+        for _ in range(8):self.device.step()
+        self.assertNotEqual(self.device.call(GOAL,bytes.fromhex(plan['goals'][-1])).payload[0],p.OK)
+        for field,value in (('x_m',1.1),('yaw_rad',float('nan'))):
+            target=Goal.from_buffer_copy(bytes.fromhex(plan['goals'][0]))
+            setattr(target.reference,field,value)
+            self.assertNotEqual(self.device.call(GOAL,bytes(target)).payload[0],p.OK)
+        target=Goal.from_buffer_copy(bytes.fromhex(plan['goals'][0]))
+        target.reference.linear.velocity=.31
+        self.assertNotEqual(self.device.call(GOAL,bytes(target)).payload[0],p.OK)
+        self.assertEqual(self.device.call(GOAL,bytes.fromhex(plan['goals'][0])).payload[0],p.OK)
+        self.assertNotEqual(self.device.call(GOAL,bytes.fromhex(plan['goals'][2])).payload[0],p.OK)
+
+    def test_tour_anchor_does_not_hide_large_drift(self):
+        from robot.nav.route import anchor_spec
+        from robot.nav.frames import Pose
+        plan=json.loads((ROOT/'config/tour_route.json').read_text())
+        spec=Goal.from_buffer_copy(bytes.fromhex(plan['goals'][0])).reference
+        with self.assertRaises(ValueError):
+            anchor_spec(spec,Pose(0,0,0),Pose(1.05,-.2,0),Pose(.02,0,0))
+        with self.assertRaises(ValueError):
+            anchor_spec(spec,Pose(0,0,0),Pose(1.05,-.2,0),Pose(0,0,.04))
+
+    def test_tour_cannot_use_raw_profile_or_mutated_goals(self):
+        from robot.nav.route import digest
+        plan=json.loads((ROOT/'config/tour_route.json').read_text())
+        for kind in ('profile','payload'):
+            transport=SimTransport(self.lib)
+            high=profile();high.update(version=3 if kind=='profile' else 4,max_rpm=100)
+            if kind=='payload':
+                plan['goals'][-1]='00'*96;plan['sha256']=digest(plan)
+            with tempfile.TemporaryDirectory() as directory,self.assertRaises(ValueError):
+                run_trial(transport,high,'straight',directory,lambda *a,**k:None,route=plan,simulation=True)
+            self.assertEqual(transport.requests,[])
+
+    def test_raw_route_frozen_specs_complete_one_session(self):
+        from robot.nav.route import validate
+        plan = json.loads((ROOT/'config/raw_route.json').read_text(encoding='utf-8'))
+        validate(plan)
+        transport = SimTransport(self.lib)
+        high = profile()
+        high.update(version=3, max_rpm=100)
+        records = []
+        with tempfile.TemporaryDirectory() as directory:
+            result = run_trial(transport, high, 'straight', directory,
+                lambda kind, **v: records.append(dict(kind=kind, **v)),
+                clock=lambda: transport.now, sleep=transport.sleep, route=plan, simulation=True)
+        self.assertTrue(result['controller_complete'])
+        self.assertEqual(sum(v.kind==ARM for v in transport.requests), 1)
+        self.assertEqual(sum(v.kind==GOAL for v in transport.requests), 2)
+        self.assertEqual(sum(v.kind==CONFIG for v in transport.requests), 1)
+        self.assertTrue(next(v for v in records if v['kind']=='stop_result')['confirmed'])
+        self.assertLess(math.hypot(transport.plant.x-.19, transport.plant.y+1.05), .015)
+        self.assertLess(abs(transport.plant.yaw-math.pi/2), .04)
+        output = ROOT/'output/raw-route'
+        output.mkdir(parents=True,exist_ok=True)
+        (output/'execution.json').write_text(json.dumps(dict(result=result,records=records,
+            elapsed_s=transport.now,truth=[transport.plant.x,transport.plant.y,transport.plant.yaw],
+            domain='simulation'),indent=2),encoding='utf-8')
+
+    def arm_raw(self):
+        high=profile(); high.update(version=3,max_rpm=100)
+        self.device.open()
+        self.device.assert_ok(self.device.call(CONFIG,config_payload(high)))
+        for _ in range(8): self.device.step()
+        self.device.assert_ok(self.device.call(ARM))
+        for _ in range(8): self.device.step()
+        return json.loads((ROOT/'config/raw_route.json').read_text(encoding='utf-8'))
+
+    def test_raw_order_mutation_and_low_speed_goal_rejected_in_high_session(self):
+        plan=self.arm_raw()
+        self.assertNotEqual(self.device.call(GOAL,bytes.fromhex(plan['goals'][1])).payload[0],p.OK)
+        self.assertNotEqual(self.device.call(GOAL,trial('straight')).payload[0],p.OK)
+        target=Goal.from_buffer_copy(bytes.fromhex(plan['goals'][0]))
+        target.reference.linear.velocity=.31
+        self.assertNotEqual(self.device.call(GOAL,bytes(target)).payload[0],p.OK)
+        target=Goal.from_buffer_copy(bytes.fromhex(plan['goals'][0]))
+        target.timeout_ms=30001
+        self.assertNotEqual(self.device.call(GOAL,bytes(target)).payload[0],p.OK)
+        self.assertEqual(self.device.call(GOAL,bytes.fromhex(plan['goals'][0])).payload[0],p.OK)
+        self.assertNotEqual(self.device.call(GOAL,bytes.fromhex(plan['goals'][1])).payload[0],p.OK)
+
+    def test_raw_lost_second_ack_stops_without_replay(self):
+        class LostAck(SimTransport):
+            def read(self,count=4096):
+                data=super().read(count)
+                if sum(v.kind==GOAL for v in self.requests)==2:
+                    if any(v.kind==GOAL|0x80 for v in p.Decoder().feed(data)):return b''
+                return data
+        plan=json.loads((ROOT/'config/raw_route.json').read_text(encoding='utf-8'))
+        high=profile(); high.update(version=3,max_rpm=100)
+        transport=LostAck(self.lib)
+        records=[]
+        with tempfile.TemporaryDirectory() as directory,self.assertRaises(ValueError):
+            run_trial(transport,high,'straight',directory,lambda kind,**v:records.append(dict(kind=kind,**v)),
+                      clock=lambda:transport.now,sleep=transport.sleep,route=plan,simulation=True)
+        self.assertEqual(sum(v.kind==GOAL for v in transport.requests),2)
+        self.assertEqual(sum(v.kind==ARM for v in transport.requests),1)
+        self.assertTrue(next(v for v in records if v['kind']=='stop_result')['confirmed'])
+
+    def test_raw_goal_cannot_enter_low_speed_session(self):
+        self.device.arm()
+        plan=json.loads((ROOT/'config/raw_route.json').read_text(encoding='utf-8'))
+        self.assertNotEqual(self.device.call(GOAL,bytes.fromhex(plan['goals'][0])).payload[0],p.OK)
+
+    def test_raw_modified_package_rejected_before_write(self):
+        from robot.nav.route import digest
+        plan=json.loads((ROOT/'config/raw_route.json').read_text(encoding='utf-8'))
+        plan['goals'][0]='00'*96
+        plan['sha256']=digest(plan)
+        transport=SimTransport(self.lib)
+        high=profile(); high.update(version=3,max_rpm=100)
+        with tempfile.TemporaryDirectory() as directory,self.assertRaises(ValueError):
+            run_trial(transport,high,'straight',directory,lambda *a,**k:None,route=plan,simulation=True)
+        self.assertEqual(transport.requests,[])
+
+    def test_north_gc_closed_loop_one_session_and_final_stop(self):
+        transport = SimTransport(self.lib)
+        records = []
+        with tempfile.TemporaryDirectory() as directory:
+            result = run_trial(transport, profile(), 'north', directory,
+                lambda kind, **v: records.append(dict(kind=kind, **v)),
+                clock=lambda: transport.now, sleep=transport.sleep, simulation=True)
+        self.assertTrue(result['controller_complete'])
+        self.assertLess(math.hypot(transport.plant.x-1.05, transport.plant.y+.13), .008)
+        self.assertEqual(sum(v.kind == GOAL for v in transport.requests), 1)
+        self.assertEqual(sum(v.kind == ARM for v in transport.requests), 1)
+        self.assertTrue(next(v for v in records if v['kind']=='stop_result')['confirmed'])
+        output = ROOT / 'output/start1-qr'
+        output.mkdir(parents=True, exist_ok=True)
+        (output / 'execution.json').write_text(json.dumps(dict(result=result, records=records,
+            truth=[transport.plant.x,transport.plant.y,transport.plant.yaw],
+            elapsed_s=transport.now, domain='simulation'), indent=2), encoding='utf-8')
+
+    def test_north_stale_placement_boot_never_arms(self):
+        transport = SimTransport(self.lib)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch('robot.nav.site.require_north', return_value={'placement_boot_id':999}), \
+                self.assertRaises(ValueError):
+            run_trial(transport, profile(), 'north', directory, lambda *a, **k: None,
+                      clock=lambda: transport.now, sleep=transport.sleep)
+        self.assertEqual(sum(v.kind == ARM for v in transport.requests), 0)
+        self.assertEqual(sum(v.kind == GOAL for v in transport.requests), 0)
+
+    def test_north_cross_track_departure_stops_without_replay(self):
+        class Departure(SimTransport):
+            def sleep(self, seconds):
+                super().sleep(seconds)
+                if self.now > 8 and not getattr(self, 'injected', False):
+                    self.plant.y += .05
+                    # 纯平移跳变不会进入轮里程计，使用四轮编码器模拟侧向滑行。
+                    delta = .05 / (2 * math.pi * .05)
+                    self.plant.turns[:] = [v+s*delta for v,s in zip(self.plant.turns,[-1,1,1,-1])]
+                    self.injected = True
+        transport = Departure(self.lib)
+        with tempfile.TemporaryDirectory() as directory, self.assertRaises(ValueError):
+            run_trial(transport, profile(), 'north', directory, lambda *a, **k: None,
+                      clock=lambda: transport.now, sleep=transport.sleep, simulation=True)
+        self.assertEqual(sum(v.kind == GOAL for v in transport.requests), 1)
+        self.assertEqual(sum(v.kind == ARM for v in transport.requests), 1)
+
+    def test_north_only_frozen_payload_is_accepted(self):
+        self.device.arm()
+        for change in ('distance','time','speed','unused'):
+            candidate = Goal.from_buffer_copy(trial('north'))
+            if change == 'distance': candidate.reference.x_m += .01
+            if change == 'time': candidate.timeout_ms = 120000
+            if change == 'speed': candidate.reference.linear.velocity = .019
+            if change == 'unused': candidate.reference.tangent = 1
+            self.assertNotEqual(self.device.call(GOAL, bytes(candidate)).payload[0], p.OK)
+        self.assertEqual(self.device.call(GOAL, trial('north')).payload[0], p.OK)
+
+    def test_north_real_execution_refuses_unconfirmed_placement_before_any_write(self):
+        transport = SimTransport(self.lib)
+        with tempfile.TemporaryDirectory() as directory, \
+                patch('robot.nav.site.read_site', return_value={}), self.assertRaises(ValueError):
+            run_trial(transport, profile(), 'north', directory, lambda *a, **k: None)
+        self.assertEqual(transport.requests, [])
 
     def test_arc_reference_stays_within_geometry_and_motion_limits(self):
         self.device.arm()

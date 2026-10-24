@@ -31,11 +31,30 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
     if route is not None:
         from .nav.route import validate
         validate(route)
+    batch_route = route is not None and route['id'] == 'start1_two_batch_v1'
+    tour_route = route is not None and route['id'] in ('start1_tour_v1', 'start1_two_batch_v1')
+    raw_route = route is not None and route['id'] in ('start1_qr_raw_v1', 'start1_tour_v1', 'start1_two_batch_v1')
+    if (raw_route and profile.get('version') != (5 if batch_route else 4 if tour_route else 3)) or (not raw_route and profile.get('version') in (3, 4, 5)):
+        raise ValueError('高速配置只允许对应版本的冻结路线')
+    if raw_route and profile.get('max_rpm') != 100:
+        raise ValueError('冻结路线必须使用100RPM配置')
+    north_site = None
+    if case == 'north':
+        if route is not None:
+            raise ValueError('north只能作为独立现场单路执行')
+        from .nav.site import require_north
+        north_site = require_north(simulation=simulation)
+        if profile.get('max_rpm') != 6:
+            raise ValueError('north限定6RPM调试配置')
+        if north_site is None and not simulation:
+            record('field_guard_disabled', map_registered=False,
+                   scope='相对起点前进1050mm、右移130mm；不证明地图north到达',
+                   retained='固件轮速/偏离/失联/反馈/故障/超时停车保护')
     cases = tuple(route['cases']) if route else (case,)
     config = config_payload(profile)
     link = MotionLink()
     stage = 'connect'
-    deadline = clock() + (90 if route else 40)
+    deadline = clock() + (120 if batch_route else 110 if case == 'north' else 90 if route else 40)
     arm_attempted = stop_requested = False
     action_id = None
     completed = False
@@ -49,6 +68,7 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
     pinned_session = None
     route_origin = None
     route_reference = route['reference_trace'] if route else None
+    north_origin = None
 
     def pump(force=False):
         nonlocal sequence, written_at
@@ -78,7 +98,7 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                 map_registered=False, physical_precision_verified=False)
         if force or now - written_at >= .1:
             save_snapshot(Path(runtime) / 'state.json', state)
-            record('state', execution=state.get('execution'), stage=stage,
+            record('state', execution=state.get('execution'), odom_fault_record=state.get('odom_fault_record'), stage=stage,
                    connected=state['connected'], state_age_ms=state['state_age_ms'],
                    route_segment=index if route else None, boot_id=link.boot, session_id=link.session)
             written_at = now
@@ -95,9 +115,27 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
             if state and (state['fault'] or state['can_errors'] or state['mode'] >= 5):
                 record('abort', execution=state, stage=stage)
                 raise ValueError('设备报告故障或动作中断')
+            if north_site and north_origin is not None and state:
+                from .nav.frames import Pose, compose, relative
+                from .nav.geometry import footprint, bounds
+                if not state['odom_valid']:
+                    raise ValueError('现场路线里程计失效，停止且不续跑')
+                pose = compose(Pose(.15, 2.25, 0), relative(north_origin,
+                    Pose(state['x_m'], state['y_m'], state['yaw_rad'])))
+                margin = north_site['start']['position_error_m'] + .20 * north_site['start']['heading_error_rad']
+                box = bounds(footprint(pose, north_site['body'], margin))
+                if box[0] <= 0 or box[1] <= 0 or box[2] >= 2.4 or box[3] >= 2.4:
+                    raise ValueError('估计车体包络接近场界，停止；不将里程计当成独立定位证明')
             if stage == 'connect' and link.bound and state and (state['mode'] != 0 or state['stop_confirmed']):
-                if link.firmware != 'GC-BASE-0.3.6' or state['mode'] not in (0, 1):
+                if (link.firmware not in ('GC-BASE-0.3.6', 'GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11')
+                        or (raw_route and link.firmware not in ('GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11'))
+                        or (case == 'north' and link.firmware not in ('GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11'))
+                        or (tour_route and link.firmware not in ('GC-BASE-0.3.10','GC-BASE-0.3.11'))
+                        or (batch_route and link.firmware != 'GC-BASE-0.3.11')
+                        or state['mode'] not in (0, 1)):
                     raise ValueError('固件或使能状态不符合冷启动短段入口')
+                if north_site and link.boot != north_site['placement_boot_id']:
+                    raise ValueError('摆放记录不属于当前板端启动，不能使能')
                 pinned_session = (link.boot, link.session)
                 record('intent', operation='config', profile=profile)
                 link.submit(CONFIG, config)
@@ -106,6 +144,11 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                 record('accepted', operation='config')
                 stage = 'observe'
             elif stage == 'observe' and state and state['mode'] == 1 and state['odom_valid']:
+                if north_site:
+                    from .nav.frames import Pose
+                    north_origin = Pose(state['x_m'], state['y_m'], state['yaw_rad'])
+                    record('map_binding', map_pose=[.15, 2.25, 0], odom=north_origin.values(),
+                           boot_id=link.boot, session_id=link.session, source='本次人工摆放记录')
                 record('intent', operation='arm')
                 arm_attempted = True
                 link.submit(ARM)
@@ -121,7 +164,23 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                     route_reference = [compose(origin, Pose(*point)).values() for point in route['reference_trace']]
                     record('route_origin', odom=route_origin, boot_id=link.boot, session_id=link.session)
                 action_id = state['action_id'] + 1
-                payload = trial(cases[index], action_id)
+                payload = None if raw_route else trial(cases[index], action_id)
+                if raw_route:
+                    import struct
+                    payload = bytes.fromhex(route['goals'][index])
+                    if tour_route:
+                        from .device.tracking import Spec
+                        from .nav.route import anchor_spec
+                        from .nav.frames import Pose, compose
+                        spec = Spec.from_buffer_copy(payload[8:])
+                        origin = Pose(*route_origin)
+                        planned_start = compose(origin, Pose(*(route['boundaries'][index-1] if index else [0,0,0])))
+                        desired = compose(origin, Pose(*route['boundaries'][index]))
+                        current = Pose(state['x_m'], state['y_m'], state['yaw_rad'])
+                        spec = anchor_spec(spec, planned_start, desired, current)
+                        payload = payload[:8] + bytes(spec)
+                    if action_id != struct.unpack_from('<I', payload)[0]:
+                        raise ValueError('原料路线动作ID不符合顺序，不重用旧会话')
                 record('intent', operation='goal', case=cases[index], segment=index, action_id=action_id,
                        boot_id=link.boot, payload_hex=payload.hex())
                 link.submit(GOAL, payload)
@@ -168,7 +227,8 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                 snapshot['route_execution'] = dict(previous['route_execution'], status=stage,
                     index=index, completed=len(completed_segments))
                 save_snapshot(Path(runtime) / 'state.json', snapshot)
-            record('stop_result', requested=stop_requested, confirmed=stopped, execution=state)
+            record('stop_result', requested=stop_requested, confirmed=stopped, execution=state,
+                   odom_fault_record=link.first_fault)
             if not stopped:
                 raise RuntimeError('停止尚未确认，请现场核对并立即停机；禁止自动续跑')
     return dict(controller_complete=completed, case='short_route' if route else case, action_id=action_id,
@@ -199,7 +259,7 @@ def observe(transport, runtime, seconds, clock=time.monotonic, sleep=time.sleep)
 
 def main():
     parser = argparse.ArgumentParser(description='默认仅准备；显式执行单段或冻结短组合')
-    parser.add_argument('--case', choices=('straight', 'side', 'turn', 'turn90', 'diagonal', 'arc', 'pose'), default='straight')
+    parser.add_argument('--case', choices=('straight', 'side', 'turn', 'turn90', 'diagonal', 'arc', 'pose', 'north'), default='straight')
     parser.add_argument('--route', type=Path, help='仅接受已冻结的短组合路线；不接受场地整图')
     parser.add_argument('--profile', type=Path, default=Path('config/base_trials.json'))
     parser.add_argument('--runtime', type=Path, default=Path('output/base-trials'))
@@ -239,6 +299,9 @@ def main():
     args.runtime.mkdir(parents=True, exist_ok=True)
     lock = ProcessLock(args.runtime / 'core.lock')
     transport = None
+    if args.case == 'north':
+        from .nav.site import require_north
+        require_north()
     evidence = args.runtime / f'trial-{uuid.uuid4().hex}.jsonl'
     try:
         with evidence.open('x', encoding='utf-8') as file:

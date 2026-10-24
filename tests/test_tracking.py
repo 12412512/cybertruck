@@ -304,7 +304,7 @@ class TrackingTests(unittest.TestCase):
                 self.assertEqual(client.get('/api/state').json()['tracking']['state'], 'COMPLETE')
                 with client.websocket_connect('/ws') as socket:
                     self.assertEqual(socket.receive_json()['tracking']['output']['stable_elapsed_ms'], 150)
-                self.assertIn('track-trace', client.get('/').text)
+                self.assertIn('track-trace', client.get('/diagnostics').text)
                 self.assertEqual(client.get('/static/tracking.js').status_code, 200)
                 self.assertEqual(client.post('/api/move', json={}).status_code, 404)
                 snapshot['snapshot_at_s'] -= 1

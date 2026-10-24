@@ -10,6 +10,7 @@ static Record sent[256];
 static BusFrame receive[256];
 static unsigned sends, input, output, polls, reads, cancels;
 static uint32_t now=100;
+static uint32_t read_advance;
 static CanState state;
 static uint8_t available=1;
 volatile CanDiag can_diag;
@@ -32,7 +33,7 @@ void Can_Drop(void) { output=input; }
 uint8_t Can_Read(BusFrame *frame)
 {
     reads++; if (output==input) return 0;
-    *frame=receive[output++]; return 1;
+    now+=read_advance; *frame=receive[output++]; return 1;
 }
 static void Finish(void)
 {
@@ -530,6 +531,23 @@ static void TestLegacyStopInbox(void)
     Finish(); Bus_Poll(); assert(Bus_Status()==CAN_SENT && !bus_diag.pending_stop_count && Bus_Rearm());
     puts("PASS 34: non-finite FE inbox and negative-response handling preserve legacy behavior");
 }
+static void TestReceiveMillisecond(void)
+{
+    assert(Bus_Start());
+    Reply(1,0x36,0);
+    receive[input-1].len=7;
+    receive[input-1].data[2]=0;
+    receive[input-1].data[3]=0;
+    receive[input-1].data[4]=0;
+    receive[input-1].data[5]=0;
+    receive[input-1].data[6]=MOTOR_CHECK_BYTE;
+    receive[input-1].tick=now+1;
+    read_advance=1;
+    Bus_Poll();
+    assert(Bus_Wheels()[0].position.valid);
+    assert(Bus_Wheels()[0].position.handled_ms>=Bus_Wheels()[0].position.tick);
+    puts("PASS 35: dequeue crossing millisecond never predates receive timestamp");
+}
 int main(int argc,char **argv)
 {
     int test;
@@ -549,6 +567,7 @@ int main(int argc,char **argv)
     case 27: TestFiniteInbox(); break; case 28: TestFiniteWait(); break;
     case 29: TestFiniteStopNegative(0xE2,29); break; case 30: TestFiniteStopNegative(0xEE,30); break;
     case 31: TestFiniteStopNegative(0x12,31); break; case 32: TestFiniteStopNegative(0x22,32); break;
+    case 35: TestReceiveMillisecond(); break;
     case 33: TestFiniteStopInbox(); break; case 34: TestLegacyStopInbox(); break; default: assert(0);
     }
     if(test) assert(polls); return 0;

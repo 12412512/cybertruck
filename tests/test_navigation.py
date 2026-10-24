@@ -403,7 +403,7 @@ class NavigationTests(unittest.TestCase):
                 self.assertFalse(client.get('/api/state').json()['navigation']['plan']['executable'])
                 with client.websocket_connect('/ws') as socket:
                     self.assertEqual(socket.receive_json()['navigation']['domain'],'simulation')
-                self.assertIn('nav-map',client.get('/').text)
+                self.assertIn('nav-map',client.get('/diagnostics').text)
                 self.assertEqual(client.get('/static/navigation.js').status_code,200)
                 self.assertEqual(client.post('/api/route/run',json={}).status_code,404)
                 snapshot['snapshot_at_s']-=1;save_snapshot(path,snapshot)

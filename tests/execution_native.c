@@ -84,3 +84,18 @@ API int Device_Ref(double fraction, RefPoint *point)
 {
     return Ref_At(&executor.track.plan, executor.track.plan.duration_s * fraction, point);
 }
+
+/* 合成跨毫秒输入，用于复现旧取时顺序；只属于主机夹具。 */
+API void Device_PosTime(uint32_t received, uint32_t handled, uint32_t check)
+{
+    MotorSample sample = {0};
+    now = check;
+    sample.address = 1;
+    sample.kind = 0x36;
+    sample.stamp.first_ms = sample.stamp.last_ms = received;
+    sample.stamp.handled_ms = handled;
+    sample.stamp.sequence = ++sequence;
+    sample.stamp.epoch = 1;
+    Exec_Motor(&executor, &sample, check);
+    Exec_Run(&executor, check);
+}

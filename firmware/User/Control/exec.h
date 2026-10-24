@@ -50,6 +50,15 @@ typedef struct
 
 typedef struct
 {
+    uint32_t valid, fault, source, now_ms, action_id, kind, address;
+    RxStamp frame, previous;
+    uint32_t latest_ms[5]; /* 四轮位置及IMU航向的最新接收时刻。 */
+    uint32_t yaw_fault, source_epoch;
+    int64_t value, previous_value;
+} ExecFault;
+
+typedef struct
+{
     ExecConfig config;
     ExecIo io;
     Odom odom;
@@ -60,6 +69,7 @@ typedef struct
     MotorSample position[4], speed[4], status[4];
     uint32_t mode, fault, tick_ms, arm_ms, stop_ms, control_ms;
     uint32_t have_goal, enabled_wheels, stop_confirmed;
+    ExecFault first_fault; /* 只锁存首次里程计故障，普通查询/STOP不清除。 */
 } Exec;
 
 void Exec_Init(Exec *exec, ExecIo io);

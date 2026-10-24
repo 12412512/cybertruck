@@ -29,6 +29,26 @@
                 <dt>后续顺序</dt><dd>同会话短组合 → 实物场地单路 → 整图</dd>
             </dl>
         </section>
+        <section class="panel" id="site-panel">
+            <h2>启停区1 → 扫码预停点 · 现场核对</h2>
+            <p class="muted">map原点在场地左下角，X向右、Y向上；启停区1车头沿+X。O取四轮轮心矩形中心。下面是测量准备，不会改变车辆位置或启用路线。</p>
+            <dl>
+                <dt>当前状态</dt><dd id="site-status">读取测量记录…</dd>
+                <dt>完整包络（前/后/左/右）</dt><dd id="site-body">待测</dd>
+                <dt>场地 / 启停区1尺寸</dt><dd id="site-field">待测</dd>
+                <dt>起点O距左边 / 上边</dt><dd id="site-start">待测；上边距离不是map Y</dd>
+                <dt>扫码预停点</dt><dd id="site-target">north与qr尚待确认</dd>
+                <dt>道路 / 摆放误差</dt><dd id="site-corridor">待核对</dd>
+            </dl>
+            <svg viewBox="0 0 560 240" role="img" aria-label="四轮中心O至整车四个最外缘测量示意，非实际比例">
+                <rect x="120" y="28" width="310" height="178" fill="#edf4fa" stroke="#738da3"/>
+                <path d="M260 116H430 M260 116H120 M260 116V28 M260 116V206" stroke="#3e729f" stroke-width="2"/>
+                <circle cx="260" cy="116" r="5" fill="#263e50"/>
+                <text x="270" y="110">O（四轮中心）</text><text x="440" y="120">前 +X</text>
+                <text x="42" y="120">后</text><text x="240" y="20">左 +Y</text><text x="240" y="228">右</text>
+                <text x="132" y="190" fill="#526579" font-size="13">示意框不是实车尺寸；计入所有突出件和线束</text>
+            </svg>
+        </section>
         <section class="panel" id="route-panel">
             <h2>短组合路线 · 同会话执行准备</h2>
             <p class="muted">直线 → 斜线 → 固定车头弧线 → 边走边转姿。局部odom坐标，尚未与场地地图配准。段间停车稳定后交接，保持串口、使能和里程计连续。</p>
@@ -168,5 +188,5 @@
         </section>
     </main>
     <footer>浏览器仅观察状态 · 参数与动作接口尚未开放</footer>
-    <script type="module" src="/static/app.js?v=16"></script>
+    <script type="module" src="/static/app.js?v=17"></script>
 </body></html>

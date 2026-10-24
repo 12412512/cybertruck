@@ -7,10 +7,31 @@ import math
 
 from ..device.execution import trial
 from ..device.tracking import Spec
-from .frames import Pose
+from .frames import Pose, relative, angle
 from .reference import NativeReference
 
 CASES = ('straight', 'diagonal', 'arc', 'pose')
+
+
+def anchor_spec(spec, planned_start, desired, current):
+    """复用离线规划器的局部目标转换；只允许小幅纠偏，不重新规划。"""
+    result = Spec.from_buffer_copy(bytes(spec))
+    if math.dist(current.values()[:2], planned_start.values()[:2]) > .01 or abs(angle(current.yaw_rad-planned_start.yaw_rad)) > .03:
+        raise ValueError('整圈段间累计误差超限，停止而不是放宽目标')
+    if spec.kind in (1, 5, 6):
+        local = relative(current, desired)
+        result.x_m, result.y_m = local.x_m, local.y_m
+    if spec.kind in (4, 5, 6):
+        result.yaw_rad = spec.yaw_rad + angle(desired.yaw_rad-current.yaw_rad-spec.yaw_rad)
+    if spec.kind == 4:
+        result.path_heading_rad = angle(planned_start.yaw_rad+spec.path_heading_rad-current.yaw_rad)
+    elif spec.kind == 2:
+        result.yaw_rad = angle(desired.yaw_rad-current.yaw_rad)
+    if (abs(result.x_m-spec.x_m) > .03 or abs(result.y_m-spec.y_m) > .03
+            or abs(result.yaw_rad-spec.yaw_rad) > .04
+            or abs(angle(result.path_heading_rad-spec.path_heading_rad)) > .04):
+        raise ValueError(f'局部目标修正超限: dx={result.x_m-spec.x_m},dy={result.y_m-spec.y_m},yaw={result.yaw_rad-spec.yaw_rad},bearing={angle(result.path_heading_rad-spec.path_heading_rad)}')
+    return result
 
 
 def digest(plan):
@@ -41,6 +62,32 @@ def short_route(library):
 
 def validate(plan):
     """先于打开串口校验；整场规划只能预览，不能借改标签绕过白名单。"""
+    if plan.get('id') in ('start1_qr_raw_v1', 'start1_tour_v1', 'start1_two_batch_v1'):
+        batch = plan['id'] == 'start1_two_batch_v1'
+        tour = plan['id'] in ('start1_tour_v1', 'start1_two_batch_v1')
+        cases = [f'batch_{i+1}' for i in range(9)] if batch else [f'tour_{i+1}' for i in range(6)] if tour else ['qr_approach', 'raw_approach']
+        expected_hash = '467916755fd05712813ea7c5a66da4ee092fbe796a00e81185b84afe304d4abf' if batch else '86737aad38dd12d6531c3f0d14eca02747b4c829710f56653167a82e9b6bd66b' if tour else '7aff8ec9099ed15cd4a7015eb30c0f6ac0f4b5e0db8b67f1ef89df39ead3272a'
+        if (plan.get('schema') != 1 or plan.get('domain') != 'commissioning'
+                or plan.get('frame_id') != 'odom' or plan.get('executable') is not False
+                or plan.get('map_registered') is not False
+                or plan.get('cases') != cases
+                or plan.get('segment_handoff') != 'stopped_and_settled'
+                or plan.get('anchor_policy') != 'measured_segment_start'
+                or plan.get('sha256') != digest(plan)):
+            raise ValueError('原料路线包格式或摘要不匹配')
+        try:
+            goals = b''.join(bytes.fromhex(v) for v in plan['goals'])
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ValueError('原料路线目标编码无效') from exc
+        if hashlib.sha256(goals).hexdigest() != expected_hash:
+            raise ValueError('不是冻结的两段原料目标')
+        points = plan.get('reference_trace')
+        if (not isinstance(points, list) or not 10 <= len(points) <= 2000
+                or any(not isinstance(point, list) or len(point) != 3
+                       or any(type(v) not in (int, float) or not math.isfinite(v) or abs(v) > (16 if batch else 8 if tour else 4) for v in point)
+                       for point in points)):
+            raise ValueError('原料路线缺少有界显示参考')
+        return
     if (plan.get('schema') != 1 or plan.get('id') != 'short_combo_v1'
             or plan.get('domain') != 'commissioning' or plan.get('frame_id') != 'odom'
             or tuple(plan.get('cases', ())) != CASES or plan.get('executable') is not False

@@ -2,6 +2,7 @@
 import {renderTracking} from './tracking.js';
 import {renderNavigation} from './navigation.js';
 import {renderRoute} from './route.js?v=16';
+import './site.js?v=17';
 const set = (id, value) => { document.getElementById(id).textContent = value ?? '—'; };
 const ageText = value => Number.isFinite(value) ? Math.floor(value) : '—';
 let lastMessage = 0;

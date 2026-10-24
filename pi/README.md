@@ -12,7 +12,8 @@
 | `robot/nav/` | 地图、A*、定位估计与路径执行 |
 | `robot/vision/` | 扫码、物料、圆环和结果确认 |
 | `robot/web/` | 网页接口与页面资源 |
-| `robot/web/static/` | 只读中文总览HTML、CSS和JavaScript |
+| `robot/web/static/` | 中文工作台、只读诊断及HTML/CSS/JavaScript模块 |
+| `robot/workbench/` | 独立离线控制核心、输入契约、控制权和模型适配 |
 | `deploy/` | 服务启动和部署配置 |
 
 树莓派维护唯一任务与计数账本；网页不直接打开串口。包导入不依赖旧工程路径。

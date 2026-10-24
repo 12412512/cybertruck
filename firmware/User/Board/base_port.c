@@ -234,9 +234,10 @@ void Base_Run(void)
     BusFrame ignored;
     const BusWheel *wheels;
     const MotorReply *reply;
-    uint32_t now = HAL_GetTick();
+    uint32_t now;
     unsigned index, kind;
     Bus_Poll();
+    now = HAL_GetTick();
     if (diag_busy && Bus_Status() != CAN_BUSY && Bus_Status() != CAN_CANCELLING)
     {
         if (Bus_Status() != CAN_SENT)
@@ -269,7 +270,7 @@ void Base_Run(void)
             motor.stamp.handled_ms = reply->handled_ms;
             motor.stamp.sequence = reply->rx_sequence;
             motor.stamp.epoch = 1;
-            Exec_Motor(&executor, &motor, now);
+            Exec_Motor(&executor, &motor, HAL_GetTick());
         }
     }
     while (Port_Imu(&sample))
@@ -278,8 +279,9 @@ void Base_Run(void)
         {
             gyro = sample;
         }
-        Exec_Imu(&executor, &sample, now);
+        Exec_Imu(&executor, &sample, HAL_GetTick());
     }
+    now = HAL_GetTick();
     if (startup_pending && Stopped(startup_ms) && Rearm())
     {
         startup_pending = 0;

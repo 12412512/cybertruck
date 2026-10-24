@@ -1,9 +1,49 @@
 #include "exec.h"
 #include "addresses.h"
+#include "raw_route.h"
+#include "tour_route.h"
+#include "batch_route.h"
 #include <math.h>
 #include <string.h>
 
 #define EXEC_PI 3.14159265358979323846
+
+static void Capture(Exec *exec, uint32_t source, uint32_t kind, uint32_t address,
+                    const RxStamp *frame, const RxStamp *previous, int64_t value,
+                    int64_t previous_value, uint32_t source_epoch, uint32_t now_ms)
+{
+    ExecFault *fault = &exec->first_fault;
+    unsigned index;
+    if (fault->valid || !exec->odom.pose.fault)
+    {
+        return;
+    }
+    memset(fault, 0, sizeof(*fault));
+    fault->fault = exec->odom.pose.fault;
+    fault->source = source;
+    fault->now_ms = now_ms;
+    fault->action_id = exec->last_goal.id;
+    fault->kind = kind;
+    fault->address = address;
+    if (frame)
+    {
+        fault->frame = *frame;
+    }
+    if (previous)
+    {
+        fault->previous = *previous;
+    }
+    fault->value = value;
+    fault->previous_value = previous_value;
+    fault->source_epoch = source_epoch;
+    for (index = 0; index < 4; index++)
+    {
+        fault->latest_ms[index] = exec->position[index].stamp.last_ms;
+    }
+    fault->latest_ms[4] = exec->angle.stamp.last_ms;
+    fault->yaw_fault = exec->odom.yaw.fault;
+    fault->valid = 1;
+}
 
 void Exec_Init(Exec *exec, ExecIo io)
 {
@@ -22,7 +62,8 @@ int Exec_Config(Exec *exec, const ExecConfig *config, uint32_t now_ms)
         return 0;
     }
     if (!config || exec->mode != EXEC_DISABLED || !config->version || !isfinite(config->max_rpm) ||
-        config->max_rpm < 1 || config->max_rpm > 10 || floor(config->max_rpm) != config->max_rpm ||
+        config->max_rpm < 1 || ((config->version == 3 || config->version == 4 || config->version == 5) ? config->max_rpm != 100 : config->max_rpm > 10) ||
+        floor(config->max_rpm) != config->max_rpm ||
         !isfinite(config->gyro_scale_rad_s) || config->gyro_scale_rad_s <= 0 ||
         config->gyro_scale_rad_s > 0.01f)
     {
@@ -66,6 +107,20 @@ int Exec_Config(Exec *exec, const ExecConfig *config, uint32_t now_ms)
     track.imu_epoch = odom.imu_epoch;
     track.imu_source_epoch = odom.imu_source_epoch;
     track.calibration = config->version;
+    if (config->version == 3 || config->version == 4 || config->version == 5)
+    {
+        /* 与离线闭环同一档；高轮速仅供下文冻结的两段目标使用。 */
+        odom.max_rpm = 120;
+        odom.max_yaw_rad_s = 5;
+        track.kp_xy = 2;
+        track.kp_yaw = 3;
+        track.kd_gyro = 0.15;
+        track.correction_m_s = 0.12;
+        track.correction_rad_s = 0.7;
+        track.slew_rpm_s = 180;
+        track.position_tol_m = 0.003;
+        track.yaw_tol_rad = 0.012;
+    }
     for (index = 0; index < 4; index++)
     {
         if (config->address[index] != addresses[index] ||
@@ -136,9 +191,123 @@ static int QuarterTurn(const RefSpec *ref)
         fabs(ref->yaw_rad - EXEC_PI / 2) <= 1e-6;
 }
 
+static unsigned RawIndex(const RefSpec *ref)
+{
+    unsigned index;
+    for (index = 0; index < 2; index++)
+    {
+        if (memcmp(ref, RawRefs[index], sizeof(*ref)) == 0)
+        {
+            return index + 1;
+        }
+    }
+    return 0;
+}
+
+static unsigned TourIndex(const RefSpec *ref)
+{
+    unsigned index;
+    RefSpec nominal, candidate;
+    for (index = 0; index < TOUR_COUNT; index++)
+    {
+        memcpy(&nominal, TourRefs[index], sizeof(nominal));
+        candidate = *ref;
+        /* 仅坐标边界的小幅修正；速度、曲率和其余字段逐字节冻结。 */
+        if (!isfinite(ref->x_m) || !isfinite(ref->y_m) || !isfinite(ref->yaw_rad) ||
+            !isfinite(ref->path_heading_rad) || fabs(ref->x_m - nominal.x_m) > 0.03 ||
+            fabs(ref->y_m - nominal.y_m) > 0.03 || fabs(ref->yaw_rad - nominal.yaw_rad) > 0.04 ||
+            fabs(atan2(sin(ref->path_heading_rad - nominal.path_heading_rad),
+                       cos(ref->path_heading_rad - nominal.path_heading_rad))) > 0.04)
+        {
+            continue;
+        }
+        if (nominal.kind == 1 || nominal.kind == 5 || nominal.kind == 6)
+        {
+            candidate.x_m = nominal.x_m;
+            candidate.y_m = nominal.y_m;
+        }
+        if (nominal.kind == 2 || nominal.kind == 4 || nominal.kind == 5 || nominal.kind == 6)
+        {
+            candidate.yaw_rad = nominal.yaw_rad;
+        }
+        if (nominal.kind == 4)
+        {
+            candidate.path_heading_rad = nominal.path_heading_rad;
+        }
+        if (memcmp(&candidate, &nominal, sizeof(nominal)) == 0)
+        {
+            return index + 1;
+        }
+    }
+    return 0;
+}
+
+static unsigned BatchIndex(const RefSpec *ref, uint32_t action)
+{
+    unsigned index;
+    RefSpec nominal, candidate;
+    if (action == 0 || action > BATCH_COUNT)
+    {
+        return 0;
+    }
+    for (index = action - 1; index < action; index++)
+    {
+        memcpy(&nominal, BatchRefs[index], sizeof(nominal));
+        candidate = *ref;
+        /* 仅坐标边界的小幅修正；速度、曲率和其余字段逐字节冻结。 */
+        if (!isfinite(ref->x_m) || !isfinite(ref->y_m) || !isfinite(ref->yaw_rad) ||
+            !isfinite(ref->path_heading_rad) || fabs(ref->x_m - nominal.x_m) > 0.03 ||
+            fabs(ref->y_m - nominal.y_m) > 0.03 || fabs(ref->yaw_rad - nominal.yaw_rad) > 0.04 ||
+            fabs(atan2(sin(ref->path_heading_rad - nominal.path_heading_rad),
+                       cos(ref->path_heading_rad - nominal.path_heading_rad))) > 0.04)
+        {
+            continue;
+        }
+        if (nominal.kind == 1 || nominal.kind == 5 || nominal.kind == 6)
+        {
+            candidate.x_m = nominal.x_m;
+            candidate.y_m = nominal.y_m;
+        }
+        if (nominal.kind == 2 || nominal.kind == 4 || nominal.kind == 5 || nominal.kind == 6)
+        {
+            candidate.yaw_rad = nominal.yaw_rad;
+        }
+        if (nominal.kind == 4)
+        {
+            candidate.path_heading_rad = nominal.path_heading_rad;
+        }
+        if (memcmp(&candidate, &nominal, sizeof(nominal)) == 0)
+        {
+            return index + 1;
+        }
+    }
+    return 0;
+}
+
+static unsigned FrozenIndex(const RefSpec *ref, uint32_t version, uint32_t action)
+{
+    return version == 5 ? BatchIndex(ref, action) : version == 4 ? TourIndex(ref) : version == 3 ? RawIndex(ref) : 0;
+}
+
 static int GoalValid(const TrackGoal *goal)
 {
     const RefSpec *ref = &goal->reference;
+    if (RawIndex(ref) || TourIndex(ref) || BatchIndex(ref, goal->id))
+    {
+        return goal->id != 0 && goal->timeout_ms == 30000;
+    }
+    /* 只开放标记起点到north这一条固定朝向低速斜直线，非任意米级目标。 */
+    if (ref->kind == 1 && ref->x_m == 1.05f && ref->y_m == -0.13f && ref->yaw_rad == 0 &&
+        ref->linear.velocity == 0.018f && ref->linear.acceleration == 0.05f &&
+        ref->linear.jerk == 0.2f && ref->angular.velocity == 0.10f &&
+        ref->angular.acceleration == 0.3f && ref->angular.jerk == 1.0f &&
+        ref->tangent == 0 && ref->path.lead_m == 0 && ref->path.tail_m == 0 &&
+        ref->path.radius_m == 0 && ref->path.blend_m == 0 && ref->path.turn == 0 &&
+        ref->path.reverse == 0 && ref->path_heading_rad == 0 && ref->curve_velocity_m_s == 0 &&
+        ref->yaw_begin_m == 0 && ref->yaw_end_m == 0 && ref->tail_velocity_m_s == 0)
+    {
+        return goal->id != 0 && goal->timeout_ms == 90000;
+    }
     if (!goal->id || goal->timeout_ms < 1000 || goal->timeout_ms > 20000 || !isfinite(ref->x_m) ||
         !isfinite(ref->y_m) || !isfinite(ref->yaw_rad) || hypot(ref->x_m, ref->y_m) > 0.15001 ||
         (fabs(ref->yaw_rad) > EXEC_PI / 18.0 + 1e-6 && !QuarterTurn(ref)) || ref->linear.velocity > 0.05f ||
@@ -190,9 +359,23 @@ int Exec_Goal(Exec *exec, const TrackGoal *goal, uint32_t now_ms)
     {
         return -1;
     }
+    if (((exec->config.version == 3 || exec->config.version == 4 || exec->config.version == 5) && FrozenIndex(&goal->reference, exec->config.version, goal->id) == 0) ||
+        ((exec->config.version != 3 && exec->config.version != 4 && exec->config.version != 5) && (RawIndex(&goal->reference) || TourIndex(&goal->reference) || BatchIndex(&goal->reference, goal->id))) ||
+        (goal->reference.kind == 1 && goal->reference.x_m == 1.05f && exec->config.max_rpm > 6))
+    {
+        return -1;
+    }
     if (exec->have_goal && goal->id == exec->last_goal.id)
     {
         return memcmp(goal, &exec->last_goal, sizeof(*goal)) == 0 ? 0 : -2;
+    }
+    if ((exec->config.version == 3 || exec->config.version == 4 || exec->config.version == 5) &&
+        (goal->id != FrozenIndex(&goal->reference, exec->config.version, goal->id) ||
+         (goal->id == 1 && exec->have_goal) ||
+         (goal->id > 1 && (!exec->have_goal || exec->last_goal.id != goal->id - 1 ||
+          FrozenIndex(&exec->last_goal.reference, exec->config.version, exec->last_goal.id) != goal->id - 1))))
+    {
+        return -2;
     }
     if (exec->have_goal && (uint32_t)(goal->id - exec->last_goal.id) >= 0x80000000UL)
     {
@@ -229,10 +412,13 @@ void Exec_Motor(Exec *exec, const MotorSample *sample, uint32_t now_ms)
         }
         if (sample->kind == 0x36 && sample->stamp.sequence != exec->position[index].stamp.sequence)
         {
+            MotorSample previous = exec->position[index];
             exec->position[index] = *sample;
             if (exec->config.version)
             {
                 (void)Odom_Pos(&exec->odom, sample, now_ms);
+                Capture(exec, 1, sample->kind, sample->address, &sample->stamp, &previous.stamp,
+                        sample->value, previous.value, 1, now_ms);
             }
         }
         if (sample->kind == 0x35)
@@ -254,10 +440,13 @@ void Exec_Imu(Exec *exec, const ImuSample *sample, uint32_t now_ms)
     }
     if (sample->kind == 0x53)
     {
+        ImuSample previous = exec->angle;
         exec->angle = *sample;
         if (exec->config.version)
         {
             (void)Odom_Yaw(&exec->odom, sample, now_ms);
+            Capture(exec, 2, sample->kind, 0, &sample->stamp, &previous.stamp,
+                    sample->axes[2], previous.axes[2], sample->source_epoch, now_ms);
         }
     }
     if (sample->kind == 0x52)
@@ -303,6 +492,7 @@ void Exec_Run(Exec *exec, uint32_t now_ms)
     if (exec->config.version)
     {
         (void)Odom_Step(&exec->odom, now_ms);
+        Capture(exec, 3, 0, 0, 0, 0, 0, 0, 0, now_ms);
     }
     if (exec->mode == EXEC_DISABLED || exec->mode == EXEC_LOCKED)
     {
@@ -359,9 +549,37 @@ void Exec_Run(Exec *exec, uint32_t now_ms)
     exec->control_ms = now_ms;
     if (exec->mode == EXEC_ACTIVE)
     {
-        double yaw_limit = QuarterTurn(&exec->last_goal.reference) ? EXEC_PI / 2 + 0.10 : 0.22;
+        int north = exec->last_goal.reference.kind == 1 &&
+            exec->last_goal.reference.x_m == 1.05f && exec->last_goal.reference.y_m == -0.13f;
+        unsigned raw = FrozenIndex(&exec->last_goal.reference, exec->config.version, exec->last_goal.id);
+        double distance_limit = raw ? 2.0 : north ? 1.10 : 0.20;
+        double yaw_limit = raw ? fabs(exec->last_goal.reference.yaw_rad) + 0.10 : north ? 0.05 : QuarterTurn(&exec->last_goal.reference) ? EXEC_PI / 2 + 0.10 : 0.22;
+        double dx = exec->observation.pose.x_m - exec->track.plan.origin[0];
+        double dy = exec->observation.pose.y_m - exec->track.plan.origin[1];
+        double heading = exec->track.plan.origin[2];
+        double local_x = cos(heading) * dx + sin(heading) * dy;
+        double local_y = -sin(heading) * dx + cos(heading) * dy;
+        if (raw)
+        {
+            RefPoint point;
+            double seconds = (uint32_t)(now_ms - exec->track.start_ms) / 1000.0;
+            if (!Ref_At(&exec->track.plan, seconds, &point) ||
+                hypot(point.x_m - exec->observation.pose.x_m, point.y_m - exec->observation.pose.y_m) > 0.06 ||
+                fabs(point.yaw_rad - exec->observation.yaw_rad) > 0.15)
+            {
+                Exec_Stop(exec, 6, now_ms);
+                return;
+            }
+        }
+        /* 独立偏离走廊保护；不因延长目标距离而删除横向和航向限制。 */
+        if (north && (fabs(0.13 * local_x + 1.05 * local_y) / 1.058017 > 0.02 ||
+            local_x < -0.01 || local_x > 1.07))
+        {
+            Exec_Stop(exec, 6, now_ms);
+            return;
+        }
         if (hypot(exec->observation.pose.x_m - exec->track.plan.origin[0],
-                  exec->observation.pose.y_m - exec->track.plan.origin[1]) > 0.20 ||
+                  exec->observation.pose.y_m - exec->track.plan.origin[1]) > distance_limit ||
             fabs(exec->observation.yaw_rad - exec->track.plan.origin[2]) > yaw_limit)
         {
             Exec_Stop(exec, 6, now_ms);

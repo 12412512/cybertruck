@@ -24,7 +24,7 @@ def config_payload(profile):
     if any(type(v) not in (int, float) or not math.isfinite(v) or not 0 < v <= .5 for v in geometry):
         raise ValueError('试验几何无效')
     counts, maximum = profile['counts_per_rev'], profile['max_rpm']
-    if counts != 65536 or type(maximum) is not int or not 1 <= maximum <= 10:
+    if counts != 65536 or type(maximum) is not int or not (maximum == 100 if profile['version'] in (3, 4, 5) else 1 <= maximum <= 10):
         raise ValueError('反馈单位或试验轮速不符合本阶段范围')
     addresses = profile['addresses']
     if (len(addresses) != 4 or len(set(addresses)) != 4
@@ -40,7 +40,7 @@ def config_payload(profile):
 
 def trial(name, action_id=1):
     """目标相对动作开始的车体，X前/Y左/逆时针正；不表示实测通过。"""
-    options = {'straight': (1, .10, 0., 0.), 'side': (1, 0., .08, 0.),
+    options = {'north': (1, 1.05, -.13, 0.), 'straight': (1, .10, 0., 0.), 'side': (1, 0., .08, 0.),
                'turn': (2, 0., 0., math.radians(10)),
                'diagonal': (1, .06, .06, 0.), 'arc': (4, 0., 0., 0.),
                'turn90': (2, 0., 0., math.pi / 2), 'pose': (5, .06, 0., math.radians(10))}
@@ -50,14 +50,14 @@ def trial(name, action_id=1):
     # 45度斜移的两轮线速为车速sqrt(2)倍，保留6RPM上限及闭环修正余量。
     velocity = .018 if name in ('diagonal', 'arc') else .03
     # 同步转姿先保留轮速叠加余量；不修改独立平移/转向用例的参数。
-    linear = (.012, .05, .2) if name == 'pose' else (velocity, .08, .3)
+    linear = (.018, .05, .2) if name == 'north' else (.012, .05, .2) if name == 'pose' else (velocity, .08, .3)
     angular = (.06, .2, .6) if name == 'pose' else (.10, .3, 1.0)
     path = (.01, .01, .06, .02, 1, 0) if name == 'arc' else (0, 0, 0, 0, 0, 0)
     # 所有未使用字段清零；二进制96字节布局由M4及主机断言共同检查。
     spec = SPEC_DATA.pack(kind, x, y, yaw, *path,
                           *linear, *angular, 0, 0,
                           .012 if name == 'arc' else 0, 0, 0, 0)
-    return struct.pack('<II', action_id, 20000) + spec
+    return struct.pack('<II', action_id, 90000 if name == 'north' else 20000) + spec
 
 
 def trials():
@@ -86,6 +86,8 @@ class MotionLink(Link):
         self.urgent_stop = False
         self.samples = {}
         self.last_sample = -1.
+        self.last_fault_query = -1.
+        self.first_fault = None
         self.sample_kind = 4
 
     def reset(self, reason):
@@ -93,6 +95,7 @@ class MotionLink(Link):
         if (self.command is not None or self.execution is not None
                 or (self.pending and self.pending[0].kind in (CONFIG, ARM, GOAL))):
             self.failed = True
+        self.first_fault = None
         self.command = None
         self.execution = self.execution_at = None
         self.samples.clear()
@@ -128,6 +131,9 @@ class MotionLink(Link):
         if now - self.last_execution >= .05:
             self.last_execution = now
             return STATUS, b''
+        if self.firmware in ('GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11') and now - self.last_fault_query >= .2:
+            self.last_fault_query = now
+            return 37, b''
         if now - self.last_sample >= .05:
             self.last_sample = now
             self.sample_kind = 5 if self.sample_kind == 4 else 4
@@ -135,6 +141,19 @@ class MotionLink(Link):
         return None
 
     def custom_reply(self, packet, request, now, sent=None):
+        if request.kind == 37:
+            if packet.boot != self.boot or len(packet.payload) != 113 or packet.payload[0] != p.OK:
+                self.failed = True
+                return True
+            raw = struct.unpack('<24Iqq', packet.payload[1:])
+            names = ('valid', 'fault', 'source', 'now_ms', 'action_id', 'kind', 'address',
+                     'first_ms', 'last_ms', 'handled_ms', 'sequence', 'epoch',
+                     'previous_first_ms', 'previous_last_ms', 'previous_handled_ms',
+                     'previous_sequence', 'previous_epoch', 'wheel1_ms', 'wheel2_ms',
+                     'wheel3_ms', 'wheel4_ms', 'yaw_ms', 'yaw_fault', 'source_epoch',
+                     'value', 'previous_value')
+            self.first_fault = dict(zip(names, raw), boot_id=packet.boot, session_id=packet.session)
+            return True
         if request.kind == FEEDBACK:
             if packet.payload[:1] == bytes([p.OK]):
                 try:
@@ -174,6 +193,7 @@ class MotionLink(Link):
         state = super().snapshot(now)
         age = None if self.execution_at is None else (now - self.execution_at) * 1000
         state.update(execution=self.execution if age is not None and age < 250 else None,
+                     odom_fault_record=self.first_fault,
                      execution_age_ms=age, control_capable=True,
                      raw_imu={str(kind): dict(values=list(sample.values), age_ms=sample.age_ms(now),
                                              first_ms=sample.first_ms, last_ms=sample.last_ms,

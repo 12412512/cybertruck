@@ -5,6 +5,7 @@
 
 typedef char ConfigSize[(sizeof(ExecConfig) == 52) ? 1 : -1];
 typedef char GoalSize[(sizeof(TrackGoal) == 96) ? 1 : -1];
+typedef char FaultSize[(sizeof(ExecFault) == 112) ? 1 : -1];
 
 uint8_t Execute_Command(Exec *exec, uint8_t type, const uint8_t *data, uint16_t size, uint8_t *reply,
                         uint16_t *reply_size, uint32_t now, uint32_t can_errors, uint32_t can_rx_sequence)
@@ -18,7 +19,13 @@ uint8_t Execute_Command(Exec *exec, uint8_t type, const uint8_t *data, uint16_t 
     float values[9];
     unsigned index;
     int result = -1;
-    if (type == 16 && size == 2)
+    if (type == 37 && size == 0)
+    {
+        memcpy(reply, &exec->first_fault, sizeof(exec->first_fault));
+        *reply_size = sizeof(exec->first_fault);
+        result = 1;
+    }
+    else if (type == 16 && size == 2)
     {
         FeedSample sample = {0};
         const ImuSample *imu;

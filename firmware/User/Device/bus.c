@@ -376,7 +376,6 @@ const BusWheel *Bus_Wheels(void)
 }
 static void Receive(void)
 {
-    uint32_t now = HAL_GetTick();
     BusFrame frame;
     MotorReply reply;
     uint8_t i, n, finite_target;
@@ -422,7 +421,8 @@ static void Receive(void)
                 }
                 else if (Drive_Parse(&frame, addresses[i], &reply))
                 {
-                    reply.handled_ms = now;
+                    /* 先取出完整帧，再记录处理时刻，避免跨毫秒后处理时间早于接收。 */
+                    reply.handled_ms = HAL_GetTick();
                     if (reply.code == 0x35)
                         wheels[i].speed = reply;
                     else if (reply.code == 0x36)

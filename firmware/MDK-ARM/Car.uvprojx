@@ -769,6 +769,21 @@
               <FilePath>../User/Config/addresses.h</FilePath>
             </File>
             <File>
+              <FileName>batch_route.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Config/batch_route.h</FilePath>
+            </File>
+            <File>
+              <FileName>tour_route.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Config/tour_route.h</FilePath>
+            </File>
+            <File>
+              <FileName>raw_route.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Config/raw_route.h</FilePath>
+            </File>
+            <File>
               <FileName>bus_config.h</FileName>
               <FileType>5</FileType>
               <FilePath>../User/Config/bus_config.h</FilePath>
