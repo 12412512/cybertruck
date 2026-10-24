@@ -21,3 +21,9 @@
 .mech-columns button { margin-top:0; }
 .mech-columns .button-row { margin:16px 0; }
 .mech-columns .hint { color:#7a8997; font-size:12px; line-height:1.8; }
+.mech-preparation { margin-bottom:20px; }
+.mech-preparation .hint { color:#7a8997; font-size:12px; }
+#mech-mapping { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 20px; font-size:13px; }
+#mech-pending { line-height:1.9; color:#657c86; }
+.mech-presets { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0; }
+.mech-presets button { font-size:12px; padding:8px 10px; }

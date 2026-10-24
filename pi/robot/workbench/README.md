@@ -15,4 +15,5 @@
 | `core.py` | 独立进程入口及100Hz模型调度 |
 
 启动方法、已验证范围和后续设备接入见 `docs/workbench.md`。
+实车准备状态来自`device/integration.py`及本地IOC/逻辑映射，保持不连接设备；详见`docs/hardware_ready.md`。
 正式实现不从 `tools/` 或 `tests/` 导入代码。

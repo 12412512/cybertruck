@@ -6,6 +6,7 @@ const all = [...axes,...servos];
 const degrees = value => value * 180 / Math.PI;
 let api, state, held = null, pending = false, versions = '', selected = null;
 let activeBefore = '', enabled = false;
+let preparationKey = '';
 const modes = {IDLE:'待命',RUNNING:'执行中',COMPLETE:'模型完成',STOPPED:'已停止',FAILED:'模型故障',CANCELLED:'已取消'};
 const statusNames = {ACCEPTED:'已接受', RUNNING:'运行中', COMPLETE:'模型完成', CANCELLED:'取消', FAILED:'失败'};
 const fmt = (axis, value) => value == null ? '未知' : axes.includes(axis) ? `${(value * 1000).toFixed(2)} mm` : `${degrees(value).toFixed(1)}°`;
@@ -73,6 +74,8 @@ export function initMechanism(options) {
       <h2>机械调试</h2><p>升降最高、伸缩最近端为人工基准。下降/伸出为正。全部状态来自离线模型，实际位置与舵机角度未知。</p></div>
       <div class="mech-banner"><div><b id="mech-mode">等待核心</b><p id="mech-reason">无设备连接</p></div>
       <button id="mech-claim">获取统一控制权</button><button id="mech-stop" class="danger">停止机构模型 · 保持夹爪</button></div>
+      <article class="card mech-preparation"><div class="card-head"><h2>实车接入准备</h2><span class="badge muted">尚未连接设备</span></div><div id="mech-mapping"></div>
+      <details><summary>查看待验收项目</summary><ul id="mech-pending"></ul></details><p class="hint">沿用当前Web及唯一控制核心；此清单不提供使能、清故障或真实动作入口。</p></article>
       <div class="mechanism-grid mech-columns">
        <article class="card"><div class="card-head"><h2>基准与互锁</h2><span class="badge lab">仅模拟</span></div>
         <dl id="mech-interlocks"></dl>
@@ -97,9 +100,10 @@ export function initMechanism(options) {
        <article class="card"><div class="card-head"><h2>转臂 / 料盘 / 夹爪</h2><span class="badge muted">无真实角度反馈</span></div>
         <div class="plan-inputs"><label>舵机<select id="mech-servo"><option value="arm">转臂 · 83°～180°</option><option value="tray">料盘 · 0°～270°（待实测）</option><option value="gripper">夹爪 · 0°～98°</option></select></label>
         <label>命令目标 / °<input type="number" id="servo-target" min="83" max="180" step="1" value="180"></label></div>
+        <div id="tray-presets" class="mech-presets"></div>
         <label class="mech-confirm"><input type="checkbox" id="mech-release">明确允许本次张爪释放（仅模拟）</label>
         <button id="servo-move" class="primary">执行舵机目标</button>
-        <p class="hint">夹爪0°观察、60°释放、98°保持。停止不会张爪。料盘三个料位编号/角度等待补充，不自动等分猜测。</p>
+        <p class="hint">夹爪0°观察、60°释放、98°保持。停止不会张爪。料盘0°基准，30°/150°/270°为三个料位；预设只填目标，需另点执行。</p>
        </article>
        <article class="card mech-wide"><div class="card-head"><h2>姿态示教与版本</h2><span class="badge lab">草稿不会自动执行</span></div>
         <div class="plan-inputs"><label>候选姿态<select id="pose-candidate"><option value="">选择旧工程候选…</option></select></label>
@@ -203,6 +207,21 @@ export function renderMechanism(snapshot, canControl) {
     }
     const stopped = snapshot.simulation.stopped && snapshot.simulation.mode !== 'FAILED';
     const ready = enabled && stopped && !state.busy;
+    const preparation = snapshot.integration;
+    const preparationValue = JSON.stringify(preparation);
+    if (preparation && preparationKey !== preparationValue) {
+        preparationKey = preparationValue;
+        const rows = [...preparation.axes.map(a => `${a.name}：CAN ID${a.address}，${a.direction}，初始限程${a.max_mm}mm`),
+            ...preparation.servos.map(s => `${s.name}：${s.pin} / TIM1_CH${s.channel}`),
+            `人工基准：${preparation.baseline}`, `接线：${preparation.wiring_confirmed?'用户已确认，待本次只读反馈核对':'待确认'}`];
+        $('mech-mapping').replaceChildren(...rows.map(value => {const item=document.createElement('p');item.textContent=value;return item;}));
+        $('mech-pending').replaceChildren(...preparation.pending.map(value => {const item=document.createElement('li');item.textContent=value;return item;}));
+        $('tray-presets').replaceChildren(...[preparation.tray_reference_deg,...preparation.tray_slot_deg].map(angle => {
+            const button=document.createElement('button');button.textContent=`料盘${angle}°${angle===preparation.tray_reference_deg?' · 基准':''}`;
+            button.onclick=() => {$('mech-servo').value='tray';$('mech-servo').onchange();$('servo-target').value=angle;api.notify(`已填入料盘${angle}°草稿，未执行。`);};return button;
+        }));
+    }
+    document.querySelectorAll('#tray-presets button').forEach(button => {button.disabled=state.busy;});
     $('mech-mode').textContent = `${modes[state.mode] || state.mode} · 基准${state.zero_valid ? `v${state.zero_version}`:'无效'}`;
     $('mech-reason').textContent = state.fault || state.reason;
     $('mech-claim').hidden = enabled;

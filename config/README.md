@@ -1,5 +1,7 @@
 # 上位机配置
 
+`mechanism_installation.json`记录用户确认的安装/料盘用途：0°基准，30°/150°/270°为三个料位；不代表完成实车标定。执行参数在`firmware/User/Config/mech_hw.h`，PWM引脚以IOC为准；PC读取这些来源显示准备清单。
+
 后续保存地图、设备绑定、机构预设姿态与视觉标定。当前不复制旧配置，不填入未测量数据。
 
 实车接入新增`base_trials.json`，显式标为commissioning候选，保存旧工程声明几何/极性与原始单位，不标为整机已标定。用户最新确认旧Web顺时针增加，配置v2设yaw_sign=-1。其addresses是当前四轮地址唯一来源，sync_project生成固件addresses.h并由阶段检查核对。试验目标与速度上限在正式接口和板端再次校验；候选参数不覆盖模拟场地图。

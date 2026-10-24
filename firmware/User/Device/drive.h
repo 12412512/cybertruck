@@ -14,7 +14,7 @@ typedef struct
     int64_t value; /* Emm: 35=RPM, 36=65536单位/圈；保留完整符号幅值范围 */
     uint32_t tick, rx_sequence, handled_ms;
 } MotorReply;
-/* op: F3使能, F6速度, FD位置, FE停, 35/36/3A查询。无广播/同步接口。 */
+/* op: F3使能, F6速度, FD位置, FE停, 33/35/36/3A查询。无广播/同步接口。 */
 uint8_t Drive_Build(uint8_t address, uint8_t op, uint8_t dir, uint16_t rpm, uint8_t acc, uint32_t pulses,
                     uint8_t mode, uint8_t enable, BusFrame frames[2]);
 uint8_t Drive_Parse(const BusFrame *frame, uint8_t address, MotorReply *reply);

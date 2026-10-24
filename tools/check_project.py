@@ -21,6 +21,7 @@ USER_FILES = {FW / 'User' / name for name in (
     'Comm/feedback.c', 'Comm/feedback.h', 'Control/odom.c', 'Control/odom.h',
     'Control/ref.c', 'Control/ref.h', 'Control/track.c', 'Control/track.h')}
 USER_FILES.update(FW / 'User' / name for name in (
+    'Control/mech_guard.c', 'Control/mech_guard.h', 'Config/mech_hw.h',
     'Control/exec.c', 'Control/exec.h', 'Comm/execute.c', 'Comm/execute.h', 'Board/base_port.c', 'Board/base_port.h',
     'Device/can_tx.c', 'Device/can_tx.h', 'Device/can_internal.h',
     'Device/bus.c', 'Device/bus.h', 'Device/bus_internal.h', 'Device/bus_board.h',
@@ -264,7 +265,14 @@ def verify_sources(data):
 
 def verify_readonly_app(data):
     actual = {path for path in (FW / "User").rglob("*") if path.suffix.lower() in (".c", ".h")}
-    check(actual == USER_FILES, "当前短段接入阶段User文件与已审核清单不一致")
+    check(actual == USER_FILES, "当前底盘及机构被动准备阶段User文件与已审核清单不一致")
+    mech = clean_c(read(FW / 'User/Control/mech_guard.c'))
+    check(not re.search(r'\b(?:HAL_\w+|Bus_Send|Can_Send|Drive_Build)\s*\(', mech),
+          '机构准备模块必须保持无IO，不得发送或启动设备')
+    for relative in ('App/app.c', 'Board/base_port.c', 'Comm/execute.c'):
+        source = clean_c(read(FW / 'User' / relative))
+        check(not re.search(r'\bMech_(?:Init|Zero|Feed|Poll)\s*\(', source),
+              '当前阶段不得将机构准备模块绑定到实车入口：' + relative)
     app = clean_c(read(FW / "User/App/app.c"))
     check(compact(body(app, 'App_Init')) == 'Port_Init();Base_Init();', 'App_Init仅允许接收/未使能入口')
     check(compact(body(app, 'App_Run')) == 'Port_Run();Base_Run();', 'App_Run仅允许唯一通信与底盘调度')

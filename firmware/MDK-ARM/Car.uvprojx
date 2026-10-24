@@ -764,6 +764,11 @@
           <GroupName>User/Config</GroupName>
           <Files>
             <File>
+              <FileName>mech_hw.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Config/mech_hw.h</FilePath>
+            </File>
+            <File>
               <FileName>addresses.h</FileName>
               <FileType>5</FileType>
               <FilePath>../User/Config/addresses.h</FilePath>
@@ -793,6 +798,16 @@
         <Group>
           <GroupName>User/Control</GroupName>
           <Files>
+            <File>
+              <FileName>mech_guard.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Control/mech_guard.c</FilePath>
+            </File>
+            <File>
+              <FileName>mech_guard.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Control/mech_guard.h</FilePath>
+            </File>
             <File>
               <FileName>curve.c</FileName>
               <FileType>1</FileType>

@@ -1,0 +1,14 @@
+{
+  "reference_root": "C:\\Users\\RISI\\Desktop\\智能搬运小车",
+  "read_only": true,
+  "date": "2026-10-24",
+  "files": {
+    "User/Config/mech_cfg.h": "27de5c48c3c57e3ce5db4212cd01201cee399afe33310d26f32133567c6c4568",
+    "User/Mech/axis.c": "2fd6c045024334317209e32313c121f66bc02dd16d48aef650154cfe04b65905",
+    "User/Mech/servo.c": "c9cacd7898f18c9d664808d5497270d23be5e1009552b76cd91be2cbc118c0b0",
+    "User/Mech/grip.c": "212331a5f3c8908605009ab3d85019663b84a716d32f476789c370f9631d9ab9",
+    "User/Mech/pose.c": "93f9fa78a6e0e48d0750564f8953e2fd68606315973a9bedd4f6f75207dbb1e1",
+    "User/Mech/mech_io.c": "cc4bcf1db5b5b7b81f41ae531a740857c7380934f2a8b193ebef991cc515a2a8"
+  },
+  "reuse": "换算、状态门槛、脉宽和互锁思路；不迁入旧CAN/PWM设备入口"
+}

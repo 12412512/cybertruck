@@ -50,6 +50,7 @@ uint8_t Drive_Build(uint8_t address, uint8_t op, uint8_t dir, uint16_t rpm, uint
         cmd[2] = 0;
         len = 4;
         break;
+    case 0x33:
     case 0x35:
     case 0x36:
     case 0x3A:
@@ -98,7 +99,7 @@ uint8_t Drive_Parse(const BusFrame *f, uint8_t address, MotorReply *r)
             return 0;
         r->value = f->data[1] ? -(int64_t)magnitude : (int64_t)magnitude;
     }
-    else if (code == 0x36 && f->len == 7 && f->data[1] <= 1)
+    else if ((code == 0x36 || code == 0x33) && f->len == 7 && f->data[1] <= 1)
     {
         magnitude = ((uint32_t)f->data[2] << 24) | ((uint32_t)f->data[3] << 16) |
                     ((uint32_t)f->data[4] << 8) | f->data[5];

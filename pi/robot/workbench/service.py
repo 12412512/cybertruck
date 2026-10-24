@@ -16,6 +16,7 @@ from .scene import make_field, normalize
 from .storage import write_json, payload, versions
 from .simulation import Simulation
 from .mechanism import Mechanism
+from ..device.integration import preparation
 
 
 class Rejected(ValueError):
@@ -29,6 +30,7 @@ class Workbench:
         self.lock = threading.RLock()
         self.sim = Simulation(self.library)
         self.mech = Mechanism(self.runtime, self.clock)
+        self.preparation = preparation()
         self.owner, self.token, self.lease_until, self.sequence = '', '', 0., -1
         self.manual_until = 0.
         self.cache = OrderedDict()
@@ -321,6 +323,7 @@ class Workbench:
                         active_plan=copy.deepcopy(self.sim.plan.view) if self.sim.plan else None,
                         events=list(self.events), log_error=self.log_error,
                         mechanism=self.mech.view(),
+                        integration=copy.deepcopy(self.preparation),
                         capabilities=dict(manual=True, move=True, planning=True,
                                           real_motion=False, mechanism=True))
 
