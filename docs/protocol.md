@@ -54,7 +54,7 @@
 - `robot.main`是唯一串口所有者和保活推进者，默认offline；`sim`只导入演示设备，`serial`要求显式设备路径且必须匹配新固件。代码没有自动搜索串口或启动旧程序。
 - 同一运行目录由OS文件锁保证只有一个核心；POSIX串口另设exclusive，Windows串口由系统独占。网页为另一进程，只读原子替换的状态快照，不导入串口管理者。
 - MCU状态超过250毫秒撤销设备在线；核心快照超过500毫秒、单调时间倒退或墙钟窗口失效时，Web撤销在线/无故障/按键状态。浏览器700毫秒无推送再次撤销显示。
-- 位姿、任务、抓取/放置计数保持null；零点有效性和实物停稳确认保持false。未知不以0代替。模拟/离线/实机模式在页面显著区分。
+- 真实位姿、抓取/放置计数保持null；零点有效性和实物停稳确认保持false。显式任务演示可在`task`字段携带`domain=simulation`的任务及`simulation_counts`，不改变真实计数。模拟/离线/实机模式在页面显著区分。
 - 核心事件日志按1MiB、3份备份轮换；启动身份、通信或故障位变化时保留当时的设备状态/诊断，状态快照覆盖保存。异常握手后至少间隔250毫秒重试。浏览器关闭不影响核心推进，核心停止会使MCU租约失效。
 
 FastAPI/WebSocket接口依据[官方WebSocket文档](https://fastapi.tiangolo.com/advanced/websockets/)；串口独占与超时依据[pySerial API](https://pyserial.readthedocs.io/en/latest/pyserial_api.html)。本版仅提供GET状态与WebSocket推送，没有参数写入、建零、使能或运动HTTP接口。

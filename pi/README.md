@@ -2,7 +2,7 @@
 
 当前实现GC只读协议的主控核心及独立FastAPI网页，默认不打开设备。本机Python3.12虚拟环境已安装；树莓派安装、实际串口和新固件尚未现场验收。
 
-核心入口`robot/main.py`，网页入口`robot/web/app.py`；任务状态机尚未实现。
+核心入口`robot/main.py`，网页入口`robot/web/app.py`。`robot/task.py`为尺寸无关的任务状态机，当前仅接模拟域，不调用执行器。
 
 | 目录 | 职责 |
 | --- | --- |
@@ -16,6 +16,8 @@
 树莓派维护唯一任务与计数账本；网页不直接打开串口。包导入不依赖旧工程路径。
 
 当前`device/protocol.py`负责纯协议，`device/link.py`负责会话与时效，`device/sim.py`为不导入串口的演示设备。`runtime.py`管理独占锁、原子快照和过期判定。正式任务、计数和物理状态尚未接入。
+
+`vision/task_code.py`迁入旧任务码解析并增强新帧锁存；`task_check.py`管理分阶段观测证据；`ledger.py`负责SQLite事务和事件幂等；`task_sim.py`提供独立物料模型与离线入口。模拟计数单独标识，真实计数仍为空。
 
 ## 本机运行
 
@@ -43,3 +45,24 @@ $env:PYTHONPATH = Join-Path (Get-Location) 'pi'
 `--mode serial --port <明确设备路径>`为后续实机入口，当前不运行。它只兼容GC-RO新固件，不是旧CARCAN固件的网页替代品。本次未烧录、未连接物理UART、未部署树莓派；`deploy/`未安装服务或配置开机自启。
 
 协议、时效和保护边界见[协议说明](../docs/protocol.md)。
+
+## 任务离线联调
+
+只运行任务模型并生成报告（不需要通信进程）：
+
+```powershell
+$env:PYTHONPATH = Join-Path (Get-Location) 'pi'
+.\.venv\Scripts\python.exe -m robot.task_sim --code '136+321+631+312' --start-zone 1
+```
+
+与模拟通信和只读Web一起运行：先停止原核心，在核心命令中增加：
+
+```powershell
+.\.venv\Scripts\python.exe -m robot.main --mode sim --task-demo '136+321+631+312' --start-zone 1
+```
+
+Web启动方法不变。完成后保留完整任务码、模拟12/12计数及三槽/码垛结果；核心重启遇到未结束任务时先进入等待对账，不能靠重复启动命令续跑。`--task-demo`不允许offline或serial模式。
+
+当前账本为运行目录中的`task.sqlite3`及SQLite附属文件，不进Git。没有`--task-demo`时，核心仅显示已有账本并将未结束轮次置为待对账；独立`task_sim`不填`--code`时只查看，不推进。
+
+显式终止待对账的模拟任务：先停止核心，再执行`python -m robot.task_sim --runtime <同一运行目录> --abort-run <run_id>`，随后可以用`--code`创建新轮次；这是终止旧轮次，不是确认未知动作已成功。详细顺序与限制见[任务离线联调](../docs/task_sim.md)。

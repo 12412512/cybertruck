@@ -28,3 +28,9 @@
 - `pi/robot/device/protocol.py`的COBS编码/解码和超长帧丢弃至分隔符逻辑改编自`ros小车/lidar/cyqm_protocol.py`；原文件SHA256为`124b316f7d6d9a4048971b36f2be2cf8003d3df93504ec81989ae22a0e14b839`。替换GC帧头、长度、启动/会话和请求语义；C版本与Python版本通过同一批随机互通样本验证。
 - `pi/robot/device/link.py`借鉴`ros小车/CAR/Web/link.py`的唯一串口所有权、接收时刻参与时效判断、重新连接先核对和未知状态不冒充有效反馈。原文件SHA256为`e48545d8480fd030ee48920481a6ebadf7a3ca0b18829df7b9e27a524b915012`。未复制其旧运动接口、Flask耦合和从Tools导入正式协议的结构。
 - 两份参考工程均未写入；旧抓放/闭环/视觉尚未移植。当前只读软件通过与物理验收分开记录。
+
+## 任务离线节点复用
+
+- `pi/robot/vision/task_code.py`迁入`智能搬运小车/Pi/qr_camera/task_codec.py`的四组解析及颜色到暂存环映射，原文件SHA256：`3bf5e91414ade5c5e1413b816a3cd7c34d740fbaf2e2d5019efb6454eb3fb766`。保留规则与输出结构，注释/异常改为中文；锁存新增帧号、采集时间、流身份、帧龄和稳定跨度约束，避免按调用次数重复计帧。
+- `task_check.py`迁用旧`User/Mech/grab_check.c`的EMPTY/SOURCE/HELD/STORED、同槽视图、动作/会话/姿态代次、250毫秒帧龄及三帧/100毫秒门槛；原文件SHA256：`1d7534a83ada7f1baab5d8ad4e6b821db7e0ac20eebe0d8e1a7c0fcbeed3eca8`。在Python中实现任务级校验，并扩展放置的目标/持料/释放/稳定确认。没有移植或运行其机构动作入口。
+- SQLite账本和可重放状态投影为新实现，替代两端各自计数的风险；当前只接模拟证据。原STM32/TJC计数逻辑未接入，实车帧、实时反馈和成功事件适配仍待后续验证。

@@ -36,6 +36,9 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .coverage
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 htmlcov/
 .venv/
 venv/

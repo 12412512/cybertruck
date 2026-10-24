@@ -1,6 +1,17 @@
 // 网页仅接收状态；掉线或失去核心快照时立即撤销在线显示。
 const set = (id, value) => { document.getElementById(id).textContent = value ?? '—'; };
 let lastMessage = 0;
+const taskStates = {READY: '待启动', RUNNING: '运行中', RECONCILE_REQUIRED: '等待对账',
+    COMPLETE: '已完成', ABORTED: '已终止'};
+function stageName(stage) {
+    const names = {START_SCAN: '启动扫描', QR_NAV: '前往扫码', SCAN_CODE: '锁存任务码', RETURN: '返回启停区'};
+    if (!stage) return '已结束';
+    if (names[stage]) return names[stage];
+    const steps = {RAW_NAV: '前往原料区', RAW_PICK: '取原料并存车', ROUGH_NAV: '前往粗加工区',
+        ROUGH_PLACE: '粗加工放置', ROUGH_PICK: '粗加工取回存车', STAGE_NAV: '前往暂存区',
+        STAGE_PLACE: stage.startsWith('B1_') ? '第一层放置' : '同色码垛'};
+    return `${stage.startsWith('B1_') ? '第一批' : '第二批'} · ${steps[stage.slice(3)] ?? stage}`;
+}
 function render(state) {
     const fresh = state.core_fresh === true;
     const board = fresh && state.connected ? state.board : null;
@@ -21,6 +32,14 @@ function render(state) {
     set('frames', fresh ? `正确 ${state.rx_good ?? 0} / 错帧 ${state.rx_bad ?? 0}` : '—');
     set('heart', board?.heartbeats);
     set('key', board ? board.flags & 8 ? '按下（只读）' : '释放' : '未知');
+    const task = fresh && state.task?.domain === 'simulation' ? state.task : null;
+    set('task-code', task ? task.code ?? '等待模拟扫码' : '未接入');
+    set('task-stage', task ? `${taskStates[task.status] ?? task.status} / ${stageName(task.stage)}` : '未接入');
+    set('task-counts', task ? `${task.simulation_counts.grabs} / ${task.simulation_counts.places}（模拟）` : '未接入');
+    set('task-tray', task ? [1, 2, 3].map(slot => task.tray[slot] ?? '空').join(' / ') : '未接入');
+    set('task-mapping', task ? Object.entries(task.first_layer_by_color).map(([color, ring]) => `颜色${color}→${ring}号`).join('，') || '待确认' : '未接入');
+    set('task-progress', task ? `${task.confirmed_steps} / ${task.planned_steps}，账本版本 ${task.revision}` : '未接入');
+    set('task-reason', task?.reason || '—');
     const events = document.getElementById('events');
     events.replaceChildren();
     for (const message of state.events?.length ? state.events.slice(-10) : ['暂无事件']) {

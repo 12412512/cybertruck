@@ -32,7 +32,9 @@ def open_transport(mode, port):
     return device
 
 
-def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None):
+def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None, task_code=None, start_zone=1):
+    if task_code is not None and mode != 'sim':
+        raise ValueError('任务演示仅允许sim模式')
     runtime = Path(runtime)
     runtime.mkdir(parents=True, exist_ok=True)
     lock = ProcessLock(runtime / 'core.lock')
@@ -47,7 +49,11 @@ def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None):
     sequence = 0
     identity = uuid.uuid4().hex
     previous = None
+    task_demo = None
     try:
+        if task_code is not None or (runtime / 'task.sqlite3').exists():
+            from .task_sim import TaskDemo
+            task_demo = TaskDemo(runtime, identity, task_code, start_zone)
         while stop is None or not stop():
             now = time.monotonic()
             sequence += 1
@@ -78,12 +84,18 @@ def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None):
                                             boot_id=state['boot_id'], board=state['board'],
                                             diagnostics=state['diagnostics']), ensure_ascii=False))
             if now - written_at >= .1:
+                if task_demo is not None:
+                    state['task'] = task_demo.snapshot()
                 state.update(mode=mode, core_id=identity, core_sequence=sequence,
                              snapshot_at_s=now, snapshot_wall_s=time.time())
                 save_snapshot(runtime / 'state.json', state)
                 written_at = now
+            if task_demo is not None:
+                task_demo.step(now, link_ok=state['connected'])
             time.sleep(.005)
     finally:
+        if task_demo is not None:
+            task_demo.close()
         if transport is not None:
             transport.close()
         logger.removeHandler(handler)
@@ -96,9 +108,13 @@ def main():
     parser.add_argument('--mode', choices=('offline', 'sim', 'serial'), default='offline')
     parser.add_argument('--port', help='显式指定真实串口；不自动猜测或扫描')
     parser.add_argument('--runtime', type=Path, default=DEFAULT_RUNTIME)
+    parser.add_argument('--task-demo', help='仅sim：模拟扫码、两批取放和返航，不执行实车动作')
+    parser.add_argument('--start-zone', type=int, choices=(1, 2), default=1)
     args = parser.parse_args()
     if args.mode == 'serial' and not args.port:
         parser.error('serial模式必须提供--port')
+    if args.task_demo and args.mode != 'sim':
+        parser.error('--task-demo仅允许--mode sim')
     stopped = False
 
     def finish(*_):
@@ -107,7 +123,7 @@ def main():
 
     signal.signal(signal.SIGINT, finish)
     signal.signal(signal.SIGTERM, finish)
-    run(args.mode, args.port, args.runtime, lambda: stopped)
+    run(args.mode, args.port, args.runtime, lambda: stopped, args.task_demo, args.start_zone)
 
 
 if __name__ == '__main__':
