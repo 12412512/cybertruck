@@ -10,6 +10,88 @@
     --red:#bd3d43;
 }
 
+/* 本轮面向PC的场景编辑区；保留旧布局，不新增手机交互。 */
+.scene-toolbar {
+    display:flex;
+    align-items:end;
+    gap:14px;
+    margin-bottom:14px;
+}
+.scene-toolbar label:first-child {
+    flex:1;
+}
+.scene-toolbar label:nth-child(2) {
+    width:100px;
+}
+.scene-toolbar .check-label {
+    display:flex;
+    align-items:center;
+    gap:5px;
+    white-space:nowrap;
+    padding-bottom:9px;
+}
+.check-label input {
+    width:auto;
+    height:auto;
+    margin:0;
+}
+.scene-grid {
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:12px;
+    margin-bottom:10px;
+}
+.model-settings {
+    display:grid;
+    grid-template-columns:160px 1fr;
+    gap:20px;
+    align-items:center;
+    margin-top:12px;
+}
+.version-row {
+    display:flex;
+    align-items:end;
+    gap:12px;
+    margin:15px 0 8px;
+}
+.version-row label {
+    flex:1;
+}
+.version-row button {
+    height:38px;
+}
+.limit-note {
+    border-left:3px solid #8db7c6;
+    background:#f1f7f9;
+    font-size:11px;
+    line-height:1.8;
+    padding:10px 12px;
+    margin-top:12px;
+    color:#5b7889;
+}
+.obstacle-table {
+    max-height:230px;
+    overflow:auto;
+    margin-top:12px;
+}
+.obstacle-table table {
+    width:100%;
+    border-collapse:collapse;
+    font-size:11px;
+}
+.obstacle-table th,.obstacle-table td {
+    padding:6px;
+    border-bottom:1px solid #e6ecef;
+    text-align:left;
+}
+.obstacle-table input {
+    min-width:50px;
+    height:31px;
+}
+#map.placing {
+    cursor:crosshair;
+}
+
 * {
     box-sizing:border-box;
 }

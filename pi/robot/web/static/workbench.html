@@ -89,6 +89,7 @@
                     <span class="badge lab">
                         模拟 · 不连接实车
                     </span>
+                    <button id="defaults" class="secondary controlled">恢复初始设置</button>
                     <button id="stop" class="danger">
                         ■ 停止模拟
                         <kbd>
@@ -166,6 +167,19 @@
                                     等待路线
                                 </span>
                             </div>
+                            <div class="scene-toolbar">
+                                <label>地图操作
+                                    <select id="map-mode" class="scene-input">
+                                        <option value="view">查看路线</option>
+                                        <option value="add">点击添加黑色障碍</option>
+                                        <option value="remove">点击删除障碍</option>
+                                    </select>
+                                </label>
+                                <label>新增直径 / mm
+                                    <input id="obstacle-diameter" class="scene-input" type="number" min="10" max="300" value="50">
+                                </label>
+                                <label class="check-label"><input id="auto-plan" type="checkbox" checked>修改后自动重规划</label>
+                            </div>
                             <div class="map-wrap">
                                 <svg id="map" viewBox="-95 -65 2630 2575" role="img" aria-label="场地、规划路径和模型轨迹">
                                 </svg>
@@ -198,6 +212,22 @@
                                 </span>
                             </div>
                         </section>
+                        <section class="card scene-card">
+                            <div class="card-head">
+                                <div><h2>工位停靠与障碍</h2><p>间隙：车体面向工位的外缘，到工作区边缘；不是夹爪中心距离</p></div>
+                                <span class="badge lab">默认间隙50 mm</span>
+                            </div>
+                            <div class="scene-grid">
+                                <label>原料区间隙 / mm<input id="gap-raw" class="scene-input" type="number" min="0" max="250" step="5" value="50"></label>
+                                <label>粗加工区间隙 / mm<input id="gap-rough" class="scene-input" type="number" min="0" max="250" step="5" value="50"></label>
+                                <label>暂存区间隙 / mm<input id="gap-staging" class="scene-input" type="number" min="0" max="250" step="5" value="50"></label>
+                            </div>
+                            <p class="help">50 mm 为模拟初值。相机与机构尚未标定，精对准和机械可达性在下一阶段验证。</p>
+                            <details><summary>障碍物坐标与尺寸 <span id="obstacle-empty">（尚未设置）</span></summary>
+                                <div class="obstacle-table"><table><thead><tr><th>编号</th><th>X / mm</th><th>Y / mm</th><th>直径 / mm</th><th></th></tr></thead><tbody id="obstacle-list"></tbody></table></div>
+                                <button id="clear-obstacles" class="text-button scene-input">清空全部障碍物</button>
+                            </details>
+                        </section>
                         <section class="card plan-card">
                             <div class="card-head">
                                 <div>
@@ -205,7 +235,7 @@
                                         路线与速度
                                     </h2>
                                     <p>
-                                        修改只保存草稿，点击规划后生成独立版本
+                                        按场景自动选路；规划和执行分别触发
                                     </p>
                                 </div>
                                 <span id="plan-status" class="badge muted">
@@ -228,13 +258,13 @@
                                     路线方案
                                     <select id="source">
                                         <option value="batch">
-                                            两批完整导航 / 9 段
+                                            两批完整导航
                                         </option>
                                         <option value="tour">
-                                            五站巡回 / 6 段
+                                            五站巡回
                                         </option>
                                         <option value="raw">
-                                            扫码 → 原料 / 2 段
+                                            扫码 → 原料
                                         </option>
                                         <option value="custom">
                                             自选站点与封路
@@ -278,12 +308,16 @@
                                     </small>
                                 </div>
                                 <div class="speed-number">
-                                    <input id="route-speed" type="number" min="0.03" max="0.30" step="0.01" value="0.30">
+                                    <input id="route-speed" type="number" min="0.03" max="1.00" step="0.01" value="0.30">
                                     <span>
                                         m/s
                                     </span>
                                 </div>
-                                <input id="speed-range" aria-label="巡航速度滑块" type="range" min="0.03" max="0.30" step="0.01" value="0.30">
+                                <input id="speed-range" aria-label="巡航速度滑块" type="range" min="0.03" max="1.00" step="0.01" value="0.30">
+                            </div>
+                            <div class="model-settings">
+                                <label>模型轮速上限 / RPM<input id="model-rpm" class="scene-input" type="number" min="20" max="350" step="10" value="100"></label>
+                                <p class="help">100 RPM 沿用原模型上限。提高此值仅用于离线探索，不更改实车固件；1 m/s 是请求上限，不保证每段达到。</p>
                             </div>
                             <div class="plan-summary">
                                 <span>
@@ -308,6 +342,7 @@
                             <div id="draft-state" class="help">
                                 两批累计导航预算 60 s；参考估计不能代替整机实测。
                             </div>
+                            <div id="limit-reason" class="limit-note">请求速度、轨迹峰值和轮速限制在规划后显示。</div>
                             <div class="button-row">
                                 <button id="plan" class="secondary controlled">
                                     生成离线路线
@@ -319,6 +354,11 @@
                                     ▶ 运行离线闭环
                                 </button>
                             </div>
+                            <div class="version-row">
+                                <label>已保存的路线配置<select id="saved-version"><option value="">尚无当前格式版本</option></select></label>
+                                <button id="load-version" class="secondary controlled">读取配置</button>
+                            </div>
+                            <p class="help">设置与最新路线保存在本机工作区；读取只恢复配置和模型待命，不自动运行。</p>
                             <details id="segments">
                                 <summary>
                                     路线分段与速度曲线
@@ -506,7 +546,7 @@
                                 </div>
                             </dl>
                             <button id="reset" class="text-button controlled">
-                                重置离线场景到所选启停区
+                                    仅重置模型位置，保留路径设置
                             </button>
                         </section>
                         <div class="device-note">
@@ -626,7 +666,7 @@
                 </span>
             </footer>
         </main>
-        <script type="module" src="/static/workbench.js?v=1">
+        <script type="module" src="/static/workbench.js?v=2">
         </script>
     </body>
 </html>

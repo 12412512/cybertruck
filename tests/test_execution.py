@@ -134,7 +134,8 @@ class ExecutionTests(unittest.TestCase):
         output.mkdir(exist_ok=True, parents=True)
         control = ROOT / 'firmware/User/Control'
         comm = ROOT / 'firmware/User/Comm'
-        library = output / f'execution-{os.getpid()}.dll'
+        # 同进程聚合运行时可能再次构建；Windows不能覆盖已被ctypes加载的DLL。
+        library = output / f'execution-{os.getpid()}-{time.time_ns()}.dll'
         compile_c(library, [*(control / name for name in ('exec.c', 'track.c', 'ref.c', 'odom.c',
                     'kin.c', 'yaw.c', 'curve.c', 'line.c', 'path.c')),
                     ROOT / 'firmware/User/Device/stamp.c', comm / 'frame.c', comm / 'comm.c',

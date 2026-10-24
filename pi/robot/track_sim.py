@@ -108,8 +108,8 @@ class Plant:
 
 class ClosedLoop:
     def __init__(self, library, kind='diagonal', *, config=None, stalled=False,
-                 ack=True, disturbance=True, base_ms=0, ideal=False, auto_start=True):
-        self.calibration = fixture()
+                 ack=True, disturbance=True, base_ms=0, ideal=False, auto_start=True, calibration=None):
+        self.calibration = calibration if calibration is not None else fixture()
         self.native = Odometry(library, self.calibration, base_ms)
         self.config = config if config is not None else settings(self.calibration)
         self.tracker = Tracker(self.native, self.config)

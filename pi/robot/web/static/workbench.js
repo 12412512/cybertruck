@@ -1,5 +1,7 @@
 // 界面只经网关调用独立核心；输入草稿、离线执行、实车状态分别表达。
 import {drawMap, drawSpeed} from './workbench-map.js';
+import {initScene, sceneValues, applyScene, overlayDraft} from './workbench-scene.js';
+import {isEditing, motionDirection, matchesRelease} from './workbench-input.js';
 
 const $ = id => document.getElementById(id);
 const text = (id, value) => { $(id).textContent = value; };
@@ -10,16 +12,56 @@ const names = {start_1:'启停区1', start_2:'启停区2', qr:'扫码', raw:'原
 const modes = {IDLE:'待命', MANUAL:'按住点动', RUNNING:'闭环执行中', STOPPING:'正在停车', STOPPED:'已停止', COMPLETE:'动作完成', FAILED:'模型故障'};
 const presets = {batch:['qr','raw','rough','staging','raw','rough','staging','start_1'],
     tour:['qr','raw','rough','staging','start_1'], raw:['qr','raw']};
-const legNames = {
-    raw:['启停区1 → 扫码', '扫码 → 原料'],
-    tour:['启停区1 → 扫码', '扫码 → 原料', '原料 → 粗加工', '粗加工 → 暂存', '暂存 → 上方道路', '上方道路 → 启停区1'],
-    batch:['启停区1 → 扫码', '扫码 → 第一批原料', '原料 → 粗加工', '粗加工 → 暂存',
-        '暂存 → 第二批原料', '原料 → 粗加工', '粗加工 → 暂存', '暂存 → 上方道路', '上方道路 → 启停区1']
-};
 let token = '', tokenSince = 0, sequence = 0, generation = 0, queue = Promise.resolve();
 let current = null, received = 0, planId = '', dirty = true, lastJob = '', lastEvents = '';
 let held = null, heldButton = null, manualBusy = false;
 let targets = ['qr', 'raw', 'rough', 'staging', 'start_1'];
+let hydrated = false, localEdited = false, autoTimer = null, autoPending = false;
+let submitted = '', versionsKey = '';
+let preferredVersion = '';
+
+function moving() { return ['RUNNING','MANUAL','STOPPING'].includes(current?.simulation?.mode); }
+function canonical(value) {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]));
+    return value;
+}
+const fingerprint = value => JSON.stringify(canonical(value));
+
+function readSettings() {
+    return {source:$('source').value, start:$('start').value,
+        targets:$('source').value === 'custom' ? [...targets] : presets[$('source').value].map(name => name === 'start_1' ? $('start').value : name),
+        blocked:[...document.querySelectorAll('#roads input:checked')].map(input => input.value),
+        speed_m_s:number('route-speed', .03, 1.), ...sceneValues()};
+}
+
+function applySettings(request) {
+    $('source').value = request.source;
+    $('start').value = request.start;
+    $('route-speed').value = request.speed_m_s;
+    $('speed-range').value = request.speed_m_s;
+    targets = [...request.targets];
+    for (const input of document.querySelectorAll('#roads input')) input.checked = request.blocked.includes(input.value);
+    applyScene(request);
+    sequenceView();
+    hydrated = true;
+    localEdited = false;
+    submitted = fingerprint(request);
+}
+
+async function submitPlan() {
+    if (!token || !online() || moving()) { autoPending = true; return; }
+    try {
+        const args = readSettings();
+        submitted = fingerprint(args);
+        localEdited = false;
+        autoPending = false;
+        await command('plan', args);
+        dirty = true;
+        notify('按当前障碍物、停靠点和限速后台规划；不会自动启动模型。');
+        updateButtons();
+    } catch (error) { autoPending = false; notify(error.message, true); }
+}
 
 function notify(message, error = false) {
     text('notice', message);
@@ -101,17 +143,17 @@ for (const button of document.querySelectorAll('.jog')) {
     });
     button.addEventListener('contextmenu', event => event.preventDefault());
 }
-const keys = {KeyW:'1,0,0', KeyS:'-1,0,0', KeyA:'0,1,0', KeyD:'0,-1,0', KeyQ:'0,0,1', KeyE:'0,0,-1'};
 window.addEventListener('keydown', event => {
-    if (event.code === 'Escape' || (event.code === 'Space' && !/INPUT|SELECT|TEXTAREA/.test(event.target.tagName))) {
+    if ((event.code === 'Escape' || event.code === 'Space') && !isEditing(event)) {
         event.preventDefault(); stop(); return;
     }
-    if (!keys[event.code] || event.repeat || /INPUT|SELECT|TEXTAREA/.test(event.target.tagName) || $('page-drive').hidden) return;
+    const direction = motionDirection(event);
+    if (!direction || $('page-drive').hidden) return;
     event.preventDefault();
-    hold(document.querySelector(`[data-dir="${keys[event.code]}"]`));
+    hold(document.querySelector(`[data-dir="${direction}"]`));
 });
 window.addEventListener('keyup', event => {
-    if (heldButton?.dataset.dir === keys[event.code]) stopHeld('键盘已松开');
+    if (matchesRelease(event, heldButton?.dataset.dir)) stopHeld('键盘已松开');
 });
 window.addEventListener('blur', () => { if (held) stopHeld('窗口失焦'); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && held) stopHeld('页面已隐藏'); });
@@ -128,6 +170,7 @@ $('claim').onclick = async () => {
         tokenSince = performance.now();
         notify('已取得离线控制权。按住方向键运动，松开即请求停车。');
         updateButtons();
+        if (autoPending) submitPlan();
     } catch (error) { notify(error.message, true); }
 };
 $('release').onclick = async () => {
@@ -143,22 +186,29 @@ function updateButtons() {
     for (const button of document.querySelectorAll('.jog')) button.disabled = !enabled || (!idle && mode !== 'MANUAL');
     $('move').disabled = !enabled || !idle;
     $('reset').disabled = !enabled || !current?.simulation?.stopped;
-    $('plan').disabled = !enabled || current?.planning?.status === 'PLANNING';
+    $('plan').disabled = !enabled || moving();
     $('run').disabled = !enabled || !idle || dirty || !planId;
     $('save').disabled = !enabled || dirty || !planId;
     $('claim').disabled = !online() || (!!current?.owner?.client && current.owner.client !== client);
     $('claim').hidden = !!token;
     $('release').hidden = !token;
+    $('defaults').disabled = !enabled || !current?.simulation?.stopped;
+    $('load-version').disabled = !enabled || !current?.simulation?.stopped || !$('saved-version').value;
+    for (const item of document.querySelectorAll('.scene-input, #start, #source, #route-speed, #speed-range, #add-target')) item.disabled = moving();
 }
 function draftChanged() {
     dirty = true;
-    text('draft-state', '草稿已修改。重新生成路线后才能运行或保存，不会改变正在执行的版本。');
+    localEdited = true;
+    autoPending = true;
+    clearTimeout(autoTimer);
+    if ($('auto-plan').checked) autoTimer = setTimeout(submitPlan, 650);
+    text('draft-state', token ? '草稿已修改，等待自动重规划；不会自动执行。' : '草稿已修改；获取控制权后可自动规划。');
     updateButtons();
 }
 function sequenceView() {
     const source = $('source').value;
     $('custom-editor').hidden = source !== 'custom';
-    const stops = [$('start').value, ...(source === 'custom' ? targets : presets[source])];
+    const stops = [$('start').value, ...(source === 'custom' ? targets : presets[source].map(name => name === 'start_1' ? $('start').value : name))];
     $('route-sequence').replaceChildren();
     stops.forEach((name, index) => {
         if (index) { const arrow = document.createElement('b'); arrow.textContent = '→'; $('route-sequence').append(arrow); }
@@ -185,29 +235,44 @@ $('add-target').onclick = () => {
 for (const id of ['source', 'start']) $(id).addEventListener('change', () => {
     if (id === 'start') {
         targets = targets.map(name => name === 'start_1' || name === 'start_2' ? $('start').value : name);
-        if ($('start').value === 'start_2') {
-            $('source').value = 'custom';
-            notify('启停区2使用自选站点规划，初始车头沿地图−X。');
-        }
     }
     sequenceView(); draftChanged();
 });
 for (const [from, to] of [['route-speed', 'speed-range'], ['speed-range', 'route-speed']]) {
     $(from).addEventListener('input', () => { $(to).value = $(from).value; draftChanged(); });
 }
-$('plan').onclick = async () => {
+$('plan').onclick = submitPlan;
+$('auto-plan').onchange = () => { if ($('auto-plan').checked && dirty) submitPlan(); };
+$('saved-version').onchange = updateButtons;
+for (const [id, op] of [['defaults','defaults'], ['load-version','load']]) $(id).onclick = async () => {
+    clearTimeout(autoTimer);
+    autoPending = false;
     try {
-        const args = {source:$('source').value, start:$('start').value, targets:[...targets],
-            blocked:$('source').value === 'custom' ? [...document.querySelectorAll('#roads input:checked')].map(input => input.value) : [],
-            speed_m_s:number('route-speed', .03, .30)};
-        await command('plan', args);
-        dirty = true;
-        notify('已提交后台规划；可继续查看状态。复杂封路搜索可能需要稍等。');
-        updateButtons();
+        const result = await command(op, op === 'load' ? {plan_id:$('saved-version').value} : {});
+        applySettings(result.draft);
+        lastJob = '';
+        dirty = op === 'defaults';
+        if (op === 'defaults') {
+            planId = '';
+            $('auto-plan').checked = true;
+            $('jog-speed').value = .05;
+            $('jog-yaw').value = 10;
+            $('move-x').value = 100;
+            $('move-y').value = 0;
+            $('move-yaw').value = 0;
+        }
+        notify(op === 'defaults' ? '已恢复初始设置并清空障碍；历史保存版本保留，未运行。' : '已读取保存的路径和参数，仅恢复模型待命。');
     } catch (error) { notify(error.message, true); }
 };
 for (const op of ['run', 'save']) $(op).onclick = async () => {
-    try { await command(op, {plan_id:planId}); notify(op === 'run' ? '离线闭环已开始，速度和路线版本已冻结。' : '离线版本已保存到 output/workbench/plans。'); }
+    try {
+        await command(op, {plan_id:planId});
+        if (op === 'save') {
+            preferredVersion = planId;
+            versionsKey = '';
+        }
+        notify(op === 'run' ? '离线闭环已开始，速度和路线版本已冻结。' : '离线版本已保存到 output/workbench/plans。');
+    }
     catch (error) { notify(error.message, true); }
 };
 $('move').onclick = async () => {
@@ -230,33 +295,47 @@ for (const button of document.querySelectorAll('[data-page]')) button.onclick = 
     document.querySelector('h1').textContent = {drive:'底盘与导航', mechanism:'机械调试', logs:'运行记录'}[button.dataset.page];
 };
 function renderPlan(job) {
-    const key = `${job.id}:${job.status}`;
+    const key = `${job.id}:${job.status}:${job.progress?.completed}`;
     if (key === lastJob) return;
     lastJob = key;
     text('plan-status', {IDLE:'尚未规划', PLANNING:'后台计算中', READY:'离线版本已就绪', FAILED:'规划失败'}[job.status] || job.status);
-    if (job.status === 'FAILED') { notify(job.reason, true); planId = ''; dirty = true; }
+    if (job.status === 'PLANNING' && job.progress) text('plan-status', `${job.progress.completed}/${job.progress.total} 工位 · ${job.progress.current}`);
+    if (job.status === 'FAILED') { notify(job.reason, true); planId = ''; dirty = true; text('limit-reason', job.reason); }
+    if (job.status === 'IDLE' || job.status === 'PLANNING') {
+        planId = '';
+        dirty = true;
+        text('plan-time', '— s'); text('plan-count', '—'); text('plan-hash', '未生成');
+        text('map-status', job.status === 'PLANNING' ? '按场景重规划中' : '等待规划');
+        if (job.status === 'IDLE') {
+            text('draft-state', '初始设置已恢复；规划后才能运行。');
+            text('limit-reason', '请求上限可设到1m/s，实际轨迹同时受轮速、弯道、距离和加减速限制。');
+        }
+    }
     if (job.status !== 'READY') return;
     const plan = job.plan;
     planId = plan.id;
     // 其他浏览器生成的路线也能查看；草稿仅在与本页输入一致时标记已应用。
     const params = plan.parameters;
-    const same = params.source === $('source').value && params.start === $('start').value && params.speed_m_s === Number($('route-speed').value)
-        && (params.source !== 'custom' || (JSON.stringify(params.targets) === JSON.stringify(targets)
-        && JSON.stringify(params.blocked) === JSON.stringify([...document.querySelectorAll('#roads input:checked')].map(input => input.value))));
+    let same = false;
+    try { same = fingerprint(params) === fingerprint(readSettings()); } catch { /* 无效输入仍是草稿。 */ }
     dirty = !same;
     text('plan-time', `${plan.seconds.toFixed(2)} s`); text('plan-count', plan.legs.length); text('plan-hash', plan.sha256.slice(0, 10));
     text('map-status', `${plan.legs.length} 段 · ${params.speed_m_s.toFixed(2)} m/s`);
     text('draft-state', same ? '当前草稿已生成独立离线版本；实车参数保持原配置。' : '显示核心最新版本；与当前草稿不同，运行前请重新规划。');
+    if (same && $('notice').textContent.includes('后台规划')) notify('当前场景规划已完成；点击运行才启动离线模型。');
+    const limits = plan.limits;
+    text('limit-reason', `请求上限 ${limits.requested_m_s.toFixed(2)} m/s；参考采样峰值 ${limits.sampled_peak_m_s.toFixed(3)} m/s；保守轮速界 ${limits.wheel_bound_rpm.toFixed(1)} / ${limits.max_rpm.toFixed(0)} RPM。${limits.reasons.join('；')}。按预计时间在道路朝向候选中择优。`);
     $('leg-list').replaceChildren();
     for (const [index, leg] of plan.legs.entries()) {
         const row = document.createElement('div');
-        const name = document.createElement('span'); name.textContent = `${index + 1}. ${legNames[plan.source]?.[index] || leg.name}`;
+        const name = document.createElement('span'); name.textContent = `${index + 1}. ${leg.name}`;
         const duration = document.createElement('span'); duration.textContent = `${leg.seconds.toFixed(2)} s`;
         row.append(name, duration); $('leg-list').append(row);
     }
     drawSpeed(plan);
 }
 function render(state) {
+    const previousMode = current?.simulation?.mode;
     current = state; received = performance.now();
     text('connection', state.available ? '离线核心在线' : '离线核心未连接');
     $('connection').className = `badge ${state.available ? 'good' : 'muted'}`;
@@ -275,7 +354,7 @@ function render(state) {
     text('rpm', Math.max(...sim.rpm.map(Math.abs)).toFixed(1));
     text('session', sim.session.slice(0, 8)); text('error-xy', `${(sim.position_error_m * 1000).toFixed(2)} mm`);
     text('error-yaw', `${(sim.yaw_error_rad * 180 / Math.PI).toFixed(2)}°`);
-    text('fault', sim.fault ? `模型故障 ${sim.fault}` : '0 / 无'); text('odom', `${sim.odom_origin_ms} ms · 连续`);
+    text('fault', sim.mode === 'FAILED' ? sim.reason : sim.fault ? `模型故障 ${sim.fault}` : '0 / 无'); text('odom', `${sim.odom_origin_ms} ms · 连续`);
     text('owner', state.owner.client === client ? '本页持有控制权' : state.owner.client ? '其他浏览器正在控制' : '当前无人控制');
     if (!$('roads').children.length) {
         for (const [road, a, b] of state.field.edges) {
@@ -284,7 +363,35 @@ function render(state) {
             label.append(input, document.createTextNode(`${names[a] || a} ↔ ${names[b] || b}`)); $('roads').append(label);
         }
     }
-    renderPlan(state.planning); drawMap(state); updateButtons();
+    if (!hydrated) applySettings(state.draft);
+    else if (!token && !localEdited && fingerprint(state.draft) !== submitted) applySettings(state.draft);
+    const key = JSON.stringify(state.saved_versions);
+    if (key !== versionsKey) {
+        versionsKey = key;
+        const old = $('saved-version').value;
+        $('saved-version').replaceChildren();
+        for (const saved of state.saved_versions) {
+            const option = document.createElement('option');
+            option.value = saved.id;
+            option.disabled = saved.schema !== 2;
+            option.textContent = `${saved.schema === 2 ? '' : '旧格式 / '}${{batch:'两批',tour:'巡回',raw:'原料',custom:'自选'}[saved.source]} · ${saved.speed_m_s.toFixed(2)}m/s · ${saved.id.slice(0,8)}`;
+            $('saved-version').append(option);
+        }
+        if (!state.saved_versions.some(item => item.schema === 2)) {
+            const option = document.createElement('option'); option.value = ''; option.textContent = '尚无当前格式保存版本'; $('saved-version').append(option); $('saved-version').value = '';
+        } else if (preferredVersion && state.saved_versions.some(item => item.id === preferredVersion && item.schema === 2)) {
+            $('saved-version').value = preferredVersion;
+            preferredVersion = '';
+        } else if (state.saved_versions.some(item => item.id === old && item.schema === 2)) $('saved-version').value = old;
+    }
+    renderPlan(state.planning); drawMap(state); overlayDraft(); updateButtons();
+    const visiblePlan = sim.mode === 'RUNNING' && state.active_plan ? state.active_plan : state.planning.plan;
+    if (visiblePlan) {
+        const executed = visiblePlan.id === sim.active_plan_id;
+        text('map-status', `${visiblePlan.legs.length} 段 · ${visiblePlan.parameters.speed_m_s.toFixed(2)} m/s · ${executed ? sim.mode === 'COMPLETE' ? '模型已完成' : '执行版本' : '待运行预览'}`);
+    }
+    if (previousMode === 'RUNNING' && sim.mode === 'COMPLETE') notify(`离线模型${sim.completed}段已完成，用时${sim.elapsed_s.toFixed(2)}s，已确认模型停稳。`);
+    if (previousMode !== 'FAILED' && sim.mode === 'FAILED') notify(sim.reason, true);
     const eventKey = JSON.stringify(state.events);
     if (eventKey !== lastEvents) {
         lastEvents = eventKey; $('events').replaceChildren();
@@ -314,4 +421,5 @@ setInterval(() => {
     if (received && performance.now() - received > 700) invalidate();
     if (token && online() && !held && !document.hidden) command('renew').catch(error => { token = ''; updateButtons(); notify(error.message, true); });
 }, 500);
+initScene({changed:draftChanged, notify, isRunning:moving});
 sequenceView(); updateButtons(); connect();

@@ -11,6 +11,39 @@ const names = {start_1:'启停区 1', start_2:'启停区 2', qr:'扫码', raw:'�
 let fieldKey = '';
 let plannedId = '';
 let path, actual, body, labels;
+let obstaclesLayer;
+let mapObserver = null;
+
+export function onMapPoint(handler) {
+    mapObserver = handler;
+    const svg = document.getElementById('map');
+    svg.addEventListener('click', event => {
+        const target = svg.createSVGPoint();
+        target.x = event.clientX;
+        target.y = event.clientY;
+        const local = target.matrixTransform(svg.getScreenCTM().inverse());
+        const x = local.x / 1000;
+        const y = 2.4 - local.y / 1000;
+        if (x >= 0 && x <= 2.4 && y >= 0 && y <= 2.4) {
+            mapObserver({x_m:x, y_m:y, obstacleId:event.target.closest('[data-obstacle]')?.dataset.obstacle});
+        }
+    });
+}
+
+export function drawObstacles(items) {
+    if (!obstaclesLayer) return;
+    obstaclesLayer.replaceChildren();
+    for (const item of items) {
+        const circle = node('circle', {cx:item.x_m * 1000, cy:(2.4 - item.y_m) * 1000,
+            r:item.diameter_m * 500, fill:'#141c23', stroke:'#fff', 'stroke-width':3,
+            'data-obstacle':item.id});
+        const title = node('title', {}, `${item.id} / 直径${(item.diameter_m * 1000).toFixed(0)}mm`);
+        circle.append(title);
+        obstaclesLayer.append(circle);
+        obstaclesLayer.append(node('text', {x:item.x_m * 1000 + item.diameter_m * 500 + 10,
+            y:(2.4 - item.y_m) * 1000 - 15, fill:'#263c49', 'font-size':32}, item.id));
+    }
+}
 
 export function drawMap(state) {
     const svg = document.getElementById('map');
@@ -18,7 +51,8 @@ export function drawMap(state) {
         if (body) body.setAttribute('visibility', 'hidden');
         return;
     }
-    const field = state.field;
+    const active = state.simulation.mode === 'RUNNING' && state.active_plan;
+    const field = active ? state.active_plan.field : state.field;
     if (fieldKey !== field.version || !body) {
         svg.replaceChildren();
         fieldKey = field.version;
@@ -53,6 +87,8 @@ export function drawMap(state) {
                 fill:'#638092', 'font-size':43}, text));
         }
         svg.append(labels);
+        obstaclesLayer = node('g');
+        svg.append(obstaclesLayer);
         body = node('g');
         body.append(node('rect', {x:-145, y:-135, width:290, height:270, rx:16,
             fill:'#b9dfda', stroke:'#077e7c', 'stroke-width':8}));
@@ -72,6 +108,7 @@ export function drawMap(state) {
         plannedId = plan?.id || '';
     }
     actual.setAttribute('points', (state.simulation.trace || []).map(point).join(' '));
+    drawObstacles(field.obstacles || []);
     const pose = state.simulation.pose;
     body.setAttribute('visibility', 'visible');
     body.setAttribute('transform', `translate(${point(pose).replace(',', ' ')}) rotate(${-pose[2] * 180 / Math.PI})`);

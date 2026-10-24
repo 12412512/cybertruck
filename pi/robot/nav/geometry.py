@@ -3,6 +3,23 @@
 import math
 
 
+def circle_intersects(polygon, x, y, radius):
+    """圆与凸包精确相交：包含中心或距任一边不大于半径，边界接触也算碰撞。"""
+    box = bounds(polygon)
+    if x + radius < box[0] or x - radius > box[2] or y + radius < box[1] or y - radius > box[3]:
+        return False
+    signs = []
+    for a, b in zip(polygon, polygon[1:] + polygon[:1]):
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        cross = dx * (y - a[1]) - dy * (x - a[0])
+        signs.append(cross)
+        length = dx * dx + dy * dy
+        ratio = max(0, min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / length)) if length else 0
+        if math.hypot(x - a[0] - ratio * dx, y - a[1] - ratio * dy) <= radius + 1e-12:
+            return True
+    return all(value >= 0 for value in signs) or all(value <= 0 for value in signs)
+
+
 def hull(points):
     points = sorted(set(points))
     if len(points) < 3:
@@ -26,11 +43,22 @@ def rectangle(bounds):
 
 
 def bounds(points):
-    return min(p[0] for p in points), min(p[1] for p in points), max(p[0] for p in points), max(p[1] for p in points)
+    x0, y0 = points[0]
+    x1, y1 = x0, y0
+    for x, y in points[1:]:
+        if x < x0:
+            x0 = x
+        if x > x1:
+            x1 = x
+        if y < y0:
+            y0 = y
+        if y > y1:
+            y1 = y
+    return x0, y0, x1, y1
 
 
-def intersects(first, second):
-    a, b = bounds(first), bounds(second)
+def intersects(first, second, boxes=None):
+    a, b = boxes if boxes is not None else (bounds(first), bounds(second))
     if a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1]:
         return False
     for polygon in (first, second):
@@ -50,6 +78,8 @@ def footprint(pose, body, margin=0, movement=0):
                             (body['front_m']+margin, -body['right_m']-margin),
                             (body['front_m']+margin, body['left_m']+margin),
                             (-body['rear_m']-margin, body['left_m']+margin))]
+    if movement == 0:
+        return corners
     # 世界轴方形包含同半径圆盘；覆盖任意方向位移和转动角造成的角点位移。
     return hull([(x+dx, y+dy) for x, y in corners
                  for dx, dy in ((-movement, -movement), (movement, -movement),

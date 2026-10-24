@@ -30,12 +30,13 @@ class Segment:
 
 class Planner:
     def __init__(self, library, geometry, field=None, max_rpm=100, cruise_m_s=CRUISE_M_S,
-                 lookahead=True,turn_rate_rad_s=1.2):
+                 lookahead=True,turn_rate_rad_s=1.2, cancelled=None):
         self.library, self.geometry = library, geometry
         self.field = field or Field()
         self.data = self.field.data
         self.nodes = self.data['nodes']
         self.max_rpm = max_rpm
+        self.cancelled = cancelled or (lambda: False)
         if not math.isfinite(cruise_m_s) or not 0 < cruise_m_s <= 2:
             raise ValueError('模拟巡航速度必须为(0,2]m/s；不代表实车许可值')
         self.cruise_m_s = cruise_m_s
@@ -61,6 +62,8 @@ class Planner:
 
     def make(self, kind, start, end, road, allowed_start, reverse=False, radius=.1, corner=None,
              window_m=.08,head_pad_m=0):
+        if self.cancelled():
+            raise InterruptedError('规划已被更新的草稿取代')
         key = (kind, start, end, allowed_start, reverse, radius, corner, window_m,head_pad_m)
         if key in self.cache:
             segment, errors = self.cache[key]
@@ -107,7 +110,7 @@ class Planner:
 
     def plan(self, start, goal, *, start_heading=None, goal_heading=None, roads=None,
              assigned_start='start_1', mode='simulation', smooth=True, flow=True,
-             free_heading=False,park_region=False):
+             free_heading=False,park_region=False, start_pose=None):
         result = dict(status='NO_PATH', frame_id='map', domain='simulation', executable=False,
                       deployment_blockers=list(self.data['unverified']), start=start, goal=goal,
                       segments=[], nodes=[], rejected={}, assumed_roads=False)
@@ -117,6 +120,9 @@ class Planner:
             return dict(result, status='NOT_READY')
         if (start not in self.nodes or goal not in self.nodes or type(start_heading) is not int
                 or start_heading not in range(4) or assigned_start not in ('start_1', 'start_2')):
+            return dict(result, status='INVALID_REQUEST')
+        if start_pose is not None and (not isinstance(start_pose, Pose)
+                or abs(angle(start_pose.yaw_rad - start_heading * math.pi / 2)) > 1e-5):
             return dict(result, status='INVALID_REQUEST')
         goal_heading = self.data['station_heading_quarters'].get(goal, start_heading) if goal_heading is None else goal_heading
         if (type(goal_heading) is not int or goal_heading not in range(4) or
@@ -138,6 +144,9 @@ class Planner:
             goal_headings = set(goal_poses)
 
         def pose_at(node,heading):
+            if node == start and start_pose is not None:
+                return Pose(start_pose.x_m, start_pose.y_m,
+                            start_pose.yaw_rad + angle(heading * math.pi / 2 - start_pose.yaw_rad))
             return goal_poses.get(heading,self.pose(node,heading)) if node == goal else self.pose(node,heading)
 
         def ends_at(node,start_pose,heading):
@@ -152,7 +161,7 @@ class Planner:
                 'UNKNOWN' if any(roads.get(r, 'UNKNOWN') != 'OPEN' for r in group) else 'OPEN')
             roads.update({road: state for road in group})
         allowed = tuple(n for n in (start, goal) if n.startswith('start_')) or None
-        errors = self.field.errors(self.pose(start,start_heading),allowed)
+        errors = self.field.errors(pose_at(start,start_heading),allowed)
         if errors:
             return dict(result,status='INVALID_POSE',rejected={start:errors})
         goal_headings = {h for h in goal_headings if not self.field.errors(goal_poses[h],allowed)}
@@ -173,6 +182,8 @@ class Planner:
         frontier = [(0., 0., next(counter), initial)]
         best, came = {initial: 0.}, {}
         while frontier:
+            if self.cancelled():
+                raise InterruptedError('规划已被更新的草稿取代')
             _, cost, _, key = heapq.heappop(frontier)
             if cost > best[key] + 1e-9:
                 continue
@@ -240,7 +251,7 @@ class Planner:
                 new = cost + edge_cost
                 if new + 1e-9 < best.get(nxt, math.inf):
                     best[nxt], came[nxt] = new, (key, segment)
-                    heuristic = 0 if nxt[0] == goal else min(math.dist(self.nodes[nxt[0]],
+                    heuristic = 0 if nxt[0] == goal else min(math.dist(pose_at(*nxt).values()[:2],
                         goal_poses[h].values()[:2]) for h in goal_headings)/self.cruise_m_s
                     heapq.heappush(frontier, (new + heuristic, new, next(counter), nxt))
         result['rejected'] = rejected

@@ -5,9 +5,11 @@ import uuid
 
 from ..device.tracking import Goal, Spec, Limit, Tracker
 from ..nav.frames import Pose, compose, relative, angle
+from ..nav.field import Field
 from ..nav.reference import NativeReference
 from ..track_sim import ClosedLoop, settings
 from ..odom_sim import fixture
+from .scene import start_zones
 
 
 class Simulation:
@@ -15,19 +17,26 @@ class Simulation:
         self.library = library
         self.reset('start_1')
 
-    def reset(self, start):
-        config = settings(fixture())
+    def reset(self, start, max_rpm=100.):
+        calibration = fixture()
+        calibration.max_rpm = max(100., max_rpm * 1.2)
+        config = settings(calibration)
+        config.max_rpm = max_rpm
         config.position_tol_m, config.yaw_tol_rad = .003, .012
-        self.model = ClosedLoop(self.library, config=config, auto_start=False, disturbance=False)
+        self.model = ClosedLoop(self.library, config=config, auto_start=False, disturbance=False,
+                                calibration=calibration)
         self.origin = Pose(.15, 2.25, 0) if start == 'start_1' else Pose(2.25, 2.25, math.pi)
         self.session = uuid.uuid4().hex
         self.mode, self.reason = 'IDLE', ''
+        self.failure_reason = ''
         self.manual = [0.] * 4
         self.plan, self.index, self.next_id = None, 0, 1
         self.results, self.trace = [], []
         self.run_ms = 0
         self.end_ms = None
         self.move_deadline = 0
+        self.field = None
+        self.truth_ms = -1
         for _ in range(16):
             self.model.advance(report=False)
         self.run_ms = self.end_ms = self.model.elapsed_ms
@@ -43,7 +52,12 @@ class Simulation:
         self.model.manual_rpm = None
         self.model.plant.targets[:] = [0.] * 4
         self.manual[:] = [0.] * 4
-        self.mode, self.reason = 'STOPPING', reason
+        self.mode = 'FAILED' if self.failure_reason else 'STOPPING'
+        self.reason = self.failure_reason or reason
+
+    def fail(self, reason):
+        self.failure_reason = reason
+        self.halt(reason)
 
     def jog(self, velocity):
         if self.mode != 'MANUAL':
@@ -73,12 +87,14 @@ class Simulation:
         current = Pose(self.model.pose['x_m'], self.model.pose['y_m'], self.model.pose['yaw_rad'])
         ref = NativeReference(self.model.native.lib, current, spec)
         self.plan, self.results, self.index = None, [], 0
+        self.field = None  # 定量校准不沿用上次路线的场景/计划指针。
         self.run_ms = self.model.elapsed_ms
         self._begin(spec, ref.duration_s)
 
     def run(self, plan):
         # 显式开始模拟建立独立运行原点，绝不冒充测得的地图配准。
-        self.reset(plan.view['parameters']['start'])
+        self.reset(plan.view['parameters']['start'], plan.view['parameters']['max_rpm'])
+        self.field = Field(data=plan.view['field'])
         self.plan = plan
         self.run_ms = self.model.elapsed_ms
         self._leg()
@@ -105,17 +121,18 @@ class Simulation:
         self.model.advance(report=False)
         if self.mode == 'MANUAL':
             if not self.model.pose['valid']:
-                self.halt('点动模型反馈失效')
-        elif self.mode == 'STOPPING':
+                self.fail('点动模型反馈失效')
+        elif self.mode in ('STOPPING', 'FAILED'):
             self.model.pending.clear()
             self.model.plant.targets[:] = [0.] * 4
-            if max(map(abs, self.model.plant.rpm)) < .5:
+            if self.mode == 'STOPPING' and max(map(abs, self.model.plant.rpm)) < .5:
                 self.mode = 'STOPPED'
         elif self.mode == 'RUNNING':
+            if not self._check_truth():
+                return
             out = self.model.tracker.output()
             if out['state'] in (5, 6) or self.model.elapsed_ms >= self.move_deadline:
-                self.halt(f'模型故障或超时：{out["fault"]}')
-                self.mode = 'FAILED'
+                self.fail(f'模型故障或超时：{out["fault"]}')
             elif out['state'] == 4:
                 self.results.append(dict(action_id=out['id'], position_error_m=out['position_error_m'],
                                          yaw_error_rad=out['yaw_error_rad'],
@@ -133,6 +150,23 @@ class Simulation:
                 if len(self.trace) > 2000:
                     self.trace[:] = self.trace[::2]
 
+    def _check_truth(self):
+        """检查独立Plant的2ms扫掠，不以规划参考代替模拟实际位置。"""
+        if self.field is None:
+            return True
+        speed = max(abs(rpm) for sample in self.model.plant.history for rpm in sample[1]) * 2 * math.pi * .05 / 60
+        movement = (math.sqrt(2) * speed + (self.field.radius + .04) * speed / .22) * .002
+        for tick, x, y, yaw in self.model.plant.positions:
+            if tick <= self.truth_ms:
+                continue
+            pose = compose(self.origin, Pose(x, y, yaw))
+            errors = self.field.errors(pose, start_zones(self.plan.view['parameters']), movement, tracking=False)
+            self.truth_ms = tick
+            if errors:
+                self.fail('模型扫掠碰撞：' + ','.join(errors))
+                return False
+        return True
+
     def pose(self):
         return compose(self.origin, Pose(self.model.pose['x_m'], self.model.pose['y_m'],
                                          self.model.pose['yaw_rad'])).values()
@@ -141,6 +175,7 @@ class Simulation:
         out = self.model.tracker.output()
         return dict(domain='simulation', physical_pose_valid=False, session=self.session,
                     mode=self.mode, reason=self.reason, pose=self.pose(), trace=list(self.trace),
+                    failure_reason=self.failure_reason,
                     rpm=list(self.model.plant.rpm), target_rpm=list(self.model.plant.targets),
                     stopped=self.stopped(), completed=len(self.results),
                     elapsed_s=max(0, ((self.end_ms if self.end_ms is not None else self.model.elapsed_ms) - self.run_ms) / 1000),
