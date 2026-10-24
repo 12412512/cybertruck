@@ -734,6 +734,16 @@
           <GroupName>User/Control</GroupName>
           <Files>
             <File>
+              <FileName>curve.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Control/curve.c</FilePath>
+            </File>
+            <File>
+              <FileName>curve.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Control/curve.h</FilePath>
+            </File>
+            <File>
               <FileName>kin.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/Control/kin.c</FilePath>
@@ -742,6 +752,26 @@
               <FileName>kin.h</FileName>
               <FileType>5</FileType>
               <FilePath>../User/Control/kin.h</FilePath>
+            </File>
+            <File>
+              <FileName>line.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Control/line.c</FilePath>
+            </File>
+            <File>
+              <FileName>line.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Control/line.h</FilePath>
+            </File>
+            <File>
+              <FileName>path.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Control/path.c</FilePath>
+            </File>
+            <File>
+              <FileName>path.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Control/path.h</FilePath>
             </File>
             <File>
               <FileName>yaw.c</FileName>

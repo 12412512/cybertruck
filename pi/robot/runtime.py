@@ -55,7 +55,7 @@ def load_snapshot(path, now=None):
             raise ValueError('控制核心快照过期')
         if not 0 <= time.time() - state['snapshot_wall_s'] < 1:
             raise ValueError('快照不属于当前时间窗口')
-        if state['mode'] not in ('offline', 'sim', 'serial') or state['readonly'] is not True:
+        if state['mode'] not in ('offline', 'sim', 'serial', 'observer') or state['readonly'] is not True:
             raise ValueError('快照阶段或模式不符')
         state['core_fresh'] = True
         state['core_age_ms'] = int(age * 1000)

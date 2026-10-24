@@ -14,7 +14,9 @@ CHECKS = 0
 USER_FILES = {FW / 'User' / name for name in (
     'App/app.c', 'App/app.h', 'Board/port.c', 'Board/port.h',
     'Comm/frame.c', 'Comm/frame.h', 'Comm/comm.c', 'Comm/comm.h',
-    'Control/kin.c', 'Control/kin.h', 'Control/yaw.c', 'Control/yaw.h')}
+    'Control/kin.c', 'Control/kin.h', 'Control/yaw.c', 'Control/yaw.h',
+    'Control/curve.c', 'Control/curve.h', 'Control/line.c', 'Control/line.h',
+    'Control/path.c', 'Control/path.h')}
 
 
 def check(ok, message):

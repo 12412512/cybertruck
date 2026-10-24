@@ -40,3 +40,11 @@
 - `firmware/User/Control/kin.c`改编旧`User/Chassis/kinematics.c`的正逆运动学、有限值检查和四轮同比限幅。原SHA256：`c3ca8e46cf249239909bf43acdc2c1519da06bc19ce6cd7abf6dfb2bf2b8dbaa`。接口改为米/秒/弧度、X前/Y左/逆时针正，移除旧车辆候选默认值，轮序仍为FL/FR/RL/RR；实际驱动极性不混入理论轮速。
 - `Control/yaw.c`沿用旧`User/Chassis/yaw_history.c`的64槽环形时间历史、uint32回绕和包围区间插值方法。原SHA256：`bb43b83675091d331ec991de61277a280dc66c67bd9fc5f278eba8812b7dea37`。输入改为CCW正弧度，新增±pi展开、时效/角速度检查与异常锁存，不外推、不向IMU写零。
 - 两模块只做数值运算与离线验证，没有移植旧路测标志、速度、轮几何或自动执行入口；后续里程计及设备适配另行验证。
+
+## 真实观察与高级几何复用
+
+- `Control/curve.c/.h`改编旧`User/Chassis/motion/scurve.c`的`SPlan/SSample`静止七段曲线部分。原SHA256：`7bae3d24d1c7a7ac139969e4e5f6c80a4b76e65668d6527af43a36a84cb116d8`。换成Module_动作、SI数值域、中文注释和展开排版；没有迁入`PathTimePlan`分段变速部分。
+- `Control/path.c/.h`改编旧`User/Chassis/motion/path.c`及其类型布局。原SHA256：`1a2f8c4acdc2f84a1e9237299042b470d8bdb78b6c87512e6de61ff4a935fc3d`。保留余弦升降曲率、Gauss构表、七次Hermite、边界投影与冻结校验；转为米、Y左/CCW正，turn正值代表左。仅纯几何，不复用旧测试默认半径/速度和执行入口。
+- `Control/line.c/.h`迁用旧`motion/motion.c`的XY距离归一化和共用标量时间轴投影；原SHA256：`98cc7782c0843fb377c0fa08e156d93f49ac0196b9789726591ba3c7ef4e15cc`。移除全局运动状态和驱动耦合，调用者持有独立冻结Plan，不含真实完成状态。
+- `device/observer.py`直接读取已核对旧服务`/api/state`，复用其串口反馈结果，未复制或打开另一个旧串口管理器。旧控制权、租约、失焦释放、地图和雷达接口逐项核对后按`web_merge.md`安排合并；当前只接只读诊断。
+- 原来源文件均未写入，移植以新测试和真实观察分别验收，详细证据与未验证项见`motion_readonly.md`。

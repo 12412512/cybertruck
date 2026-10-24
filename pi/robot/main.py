@@ -32,9 +32,18 @@ def open_transport(mode, port):
     return device
 
 
-def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None, task_code=None, start_zone=1):
+def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None, task_code=None, start_zone=1,
+        owner_url=None):
+    if mode not in ('offline', 'sim', 'serial', 'observer'):
+        raise ValueError('未知运行模式')
     if task_code is not None and mode != 'sim':
         raise ValueError('任务演示仅允许sim模式')
+    observer = client = None
+    if mode == 'observer':
+        if port is not None:
+            raise ValueError('观察模式不能指定串口')
+        from .device.observer import Observer, OwnerClient
+        observer, client = Observer(), OwnerClient(owner_url)
     runtime = Path(runtime)
     runtime.mkdir(parents=True, exist_ok=True)
     lock = ProcessLock(runtime / 'core.lock')
@@ -51,13 +60,20 @@ def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None, task_code
     previous = None
     task_demo = None
     try:
-        if task_code is not None or (runtime / 'task.sqlite3').exists():
+        if mode != 'observer' and (task_code is not None or (runtime / 'task.sqlite3').exists()):
             from .task_sim import TaskDemo
             task_demo = TaskDemo(runtime, identity, task_code, start_zone)
         while stop is None or not stop():
             now = time.monotonic()
             sequence += 1
-            if mode != 'offline':
+            if mode == 'observer':
+                try:
+                    source, sent, received = client.read()
+                    observer.feed(source, sent, received)
+                except (OSError, ValueError) as exc:
+                    observer.reset(f'观察连接异常：{type(exc).__name__}')
+                now = time.monotonic()
+            elif mode != 'offline':
                 try:
                     if transport is None and now >= retry_at:
                         transport = open_transport(mode, port)
@@ -73,11 +89,13 @@ def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None, task_code
                     transport = None
                     link.reset(f'连接中断：{exc}')
                     retry_at = now + 1
-            state = link.snapshot(now)
+            state = observer.snapshot(now) if observer is not None else link.snapshot(now)
             if mode == 'offline':
                 state['message'] = '离线模式，未打开设备'
             health = (state['message'], state['boot_id'],
-                      None if state['board'] is None else state['board']['fault_bits'])
+                      None if state['board'] is None else (
+                          state['board'].get('fault_bits'), state['board'].get('state'),
+                          state['board'].get('bus_error')))
             if health != previous:
                 previous = health
                 logger.info(json.dumps(dict(time_s=time.time(), message=state['message'],
@@ -92,7 +110,7 @@ def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None, task_code
                 written_at = now
             if task_demo is not None:
                 task_demo.step(now, link_ok=state['connected'])
-            time.sleep(.005)
+            time.sleep(.1 if mode == 'observer' else .005)
     finally:
         if task_demo is not None:
             task_demo.close()
@@ -105,14 +123,21 @@ def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None, task_code
 
 def main():
     parser = argparse.ArgumentParser(description='只读通信核心；无运动接口')
-    parser.add_argument('--mode', choices=('offline', 'sim', 'serial'), default='offline')
+    parser.add_argument('--mode', choices=('offline', 'sim', 'serial', 'observer'), default='offline')
     parser.add_argument('--port', help='显式指定真实串口；不自动猜测或扫描')
+    parser.add_argument('--owner-url', help='observer模式：已核对的既有串口所有者http地址')
     parser.add_argument('--runtime', type=Path, default=DEFAULT_RUNTIME)
     parser.add_argument('--task-demo', help='仅sim：模拟扫码、两批取放和返航，不执行实车动作')
     parser.add_argument('--start-zone', type=int, choices=(1, 2), default=1)
     args = parser.parse_args()
     if args.mode == 'serial' and not args.port:
         parser.error('serial模式必须提供--port')
+    if args.mode == 'observer' and not args.owner_url:
+        parser.error('observer模式必须提供--owner-url')
+    if args.mode != 'observer' and args.owner_url:
+        parser.error('--owner-url仅适用于observer模式')
+    if args.mode == 'observer' and args.port:
+        parser.error('observer模式不打开串口，不能提供--port')
     if args.task_demo and args.mode != 'sim':
         parser.error('--task-demo仅允许--mode sim')
     stopped = False
@@ -123,7 +148,8 @@ def main():
 
     signal.signal(signal.SIGINT, finish)
     signal.signal(signal.SIGTERM, finish)
-    run(args.mode, args.port, args.runtime, lambda: stopped, args.task_demo, args.start_zone)
+    run(args.mode, args.port, args.runtime, lambda: stopped, args.task_demo, args.start_zone,
+        args.owner_url)
 
 
 if __name__ == '__main__':

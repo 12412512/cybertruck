@@ -49,6 +49,20 @@
             </dl>
         </section>
         <section class="panel">
+            <h2>实车只读反馈</h2>
+            <p class="muted">以下为旧服务报告值。精确采集时刻尚未接入；编码器和IMU未转换为本车位姿，不用于闭环。</p>
+            <dl>
+                <dt>CAN错误 / 最近错误 / 接收</dt><dd id="can">未接入</dd>
+                <dt>锁存CAN错误快照</dt><dd id="can-event">未接入</dd>
+                <dt>旧串口CRC / 格式错误</dt><dd id="legacy-uart">未接入</dd>
+                <dt>旧服务控制权</dt><dd id="legacy-owner">未接入</dd>
+                <dt>IMU航向</dt><dd id="imu">未接入</dd>
+                <dt>IMU角速度</dt><dd id="gyro">未接入</dd>
+                <dt>停车证据</dt><dd id="stopped">未接入</dd>
+            </dl>
+            <ul id="wheels"></ul>
+        </section>
+        <section class="panel">
             <h2>任务与物理状态</h2>
             <div class="facts">
                 <p>位姿 <b>未接入</b></p>

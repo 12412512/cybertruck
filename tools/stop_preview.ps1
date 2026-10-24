@@ -1,6 +1,10 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿param(
+    [ValidateSet('preview', 'observer')]
+    [string]$Name = 'preview'
+)
+$ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path -Parent $PSScriptRoot
-$taskRuntime = Join-Path $taskRoot 'output\preview'
+$taskRuntime = Join-Path $taskRoot "output\$Name"
 $taskRecord = Join-Path $taskRuntime 'processes.json'
 if (-not (Test-Path -LiteralPath $taskRecord)) { return }
 $taskProcesses = Get-Content -LiteralPath $taskRecord -Raw | ConvertFrom-Json
@@ -14,4 +18,4 @@ foreach ($taskId in @($taskProcesses.core, $taskProcesses.web)) {
     }
     Stop-Process -Id $taskId -ErrorAction Stop
 }
-Write-Output '本机模拟预览已停止，未访问物理设备'
+Write-Output '本机预览进程已停止；未修改树莓派服务'

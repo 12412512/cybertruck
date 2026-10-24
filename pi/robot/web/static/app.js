@@ -1,5 +1,6 @@
 // 网页仅接收状态；掉线或失去核心快照时立即撤销在线显示。
 const set = (id, value) => { document.getElementById(id).textContent = value ?? '—'; };
+const ageText = value => Number.isFinite(value) ? Math.floor(value) : '—';
 let lastMessage = 0;
 const taskStates = {READY: '待启动', RUNNING: '运行中', RECONCILE_REQUIRED: '等待对账',
     COMPLETE: '已完成', ABORTED: '已终止'};
@@ -16,22 +17,45 @@ function render(state) {
     const fresh = state.core_fresh === true;
     const board = fresh && state.connected ? state.board : null;
     const notice = document.getElementById('source');
-    notice.className = `notice ${!fresh ? 'stale' : state.mode === 'sim' ? 'sim' : ''}`;
+    const hasFault = board && (state.mode === 'observer'
+        ? board.state === 5 || board.bus_error !== 0 : board.fault_bits !== 0);
+    notice.className = `notice ${!fresh || hasFault ? 'stale' : state.mode === 'sim' ? 'sim' : ''}`;
     set('source', !fresh ? '控制核心状态过期或未启动' : state.mode === 'sim'
         ? '模拟数据 · 未连接实车，不能作为实机验收' : state.mode === 'offline'
-        ? '离线模式 · 未打开设备' : '实机只读模式 · 动作接口未开放');
+        ? '离线模式 · 未打开设备' : state.mode === 'observer'
+        ? '旧固件实车观察 · 经现有串口所有者读取，GC新协议尚未验收' : '实机只读模式 · 动作接口未开放');
     set('connection', board ? '只读在线' : '状态未知');
     set('message', state.message);
     set('core', fresh ? '运行中' : '状态未知');
-    set('age', `核心 / 设备状态时效：${state.core_age_ms ?? '—'} / ${state.state_age_ms ?? '—'} 毫秒`);
+    set('age', `核心 / 设备状态时效：${ageText(state.core_age_ms)} / ${ageText(state.state_age_ms)} 毫秒`);
     set('firmware', fresh ? state.firmware || '—' : '—');
     set('uptime', `运行时间：${board ? (board.uptime_ms / 1000).toFixed(1) : '—'} 秒`);
-    set('fault', board ? board.fault_bits === 0 ? '无上报故障' : `故障 ${board.fault_bits}` : '未知');
+    set('fault', board ? state.mode === 'observer'
+        ? `${board.state_name ?? board.state} / 总线 ${board.bus_error} / 原因 ${board.reason}`
+        : board.fault_bits === 0 ? '无上报故障' : `故障 ${board.fault_bits}` : '未知');
     set('boot', board ? state.boot_id : '—');
     set('session', board ? state.session_id : '—');
-    set('frames', fresh ? `正确 ${state.rx_good ?? 0} / 错帧 ${state.rx_bad ?? 0}` : '—');
+    set('frames', fresh && state.mode !== 'observer' ? `正确 ${state.rx_good ?? 0} / 错帧 ${state.rx_bad ?? 0}` : '—');
     set('heart', board?.heartbeats);
-    set('key', board ? board.flags & 8 ? '按下（只读）' : '释放' : '未知');
+    set('key', board && Number.isInteger(board.flags) ? board.flags & 8 ? '按下（只读）' : '释放' : '未知');
+    const observed = board && state.mode === 'observer';
+    set('can', observed ? `${board.can_errors} / HAL ${board.can_last_error} / 接收序号 ${board.can_rx_sequence}` : '未接入');
+    const errorEvent = observed ? state.diagnostics?.can_error_event : null;
+    const hex = value => Number.isInteger(value) ? `0x${value.toString(16).toUpperCase()}` : '—';
+    set('can-event', errorEvent?.valid ? `序号 ${errorEvent.sequence}，板时 ${errorEvent.tick_ms} ms，HAL ${hex(errorEvent.hal_error)}，ESR ${hex(errorEvent.esr)}，发送ID ${hex(errorEvent.tx_id)}` : '无有效快照');
+    set('legacy-uart', observed ? `${state.diagnostics?.uart_bad_crc ?? '—'} / ${state.diagnostics?.uart_bad_line ?? '—'}` : '未接入');
+    set('legacy-owner', observed ? `${state.diagnostics?.owner_busy ? '旧服务有其他控制者' : '未报告其他控制者'}；本页不申请控制权` : '未接入');
+    const imu = observed ? state.imu : null;
+    set('imu', imu?.angle_reported ? `${imu.yaw_deg}°（旧服务报告，原设备方向）` : '未知或源报告过期');
+    set('gyro', imu?.gyro_reported ? `${imu.gz_dps} °/s（旧服务报告，原始Z轴）` : '未知或源报告过期');
+    set('stopped', observed ? `原服务报告${state.diagnostics?.source_stopped ? '已停' : '停止未确认'}；本工程实物停稳证据未建立` : '未接入');
+    const wheels = document.getElementById('wheels');
+    wheels.replaceChildren();
+    for (const wheel of observed ? state.wheels ?? [] : []) {
+        const item = document.createElement('li');
+        item.textContent = `地址${wheel.address}：${wheel.speed_reported ? wheel.rpm + ' RPM' : '未知'}；位置 ${wheel.position_reported ? wheel.position + '（原始计数）' : '未知'}；状态 ${wheel.status_reported ? wheel.status : '未知'}（旧服务报告）`;
+        wheels.appendChild(item);
+    }
     const task = fresh && state.task?.domain === 'simulation' ? state.task : null;
     set('task-code', task ? task.code ?? '等待模拟扫码' : '未接入');
     set('task-stage', task ? `${taskStates[task.status] ?? task.status} / ${stageName(task.stage)}` : '未接入');

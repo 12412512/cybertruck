@@ -1,6 +1,6 @@
 # 树莓派程序
 
-当前实现GC只读协议的主控核心及独立FastAPI网页，默认不打开设备。本机Python3.12虚拟环境已安装；树莓派安装、实际串口和新固件尚未现场验收。
+当前实现GC只读协议核心及独立FastAPI网页，默认不打开设备；增加对旧CARCAN13串口所有者的只读观察模式。本机Python3.12虚拟环境已安装；新程序尚未部署树莓派，新GC板端未验收。
 
 核心入口`robot/main.py`，网页入口`robot/web/app.py`。`robot/task.py`为尺寸无关的任务状态机，当前仅接模拟域，不调用执行器。
 
@@ -42,9 +42,29 @@ $env:PYTHONPATH = Join-Path (Get-Location) 'pi'
 
 本次后台预览的进程号记录在`output/preview/processes.json`，可从根目录执行`tools/stop_preview.ps1`停止；脚本先核对进程命令行和本项目预览目录，防止PID复用误停其他程序。
 
-`--mode serial --port <明确设备路径>`为后续实机入口，当前不运行。它只兼容GC-RO新固件，不是旧CARCAN固件的网页替代品。本次未烧录、未连接物理UART、未部署树莓派；`deploy/`未安装服务或配置开机自启。
+`--mode serial --port <明确设备路径>`只兼容GC-RO新固件，当前不能对CARCAN13运行。实车串口当前由旧`car_web`独占，本工程未烧录、未部署Pi服务，不争抢设备；`deploy/`未安装服务或开机自启。
 
 协议、时效和保护边界见[协议说明](../docs/protocol.md)。
+
+## 观察已有实车服务
+
+本轮核对Pi8080的真实所有者与CARCAN13固件后，通过其状态GET合并到新Web，不触发控制权、运动或旧控制保活。独立运行目录避免混入模拟账本：
+
+```powershell
+$env:PYTHONPATH = Join-Path (Get-Location) 'pi'
+.\.venv\Scripts\python.exe -B -m robot.main --mode observer --owner-url http://172.20.10.4:8080 --runtime output/observer
+```
+
+另开终端：
+
+```powershell
+$env:PYTHONPATH = Join-Path (Get-Location) 'pi'
+.\.venv\Scripts\python.exe -B -m robot.web.app --port 8001 --runtime output/observer
+```
+
+访问`http://127.0.0.1:8001/`。本轮已启动本机预览，PID记录于`output/observer/processes.json`；使用`tools/stop_preview.ps1 -Name observer`可核对身份后只停止本机两个进程。手动终端运行用Ctrl+C，不依赖PID文件。旧Pi8080未替换、未停止。
+
+新页展示原始四轮、IMU、CAN快照、串口错误与原服务控制权状态；设备过期立即撤销有效值。真实状态与任务模拟计数隔离；本模式不推进模拟账本或实际任务。合并安排见[Web合并](../docs/web_merge.md)，实测及故障记录见[本轮验收](../docs/motion_readonly.md)。
 
 ## 任务离线联调
 
