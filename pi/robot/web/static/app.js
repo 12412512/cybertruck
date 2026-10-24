@@ -67,6 +67,26 @@ function render(state) {
     set('task-mapping', task ? Object.entries(task.first_layer_by_color).map(([color, ring]) => `颜色${color}→${ring}号`).join('，') || '待确认' : '未接入');
     set('task-progress', task ? `${task.confirmed_steps} / ${task.planned_steps}，账本版本 ${task.revision}` : '未接入');
     set('task-reason', task?.reason || '—');
+    const odom = fresh && state.mode === 'sim' && state.odometry?.domain === 'simulation' ? state.odometry : null;
+    set('odom-status', odom ? `${odom.status} / ${odom.pose.valid ? '模型有效' : '等待或失效'} / 故障 ${odom.pose.fault}` : '未运行');
+    set('odom-pose', odom?.pose.valid ? `${odom.pose.x_m.toFixed(4)} m / ${odom.pose.y_m.toFixed(4)} m / ${(odom.pose.yaw_rad * 180 / Math.PI).toFixed(2)}°（模拟）` : '未知');
+    set('odom-error', Number.isFinite(odom?.error_m) ? `${(odom.error_m * 1000).toFixed(3)} mm（合成模型对照，不代表实车精度）` : '未知');
+    set('odom-timing', odom ? `${odom.pose.tick_ms} ms / ${odom.pose.steps} / ${odom.pose.waits}` : '未接入');
+    set('odom-source', odom ? `${odom.frames} / ${odom.calibration}` : '未接入');
+    const trace = document.getElementById('odom-trace');
+    trace.replaceChildren();
+    if (odom?.pose.valid && odom.history.length > 1) {
+        const points = odom.history;
+        const xs = points.map(point => point.x_m), ys = points.map(point => point.y_m);
+        const left = Math.min(0, ...xs), bottom = Math.min(0, ...ys);
+        const scale = Math.min(560 / Math.max(.2, Math.max(...xs) - left), 200 / Math.max(.2, Math.max(...ys) - bottom));
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        line.setAttribute('points', points.map(point => `${20 + (point.x_m - left) * scale},${220 - (point.y_m - bottom) * scale}`).join(' '));
+        line.setAttribute('fill', 'none');
+        line.setAttribute('stroke', '#3e729f');
+        line.setAttribute('stroke-width', '3');
+        trace.appendChild(line);
+    }
     const events = document.getElementById('events');
     events.replaceChildren();
     for (const message of state.events?.length ? state.events.slice(-10) : ['暂无事件']) {

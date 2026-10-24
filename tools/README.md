@@ -63,3 +63,9 @@ $taskPython = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-ru
 ```
 
 只用既有所有者固定GET，不打开UART、不请求控制权、不发STOP或清故障。窗口0.5～60秒，拒绝覆盖既有证据；原始样本与前后诊断写output。解析实现位于正式`pi/robot/device/can_diag.py`，工具仅组织采样与文件输出。
+
+## 正式C主机模型库
+
+`python -B tools/build_odom.py`将正式Odom/Kin/Yaw/Stamp/反馈编码器构建到`output/native/odometry.dll`（Linux为so）；Zig依赖沿用tests/requirements.txt，不链接HAL、驱动、App或测试实现。`--output`可指定另一个产物文件；Windows旧模型正在运行时先停本机模拟或换新文件。
+
+模型由`robot.main --mode sim --odom-library <库路径>`显式加载，或用`robot.odom_sim`独立回放；不开设备、不自动构建、不在真实模式加载。详细运行与验收见`docs/odometry.md`。

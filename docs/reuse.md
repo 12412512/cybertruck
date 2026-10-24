@@ -55,3 +55,9 @@
 - `Device/imu.*`改编旧智能车`User/Device/imu/imu.c`的11字节格式、校验、重叠移窗同步搬运tick、原始样本、16槽及连续性代号；原SHA256为`1fa9c777a8073684acff1acb8977a3de09757bb044341f9fc44c3d148fd6dfa7`。抽离UART/HAL/全局应用耦合，加入handled时刻与溢出失效，保留原始三轴，不复制未标定量程假设。
 - `can_diag.py`依据旧CAR错误冻结上下文及本地ST寄存器位定义做只读解释。旧`Chassis/can_transport.c`本次SHA256为`a91d49de77b7b5c3bb29ac688bf0cff2da7c58867d4b4ab8c75dff7cd2e67431`，没有迁入其发包/重试/清HAL错误入口。
 - `stamp.*`、`feedback.*`及Python反馈缓存为新接口适配，复用既有GC帧/CRC而不另起传输协议；时间负载先离线验证，不改变当前Comm能力。详细新旧时间语义与物理出口见`feedback_time.md`。
+
+## 连续里程计复用
+
+- `Control/odom.*`迁用旧`User/Chassis/odom.c`的连续轮增量、IMU历史、时效/计数跳变门槛、保留原点和整批提交；来源SHA256为`48607c8c51ac53c313ed225b3e915a23460c151f166575e5fd4c344f9c69d670`。
+- 为避免各轮积分区间不一致，改为四轮历史在共同时间边界插值，再按全部轮/IMU节点分段积分；继续复用正式Kin和Yaw，不复制另一套公式/角度展开。移除HAL/全局轮总线/路测档位，只接显式配置和带代次样本。
+- `device/odometry.py`只做正式C的模型绑定；`odom_sim.py`复用现有C反馈编码、Python GC/CRC和FeedbackCache，独立解析曲线作真值。主控仅sim显式加载，正式代码不导入tests/tools实现；详见`odometry.md`。

@@ -75,6 +75,18 @@
             <p class="muted">本阶段验证通信。设备在线不表示已具备运动或搬运条件。</p>
         </section>
         <section class="panel">
+            <h2>连续里程计 · 离线模型</h2>
+            <p class="muted">仅合成反馈回放。下列位置属于模拟odom，本车真实位姿仍未接入。</p>
+            <dl>
+                <dt>模型状态</dt><dd id="odom-status">未运行</dd>
+                <dt>X / Y / 航向</dt><dd id="odom-pose">未接入</dd>
+                <dt>参考对照差</dt><dd id="odom-error">未接入</dd>
+                <dt>共同时间 / 提交 / 等待</dt><dd id="odom-timing">未接入</dd>
+                <dt>反馈帧 / 数据源</dt><dd id="odom-source">未接入</dd>
+            </dl>
+            <svg id="odom-trace" viewBox="0 0 600 240" role="img" aria-label="模拟里程轨迹，非真实地图"></svg>
+        </section>
+        <section class="panel">
             <h2>离线任务账本</h2>
             <p class="muted">以下任务与计数均来自模拟物料模型，实车成绩未接入。</p>
             <dl>

@@ -88,3 +88,17 @@ Web启动方法不变。完成后保留完整任务码、模拟12/12计数及三
 当前账本为运行目录中的`task.sqlite3`及SQLite附属文件，不进Git。没有`--task-demo`时，核心仅显示已有账本并将未结束轮次置为待对账；独立`task_sim`不填`--code`时只查看，不推进。
 
 显式终止待对账的模拟任务：先停止核心，再执行`python -m robot.task_sim --runtime <同一运行目录> --abort-run <run_id>`，随后可以用`--code`创建新轮次；这是终止旧轮次，不是确认未知动作已成功。详细顺序与限制见[任务离线联调](../docs/task_sim.md)。
+
+## 连续里程计联合模拟
+
+```powershell
+.\.venv\Scripts\python.exe -B tools/build_odom.py
+$env:PYTHONPATH = Join-Path (Get-Location) 'pi'
+.\.venv\Scripts\python.exe -B -m robot.main --mode sim --task-demo '136+321+631+312' --odom-library output/native/odometry.dll --runtime output/preview
+```
+
+网页沿用`--runtime output/preview --port 8000`。本轮已重启本机预览为该组合，SQLite保留历史并新增模拟轮次；停止仍用`tools/stop_preview.ps1`。Windows库被运行中的核心持有时，先停本机模拟再重建，或在构建工具用`--output`指定新文件。
+
+模型通过正式C负载编码、GC拆包/CRC、请求/时间缓存和正式C连续观察器，显示模拟odom、解析对照和近期轨迹。物料任务与里程模型各自标记simulation，NAV仍未接真实场地；顶层真实pose/grabs/places保持未知。`--odom-library`在offline/observer/serial模式均拒绝，主程序不自动编译或加载模型。
+
+只生成离线报告：`python -B -m robot.odom_sim --library output/native/odometry.dll`，默认输出`output/odometry/report.json`。来源、共同时间对齐及未验证项见[连续里程计](../docs/odometry.md)。
