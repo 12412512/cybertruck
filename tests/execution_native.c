@@ -79,3 +79,8 @@ API void Device_Ack(int value) { allow_ack=value; }
 API void Device_Drop(uint32_t value) { drop=value; }
 API void Device_Epoch(uint32_t value) { imu_epoch=value; }
 API void Device_LinkFault(uint32_t value) { Comm_Fault(value); }
+/* 正式参考计划的只读采样，验证整段边界，不导出设备动作接口。 */
+API int Device_Ref(double fraction, RefPoint *point)
+{
+    return Ref_At(&executor.track.plan, executor.track.plan.duration_s * fraction, point);
+}

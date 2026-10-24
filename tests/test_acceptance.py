@@ -19,7 +19,7 @@ class AcceptanceTests(unittest.TestCase):
         records += [dict(kind=kind, address=0, values=[0, 0, 0]) for kind in (4, 5) for _ in range(5)]
         self.link = SimpleNamespace(records=records, decoder=SimpleNamespace(bad=0),
                                     uart_diag=[dict(overflows=0, errors=0, restart_errors=0)] * 2)
-        state = dict(firmware='GC-BASE-0.3.3', boot_id='test', execution=dict(
+        state = dict(firmware='GC-BASE-0.3.4', boot_id='test', execution=dict(
             mode=0, fault=0, action_id=0, action_state=0, config_version=0,
             stop_confirmed=1, can_errors=0, can_rx_sequence=10))
         self.states = [state, deepcopy(state)]

@@ -141,11 +141,21 @@ static int GoalValid(const TrackGoal *goal)
     {
         return 0;
     }
-    /* 首次接入只开放短平移/小转向；斜线属于同一平移算法。
-     * 弧线及整图在短段实测后开放，不能借大参数绕过本阶段门槛。 */
+    /* 短斜线复用平移；首个弧线仅开放固定朝向的已验证小轮廓。
+     * 不开放切线转头、任意弯道或整图，独立位移/航向保护不变。 */
     if (ref->kind == 1)
     {
         return ref->yaw_rad == 0 && hypot(ref->x_m, ref->y_m) >= 0.005;
+    }
+    if (ref->kind == 4)
+    {
+        return ref->x_m == 0 && ref->y_m == 0 && ref->yaw_rad == 0 && ref->tangent == 0 &&
+            ref->path.lead_m == 0.01f && ref->path.tail_m == 0.01f &&
+            ref->path.radius_m == 0.06f && ref->path.blend_m == 0.02f &&
+            ref->path.turn == 1 && ref->path.reverse == 0 && ref->path_heading_rad == 0 &&
+            ref->curve_velocity_m_s > 0 && ref->curve_velocity_m_s <= 0.012f &&
+            ref->linear.velocity <= 0.018f && ref->yaw_begin_m == 0 && ref->yaw_end_m == 0 &&
+            ref->tail_velocity_m_s == 0;
     }
     return ref->kind == 2 && ref->x_m == 0 && ref->y_m == 0 && fabs(ref->yaw_rad) >= 0.01;
 }

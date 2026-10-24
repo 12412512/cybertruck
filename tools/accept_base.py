@@ -70,7 +70,7 @@ def summarize(link, states, requests):
                            status_samples=len(status), rpm_range=[min(speed), max(speed)] if speed else None,
                            position_range=[min(position), max(position)] if position else None,
                            status_values=sorted(set(status))))
-    checks = dict(firmware=latest.get('firmware') == 'GC-BASE-0.3.3',
+    checks = dict(firmware=latest.get('firmware') == 'GC-BASE-0.3.4',
                   no_actions=bool(execution) and all(v['action_id'] == 0 and v['action_state'] == 0
                                                    and v['config_version'] == 0 for v in execution),
                   disabled=bool(execution) and all(v['mode'] == 0 and not v['fault'] for v in execution),

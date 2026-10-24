@@ -68,7 +68,7 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                 record('abort', execution=state, stage=stage)
                 raise ValueError('设备报告故障或动作中断')
             if stage == 'connect' and link.bound and state and (state['mode'] != 0 or state['stop_confirmed']):
-                if link.firmware != 'GC-BASE-0.3.3' or state['mode'] not in (0, 1):
+                if link.firmware != 'GC-BASE-0.3.4' or state['mode'] not in (0, 1):
                     raise ValueError('固件或使能状态不符合冷启动短段入口')
                 record('intent', operation='config', profile=profile)
                 link.submit(CONFIG, config)
@@ -147,7 +147,7 @@ def observe(transport, runtime, seconds, clock=time.monotonic, sleep=time.sleep)
 
 def main():
     parser = argparse.ArgumentParser(description='默认离线准备；显式执行仅一个短段')
-    parser.add_argument('--case', choices=('straight', 'side', 'turn'), default='straight')
+    parser.add_argument('--case', choices=('straight', 'side', 'turn', 'diagonal', 'arc'), default='straight')
     parser.add_argument('--profile', type=Path, default=Path('config/base_trials.json'))
     parser.add_argument('--runtime', type=Path, default=Path('output/base-trials'))
     parser.add_argument('--owner-url', default='http://172.20.10.4:8080')

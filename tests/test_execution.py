@@ -22,6 +22,7 @@ from robot.track_sim import Plant
 from robot.web.app import create_app
 from robot.runtime import save_snapshot, load_snapshot
 from robot.device.feedback import Feedback, FEEDBACK
+from robot.device.tracking import Reference
 
 
 def profile():
@@ -139,6 +140,7 @@ class ExecutionTests(unittest.TestCase):
         cls.lib.Device_Target.argtypes = [c.POINTER(c.c_int16)]
         cls.lib.Device_Value.argtypes = [c.c_uint]
         cls.lib.Device_Value.restype = c.c_uint32
+        cls.lib.Device_Ref.argtypes = [c.c_double, c.POINTER(Reference)]
 
     def setUp(self):
         self.device = Device(self.lib)
@@ -203,6 +205,41 @@ class ExecutionTests(unittest.TestCase):
         self.assertNotEqual(self.device.call(GOAL, bytes(goal)).payload[0], p.OK)
         struct.pack_into('<I', goal, 8, 3)
         self.assertNotEqual(self.device.call(GOAL, bytes(goal)).payload[0], p.OK)
+
+    def test_only_bounded_fixed_heading_arc_is_accepted(self):
+        import struct
+        self.device.arm()
+        # 不扩大总类权限：只接受这一轮已验算的小弧线，禁止任意半径或转姿。
+        for offset, code, value in ((8, 'I', 3), (8, 'I', 5), (12, 'f', .01),
+                                    (20, 'f', .1), (24, 'f', .02), (32, 'f', .07),
+                                    (32, 'f', float('nan')), (40, 'i', -1), (44, 'i', 1),
+                                    (48, 'f', .025), (72, 'I', 1), (76, 'f', .1),
+                                    (80, 'f', .02), (92, 'f', .001)):
+            goal = bytearray(trial('arc'))
+            struct.pack_into('<' + code, goal, offset, value)
+            self.assertNotEqual(self.device.call(GOAL, bytes(goal)).payload[0], p.OK)
+        self.assertEqual(self.device.call(GOAL, trial('arc')).payload[0], p.OK)
+
+    def test_arc_reference_stays_within_geometry_and_motion_limits(self):
+        self.device.arm()
+        self.assertEqual(self.device.call(GOAL, trial('arc')).payload[0], p.OK)
+        point = Reference()
+        maximum = dict(velocity=0., acceleration=0., jerk=0., wheel_rpm=0.)
+        for index in range(3001):
+            self.assertEqual(self.lib.Device_Ref(index / 3000, c.byref(point)), 1)
+            self.assertLessEqual(math.hypot(point.x_m, point.y_m), .15)
+            self.assertGreaterEqual(point.x_m, -1e-6)
+            self.assertGreaterEqual(point.y_m, -1e-6)
+            self.assertAlmostEqual(point.yaw_rad, 0.)
+            maximum['velocity'] = max(maximum['velocity'], math.hypot(point.vx_m_s, point.vy_m_s))
+            maximum['acceleration'] = max(maximum['acceleration'], math.hypot(point.ax_m_s2, point.ay_m_s2))
+            maximum['jerk'] = max(maximum['jerk'], math.hypot(point.jx_m_s3, point.jy_m_s3))
+            maximum['wheel_rpm'] = max(maximum['wheel_rpm'],
+                                       (abs(point.vx_m_s) + abs(point.vy_m_s)) * 60 / (2 * math.pi * .05))
+        for key, limit in dict(velocity=.018, acceleration=.08, jerk=.3, wheel_rpm=6).items():
+            self.assertLessEqual(maximum[key], limit * 1.0003, (key, maximum[key]))
+        report = dict(maximum=maximum, target_m_rad=[point.x_m, point.y_m, point.yaw_rad], samples=3001)
+        (ROOT / 'output/tests/arc-reference.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
 
     def test_imu_sign_missing_blocks_before_serial(self):
         value = profile()
@@ -327,9 +364,9 @@ class ExecutionTests(unittest.TestCase):
         self.assertNotEqual(self.lib.Device_Value(5), 4)
         self.assertEqual(sum(v.kind == GOAL for v in transport.requests), 1)
 
-    def test_real_core_protocol_runs_three_short_cases_offline(self):
+    def test_real_core_protocol_runs_short_cases_offline(self):
         summary = []
-        for case in ('straight', 'side', 'turn'):
+        for case in ('straight', 'side', 'turn', 'diagonal', 'arc'):
             transport = SimTransport(self.lib)
             records = []
             with tempfile.TemporaryDirectory() as directory:
