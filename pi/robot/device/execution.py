@@ -59,7 +59,7 @@ def trials():
                     ('straight', [.10, 0, 0]), ('side', [0, .08, 0]),
                     ('turn', [0, 0, math.radians(10)]))],
                 next_cases=['diagonal', 'arc', 'whole_route'],
-                blockers=['尚未烧录GC-BASE-0.3.0', '需核对配置与现场条件',
+                blockers=['需核对板端GC-BASE-0.3.3与现场条件',
                           '整图及弧线暂不开放，模拟页面不向实车下发'])
 
 

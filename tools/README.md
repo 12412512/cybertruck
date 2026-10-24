@@ -80,3 +80,11 @@ $taskPython = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-ru
 提速节点须重建到`output/native/speed.dll`以取得正式C转姿区间上界。`tools/tune_nav.py --library output/native/speed.dll --output output/speed/region`对照六场景；`--case`选择单个或多个，`--collect`核对版本并汇总，支持不同case并行留证。当前区域返航不要求原中心或朝向，历史对照可传`--fixed-return-position --fixed-return-heading`，详见`docs/speed.md`。
 
 弯道版改建`output/native/corners.dll`，新增正式几何导数限速查询。`tools/tune_corners.py --library output/native/corners.dll --output output/corners/release`固定0.30m/s对照旧策略、窗口优化、转姿角速及两起点；case可并行，collect核对哈希/数据域/同速口径。独立回放可用`--legacy-corners`与`--turn-rate`，仅模拟，不改实车配置。上电只读留证继续复用`inspect_can.py`，见`docs/field_test.md`。
+
+## 板端识别、烧录与只读验收
+
+可选烧录依赖在`requirements-flash.txt`，不属于树莓派运行依赖。`flash_base.py`默认只读识别，显式`--program`还必须绑定探针、芯片UID及本次HEX SHA256；写前完整备份，写后全部有效字节读回，再复位运行。不得把旧DFP的CCM当作可执行下载RAM。`make_flash_pack.py`生成独立修正包，不修改本机源设备包。
+
+`accept_base.py`须在旧所有者停用、当前串口明确后运行；仅发送白名单查询与保活，无配置、使能、运动或清故障。输出文件拒绝覆盖，任何判据失败均非零退出。当前串口打开可能使板复位，正式open_transport静默500ms后才允许握手，仍重新绑定boot/session。
+
+本次已执行命令、包来源、恢复边界、Pi部署及证据见[板端记录](../docs/board_readonly.md)。输出路径仅为本次证据，重做要用新的目录及新编译摘要，不能直接重复复制烧录命令。

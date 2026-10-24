@@ -1,0 +1,308 @@
+{
+  "date": "2026-10-24",
+  "base_commit": "93277e2",
+  "milestone_tag": "v0.14.0-board-readonly",
+  "firmware": "GC-BASE-0.3.3",
+  "configuration_version": 2,
+  "configuration_applied": false,
+  "source_sha256": {
+    "firmware/User/Board/port.c": "c4bf0cae6f73e89345213a1055a865775b8b3c6166e888e54659540e1561ac51",
+    "firmware/User/Board/port.h": "9dc9615e1b73dbf8aa835f1a7c655c7179d5e119e71f5556c3b4a89ac0af397f",
+    "firmware/User/Board/base_port.c": "bf1950786860de78d8241ff32baa8546f0c2cb35f89e0163924f770d9bfcdba3",
+    "firmware/User/Comm/comm.c": "0dab066ae5966ba285385b96de89079a827bb551a7c5acab7dc55d600d8824a2",
+    "pi/robot/main.py": "f55987748799759a05f18aff0eefbfe28ca819b37348e117cf1622fef524c04e",
+    "pi/robot/drive_core.py": "08fac0134a0cd8081ebeb855a04a794b5a416aa78a69e12d608926dc40a3c42b",
+    "pi/robot/device/execution.py": "4f23af54b5ad7f5ca6219eca0b2de6861426b972173e15cb5c4b3b6c9e4f7fd5",
+    "tools/accept_base.py": "d1c86a003419b22e0a74a74242fdede1faa60709bc6bd6416671c385a7076385",
+    "tools/flash_base.py": "619fbd0df4f53ad28f19813866c75c2302a6eaa54bea5f28d1df925ff3378e49",
+    "tools/make_flash_pack.py": "93613f53845e5c3e8ca2a5cda3b3734696ec7ad869f9682af236530edcb047cf"
+  },
+  "evidence": [
+    {
+      "path": "output/flash/program_20261024/manifest.json",
+      "bytes": 620,
+      "sha256": "f32b437fe51cfc7783268dd55504f255aac5f27238acd20a8bb7f97625755387"
+    },
+    {
+      "path": "output/flash/program_031_20261024/manifest.json",
+      "bytes": 620,
+      "sha256": "98324d07b9a79600a9d496ae7efafbafa3a872378b50dce365328eb6de436477"
+    },
+    {
+      "path": "output/flash/program_031_sram_20261024/manifest.json",
+      "bytes": 820,
+      "sha256": "88d3052b7a19f802d26090c65f08b449cb53e22fb95071b455070c52b78946d4"
+    },
+    {
+      "path": "output/flash/program_032_20261024/manifest.json",
+      "bytes": 820,
+      "sha256": "df54f32a6f1a07d1af64464517370fb94b8f635d07e749e8c173e4ed37fc1cad"
+    },
+    {
+      "path": "output/flash/program_033_20261024/manifest.json",
+      "bytes": 820,
+      "sha256": "d81f67a396463d9fd7048983addf6391b6379f429ce0c97bed1cc93ea3a7c9d9"
+    },
+    {
+      "path": "output/flash/execution-033-tests.log",
+      "bytes": 3242,
+      "sha256": "07136f357bcc12dffabf884b3286dd8f69736f6df8da39765e108cd7383c7ed9"
+    },
+    {
+      "path": "output/flash/readonly-033-tests.log",
+      "bytes": 3243,
+      "sha256": "885a728ed4ce9be482e596404aaeac930215f4a294b0b3096aef0febd309f9bf"
+    },
+    {
+      "path": "output/flash/accept-tool-tests.log",
+      "bytes": 1165,
+      "sha256": "d58eafac5159763443ffa1e9d517d833f210ecc78e954f17b76ff03c9a1a75f3"
+    },
+    {
+      "path": "output/flash/pi/acceptance_031.json",
+      "bytes": 1036466,
+      "sha256": "32c934be7586f424b70ef04c7ad1a75be5ba8a35a1b8810aaade83b667cf4f31"
+    },
+    {
+      "path": "output/flash/pi/acceptance_031.log",
+      "bytes": 11102,
+      "sha256": "0948137653c8806ab680fa0b8782968fbf9b4553dc6097351b094744d16befc2"
+    },
+    {
+      "path": "output/flash/pi/acceptance_032.json",
+      "bytes": 1031091,
+      "sha256": "3acfcdd0ed24d70dd851180cbb1220a7f062f0079395562475dcda50fd0b7a61"
+    },
+    {
+      "path": "output/flash/pi/acceptance_032.log",
+      "bytes": 11467,
+      "sha256": "42a8ec8c3163b6932094aaa38164880c32ec994e867e9ab1a1ee5f9e147719e6"
+    },
+    {
+      "path": "output/flash/pi/acceptance_033.json",
+      "bytes": 1030469,
+      "sha256": "f33e21a2bed3e8ff57576d651329f0423c054e53a6512027dab44f62e3236711"
+    },
+    {
+      "path": "output/flash/pi/acceptance_033.log",
+      "bytes": 11473,
+      "sha256": "8a49b2c0cd474b4fed466a620fdf776709b6f015f1fc2a62041893919fac246f"
+    },
+    {
+      "path": "output/flash/pi/acceptance_033_settle.json",
+      "bytes": 1029584,
+      "sha256": "760aa0f9787735314805a49a5434896f34768f4f831af2f344aa5e7c294dfd03"
+    },
+    {
+      "path": "output/flash/pi/acceptance_033_settle.log",
+      "bytes": 11499,
+      "sha256": "24829524c0f9ff1d7c6a7f4a7e81eb074e4a6d119c542b93bd9346dc988ad488"
+    }
+  ],
+  "acceptance": {
+    "passed": true,
+    "checks": {
+      "firmware": true,
+      "no_actions": true,
+      "disabled": true,
+      "startup_stop": true,
+      "can_healthy": true,
+      "can_advancing": true,
+      "wheel_feedback": true,
+      "imu_feedback": true,
+      "readonly_commands": true,
+      "uart_clean": true,
+      "crc_clean": true
+    },
+    "wheels": [
+      {
+        "address": 1,
+        "speed_samples": 15,
+        "position_samples": 15,
+        "status_samples": 15,
+        "rpm_range": [
+          0,
+          0
+        ],
+        "position_range": [
+          15207,
+          15207
+        ],
+        "status_values": [
+          3
+        ]
+      },
+      {
+        "address": 2,
+        "speed_samples": 15,
+        "position_samples": 15,
+        "status_samples": 15,
+        "rpm_range": [
+          0,
+          0
+        ],
+        "position_range": [
+          -8485,
+          -8479
+        ],
+        "status_values": [
+          3
+        ]
+      },
+      {
+        "address": 3,
+        "speed_samples": 15,
+        "position_samples": 15,
+        "status_samples": 14,
+        "rpm_range": [
+          0,
+          0
+        ],
+        "position_range": [
+          13569,
+          13571
+        ],
+        "status_values": [
+          3
+        ]
+      },
+      {
+        "address": 4,
+        "speed_samples": 14,
+        "position_samples": 14,
+        "status_samples": 14,
+        "rpm_range": [
+          0,
+          0
+        ],
+        "position_range": [
+          -8473,
+          -8473
+        ],
+        "status_values": [
+          3
+        ]
+      }
+    ],
+    "can_rx_delta": 5994,
+    "firmware": "GC-BASE-0.3.3",
+    "boot_id": "dccfd638ecf0fccf",
+    "uart_diag": [
+      {
+        "rx_bytes": 67370,
+        "overflows": 0,
+        "errors": 0,
+        "restart_errors": 0,
+        "first_error_code": 0,
+        "first_error_ms": 0,
+        "last_error_code": 0,
+        "last_error_ms": 0,
+        "startup_flags": 0
+      },
+      {
+        "rx_bytes": 33396,
+        "overflows": 0,
+        "errors": 0,
+        "restart_errors": 0,
+        "first_error_code": 0,
+        "first_error_ms": 0,
+        "last_error_code": 0,
+        "last_error_ms": 0,
+        "startup_flags": 0
+      }
+    ],
+    "requests": {
+      "1": 1,
+      "2": 1,
+      "3": 277,
+      "35": 545,
+      "16": 719,
+      "36": 30,
+      "4": 369,
+      "5": 93
+    },
+    "states": 294,
+    "feedback_samples": 718,
+    "first_execution": {
+      "mode": 0,
+      "fault": 0,
+      "action_id": 0,
+      "action_state": 0,
+      "action_fault": 0,
+      "stop_confirmed": 1,
+      "board_ms": 535,
+      "config_version": 0,
+      "can_errors": 0,
+      "can_rx_sequence": 110,
+      "odom_valid": 0,
+      "x_m": 0.0,
+      "y_m": 0.0,
+      "yaw_rad": 0.0,
+      "position_error_m": 0.0,
+      "yaw_error_rad": 0.0,
+      "fl_rpm": 0.0,
+      "fr_rpm": 0.0,
+      "rl_rpm": 0.0,
+      "rr_rpm": 0.0,
+      "mode_name": "DISABLED",
+      "action_name": "IDLE"
+    },
+    "last_execution": {
+      "mode": 0,
+      "fault": 0,
+      "action_id": 0,
+      "action_state": 0,
+      "action_fault": 0,
+      "stop_confirmed": 1,
+      "board_ms": 30508,
+      "config_version": 0,
+      "can_errors": 0,
+      "can_rx_sequence": 6104,
+      "odom_valid": 0,
+      "x_m": 0.0,
+      "y_m": 0.0,
+      "yaw_rad": 0.0,
+      "position_error_m": 0.0,
+      "yaw_error_rad": 0.0,
+      "fl_rpm": 0.0,
+      "fr_rpm": 0.0,
+      "rl_rpm": 0.0,
+      "rr_rpm": 0.0,
+      "mode_name": "DISABLED",
+      "action_name": "IDLE"
+    },
+    "physical_direction": "沿用用户顺时针增加确认；本次只读静止，实体转向响应留到短转验证"
+  },
+  "not_verified": [
+    "实车距离/转向响应及精度",
+    "完整外形与地图配准",
+    "斜线/弧线/整图实车执行",
+    "机构与真实成功计数"
+  ],
+  "pi_deployed_sha256": {
+    "pi/robot/main.py": "f55987748799759a05f18aff0eefbfe28ca819b37348e117cf1622fef524c04e",
+    "pi/robot/drive_core.py": "08fac0134a0cd8081ebeb855a04a794b5a416aa78a69e12d608926dc40a3c42b",
+    "pi/robot/device/execution.py": "4f23af54b5ad7f5ca6219eca0b2de6861426b972173e15cb5c4b3b6c9e4f7fd5",
+    "pi/robot/web/static/app.js": "d1b651655e43d4dfcae55b3ea8ea6514cefac6f883b24df2863149b3ee317e04",
+    "tools/accept_base.py": "d1c86a003419b22e0a74a74242fdede1faa60709bc6bd6416671c385a7076385"
+  },
+  "pi_remote_hash_assertion_passed": true,
+  "tests": {
+    "execution": 22,
+    "readonly": 23,
+    "acceptance_and_startup": 9,
+    "static_checks": 941,
+    "keil_errors": 0,
+    "keil_warnings": 0
+  },
+  "service_state": {
+    "old_car_web": "inactive/disabled",
+    "observer": "active/transient/3600s",
+    "new_web": "active/transient/8081",
+    "serial_owners": 1
+  },
+  "acceptance_identity_audit": {
+    "unique_boot_ids": 1,
+    "mcu_time_monotonic": true
+  }
+}

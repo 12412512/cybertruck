@@ -3,6 +3,7 @@
 #include "usart.h"
 #include "rng.h"
 #include "main.h"
+#include <string.h>
 
 #define RX_CAPACITY 512U
 
@@ -19,6 +20,7 @@ static volatile uint16_t imu_head, imu_tail;
 static volatile uint8_t imu_error;
 static uint32_t imu_source = 1;
 static ImuParser imu;
+static volatile PortDiag diagnostics[2];
 
 void Port_Init(void)
 {
@@ -33,25 +35,41 @@ void Port_Init(void)
     }
     Comm_Init(boot, HAL_GetTick());
     Imu_Init(&imu, imu_source);
+    /* 外部串口先于本机启动时可能已有ORE/FE；仅首次挂接前丢弃残留字节。
+     * 开始接收后所有错误仍记录、失效会话并停止，不清除运行期锁存。 */
+    diagnostics[0].startup_flags = huart1.Instance->SR & (USART_SR_ORE | USART_SR_NE | USART_SR_FE);
+    diagnostics[1].startup_flags = huart2.Instance->SR & (USART_SR_ORE | USART_SR_NE | USART_SR_FE);
+    __HAL_UART_CLEAR_OREFLAG(&huart1);
+    __HAL_UART_CLEAR_OREFLAG(&huart2);
     if (HAL_UART_Receive_IT(&huart1, &rx_byte, 1) != HAL_OK)
     {
         rx_error = 1;
+        diagnostics[0].restart_errors++;
     }
     if (HAL_UART_Receive_IT(&huart2, &imu_byte, 1) != HAL_OK)
     {
         imu_error = 1;
+        diagnostics[1].restart_errors++;
     }
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *uart)
 {
     uint16_t next;
+    /* 复用旧工程的错误交接：坏字节不入队，不在HAL错误分支内重挂接。
+     * Receive_IT会清ErrorCode；此处重挂接会掩盖错误并干扰HAL终止接收。 */
+    if (HAL_UART_GetError(uart) != HAL_UART_ERROR_NONE)
+    {
+        return;
+    }
     if (uart == &huart2)
     {
+        diagnostics[1].rx_bytes++;
         next = (uint16_t)((imu_head + 1U) % RX_CAPACITY);
         if (next == imu_tail)
         {
             imu_error = 1;
+            diagnostics[1].overflows++;
         }
         else
         {
@@ -63,6 +81,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *uart)
         if (HAL_UART_Receive_IT(&huart2, &imu_byte, 1) != HAL_OK)
         {
             imu_error = 1;
+            diagnostics[1].restart_errors++;
         }
         return;
     }
@@ -70,10 +89,12 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *uart)
     {
         return;
     }
+    diagnostics[0].rx_bytes++;
     next = (uint16_t)((rx_head + 1U) % RX_CAPACITY);
     if (next == rx_tail)
     {
         rx_error = 1;
+        diagnostics[0].overflows++;
     }
     else
     {
@@ -85,11 +106,25 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *uart)
     if (HAL_UART_Receive_IT(&huart1, &rx_byte, 1) != HAL_OK)
     {
         rx_error = 1;
+        diagnostics[0].restart_errors++;
     }
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *uart)
 {
+    unsigned index;
+    if (uart == &huart1 || uart == &huart2)
+    {
+        index = uart == &huart1 ? 0U : 1U;
+        if (!diagnostics[index].errors)
+        {
+            diagnostics[index].first_error_code = uart->ErrorCode;
+            diagnostics[index].first_error_ms = HAL_GetTick();
+        }
+        diagnostics[index].errors++;
+        diagnostics[index].last_error_code = uart->ErrorCode;
+        diagnostics[index].last_error_ms = HAL_GetTick();
+    }
     if (uart == &huart1)
     {
         rx_error = 1;
@@ -98,6 +133,15 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *uart)
     {
         imu_error = 1;
     }
+}
+
+uint16_t Port_Diag(uint8_t *data)
+{
+    uint32_t mask = __get_PRIMASK();
+    __disable_irq();
+    memcpy(data, (const void *)diagnostics, sizeof(diagnostics));
+    __set_PRIMASK(mask);
+    return sizeof(diagnostics);
 }
 
 int Port_Imu(ImuSample *sample)

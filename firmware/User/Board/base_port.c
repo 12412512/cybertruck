@@ -161,6 +161,11 @@ static uint8_t Command(uint8_t type, const uint8_t *data, uint16_t size, uint8_t
                        uint32_t now)
 {
     uint32_t configured = executor.config.version;
+    if (type == 36 && size == 0)
+    {
+        *reply_size = Port_Diag(reply);
+        return COMM_OK;
+    }
     if (startup_pending && type != EXEC_STATE && type != 16)
     {
         return COMM_BUSY;
@@ -208,7 +213,7 @@ static void Query(uint32_t now)
     BusFrame frames[2];
     uint8_t count;
     const uint8_t kinds[3] = {0x35, 0x36, 0x3A};
-    if (diag_busy || (executor.mode == EXEC_DISABLED && !startup_pending) || executor.mode == EXEC_READY ||
+    if (diag_busy || executor.mode == EXEC_READY ||
         executor.mode == EXEC_ACTIVE || (uint32_t)(now - query_ms) < 5)
     {
         return;

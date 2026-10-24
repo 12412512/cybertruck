@@ -1,6 +1,6 @@
 # GC协议1：只读阶段
 
-此页保留GC-RO-0.2.0历史基线。新固件GC-BASE-0.3.0增加受控短段能力，能力位为5；独立MotionLink核对该能力，默认只读Link仍要求1。新增0x20～0x23、配置52字节/目标96字节/执行状态80字节，见[执行接入](execution.md)。STOP回复成功只代表已接受停止，物理停止仍需单独状态证据。
+此页保留GC-RO-0.2.0历史基线。新固件GC-BASE-0.3.3增加受控短段能力，能力位为5；独立MotionLink核对该能力，默认只读Link仍要求1。新增0x20～0x23、配置52字节/目标96字节/执行状态80字节，见[执行接入](execution.md)。STOP回复成功只代表已接受停止，物理停止仍需单独状态证据。
 
 此版用于新工程与只读控制台，不兼容旧CARCAN文本协议、旧搬运车AA55协议或CYQM雷达LR协议。复用的是COBS算法、有界解码、唯一设备所有权和时效检查，未复用旧报文语义。
 
@@ -61,4 +61,4 @@
 
 FastAPI/WebSocket接口依据[官方WebSocket文档](https://fastapi.tiangolo.com/advanced/websockets/)；串口独占与超时依据[pySerial API](https://pyserial.readthedocs.io/en/latest/pyserial_api.html)。本版仅提供GET状态与WebSocket推送，没有参数写入、建零、使能或运动HTTP接口。
 
-接收/处理/上报时间负载V1规范见[反馈时间链](feedback_time.md)。历史能力1的type0x10仅预留；新能力5已通过Execute_Command/MotionLink开放两字节kind/address选择查询，复用56字节负载及原时效验证。CARCAN13仍不支持该新负载，新固件尚未烧录，不能将主机通过称为板端在线支持。
+接收/处理/上报时间负载V1规范见[反馈时间链](feedback_time.md)。历史能力1的type0x10仅预留；新能力5已通过Execute_Command/MotionLink开放两字节kind/address选择查询，复用56字节负载及原时效验证。CARCAN13仍不支持该新负载，新固件已烧录并通过静止只读时间链验收，见[板端记录](board_readonly.md)；实物运动仍待验证。

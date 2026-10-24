@@ -124,7 +124,7 @@ static void Dispatch(const Frame *frame, uint32_t now_ms)
         Frame_Put(data + 4, executor.command ? 5U : 1U, 4);
         if (executor.command)
         {
-            memcpy(data + 8, "GC-BASE-0.3.0", sizeof("GC-BASE-0.3.0"));
+            memcpy(data + 8, "GC-BASE-0.3.3", sizeof("GC-BASE-0.3.3"));
         }
         else
         {
@@ -179,7 +179,7 @@ static void Dispatch(const Frame *frame, uint32_t now_ms)
         Reply(frame, COMM_SESSION, 0, 0);
         return;
     }
-    if (executor.command && (frame->type == 16 || (frame->type >= 32 && frame->type <= 35)))
+    if (executor.command && (frame->type == 16 || (frame->type >= 32 && frame->type <= 36)))
     {
         result = executor.command(frame->type, frame->data, frame->size, data, &size, now_ms);
         Reply(frame, result, data, size);

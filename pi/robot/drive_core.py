@@ -68,7 +68,7 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                 record('abort', execution=state, stage=stage)
                 raise ValueError('设备报告故障或动作中断')
             if stage == 'connect' and link.bound and state and (state['mode'] != 0 or state['stop_confirmed']):
-                if link.firmware != 'GC-BASE-0.3.0' or state['mode'] not in (0, 1):
+                if link.firmware != 'GC-BASE-0.3.3' or state['mode'] not in (0, 1):
                     raise ValueError('固件或使能状态不符合冷启动短段入口')
                 record('intent', operation='config', profile=profile)
                 link.submit(CONFIG, config)

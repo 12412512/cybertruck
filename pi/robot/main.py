@@ -25,10 +25,17 @@ def open_transport(mode, port):
     if os.name != 'nt':
         options['exclusive'] = True
     device = serial.Serial(**options)
-    # 禁止主动切换DTR/RTS复位外设；USB驱动自身枚举行为仍需实机验证。
+    # 打开前设定控制线，不在会话中切换。当前USB接线打开时仍可能使板复位。
     device.dtr = device.rts = False
     device.port = port
     device.open()
+    # 实测立即发HELLO可撞上复位后的UART初始化，产生第0毫秒帧错误。
+    # 先静默等待启动稳定；期间不发字节，不清故障，也不沿用旧启动身份。
+    try:
+        time.sleep(.5)
+    except BaseException:
+        device.close()
+        raise
     return device
 
 
