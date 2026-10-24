@@ -60,6 +60,16 @@ def load_snapshot(path, now=None):
             raise ValueError('快照阶段或模式不符')
         state['core_fresh'] = True
         state['core_age_ms'] = int(age * 1000)
+        execution_age = state.get('execution_age_ms')
+        if isinstance(execution_age, (int, float)):
+            state['execution_age_ms'] = execution_age + age * 1000
+            if not 0 <= state['execution_age_ms'] < 250:
+                state['execution'] = None
+        if isinstance(state.get('raw_imu'), dict):
+            state['raw_imu'] = {key: dict(sample, age_ms=sample['age_ms'] + age * 1000)
+                                for key, sample in state['raw_imu'].items()
+                                if type(sample.get('age_ms')) in (int, float)
+                                and 0 <= sample['age_ms'] + age * 1000 < 250}
         if state.get('connected') is True:
             device_age = state.get('state_age_ms')
             if (type(device_age) not in (int, float) or not math.isfinite(device_age)

@@ -8,7 +8,8 @@ from . import protocol as p
 
 
 class Link:
-    def __init__(self):
+    def __init__(self, capabilities=1):
+        self.capabilities = capabilities
         self.decoder = p.Decoder()
         self.events = deque(maxlen=32)
         self.request = 0
@@ -56,6 +57,8 @@ class Link:
             self.progress = (self.progress + 1) & 0xFFFFFFFF
             kind, payload = p.HEART, struct.pack('<I', self.progress)
             self.last_heart = now
+        elif (extra := self.extra_request(now)) is not None:
+            kind, payload = extra
         elif now - self.last_state >= .05:
             kind, payload = p.STATE, b''
             self.last_state = now
@@ -75,11 +78,13 @@ class Link:
         for packet in self.decoder.feed(data):
             if not self.pending:
                 continue
-            request, _ = self.pending
+            request, sent = self.pending
             if (packet.kind, packet.request, packet.session) != (
                     request.kind | 0x80, request.request, request.session):
                 continue
             self.pending = None
+            if self.custom_reply(packet, request, now, sent):
+                continue
             if not packet.payload or packet.payload[0] != p.OK:
                 self.reset('设备拒绝请求，等待重新握手')
                 continue
@@ -89,7 +94,7 @@ class Link:
                     self.reset('设备启动身份或HELLO长度无效')
                     continue
                 generation, capabilities = struct.unpack_from('<II', payload)
-                if capabilities != 1:
+                if capabilities != self.capabilities:
                     self.reset('设备能力不符合当前只读阶段')
                     continue
                 self.boot, self.generation = packet.boot, generation
@@ -124,6 +129,12 @@ class Link:
                 self.diagnostics = dict(tx_replaced=dropped, generation=generation)
             elif request.kind == p.HEART and payload:
                 self.reset('HEART应答长度无效')
+
+    def extra_request(self, now):
+        return None
+
+    def custom_reply(self, packet, request, now, sent=None):
+        return False
 
     def snapshot(self, now):
         age = None if self.state_at is None else max(0, int((now - self.state_at) * 1000))

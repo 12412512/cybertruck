@@ -22,6 +22,7 @@
 #include "stm32f4xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "can_tx.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -207,6 +208,7 @@ void SysTick_Handler(void)
 void CAN1_TX_IRQHandler(void)
 {
   /* USER CODE BEGIN CAN1_TX_IRQn 0 */
+  Can_Irq();
 
   /* USER CODE END CAN1_TX_IRQn 0 */
   HAL_CAN_IRQHandler(&hcan1);
@@ -221,6 +223,7 @@ void CAN1_TX_IRQHandler(void)
 void CAN1_RX0_IRQHandler(void)
 {
   /* USER CODE BEGIN CAN1_RX0_IRQn 0 */
+  Can_Irq();
 
   /* USER CODE END CAN1_RX0_IRQn 0 */
   HAL_CAN_IRQHandler(&hcan1);
@@ -235,6 +238,7 @@ void CAN1_RX0_IRQHandler(void)
 void CAN1_SCE_IRQHandler(void)
 {
   /* USER CODE BEGIN CAN1_SCE_IRQn 0 */
+  Can_Irq();
 
   /* USER CODE END CAN1_SCE_IRQn 0 */
   HAL_CAN_IRQHandler(&hcan1);

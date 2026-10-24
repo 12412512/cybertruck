@@ -14,7 +14,14 @@ enum
     COMM_EXPIRED = 4, COMM_FORMAT = 5, COMM_READONLY = 6
 };
 
-/* 仅实现通信。无电机、PWM、建零、运动或成功计数接口。 */
+/* 默认仍为只读；App可绑定唯一执行器，测试和只读设备不绑定。 */
+typedef struct
+{
+    void (*stop)(uint32_t reason, uint32_t now_ms);
+    uint8_t (*command)(uint8_t type, const uint8_t *data, uint16_t size,
+                       uint8_t *reply, uint16_t *reply_size, uint32_t now_ms);
+} CommHooks;
+void Comm_Bind(CommHooks hooks);
 void Comm_Init(uint64_t boot, uint32_t now_ms);
 void Comm_Tick(uint32_t now_ms, uint8_t key_pressed);
 void Comm_Feed(uint8_t byte, uint32_t received_ms, uint32_t now_ms);

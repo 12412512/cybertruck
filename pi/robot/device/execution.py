@@ -1,0 +1,173 @@
+"""短段执行协议；复用Link会话/保活，仅显式命令能配置、使能和运动。"""
+
+import math
+import struct
+
+from . import protocol as p
+from .link import Link
+from .feedback import Feedback, FEEDBACK
+
+CONFIG, ARM, GOAL, STATUS = range(32, 36)
+CONFIG_DATA = struct.Struct('<I3fIfifff4B4b4b')
+STATUS_DATA = struct.Struct('<11I9f')
+SPEC_DATA = struct.Struct('<I3f4f2i6fI5f')
+MODE = ('DISABLED', 'OBSERVING', 'ARMING', 'READY', 'ACTIVE', 'STOPPING', 'LOCKED')
+ACTION = ('IDLE', 'ACCEPTED', 'RUNNING', 'SETTLING', 'COMPLETE', 'FAILED', 'CANCELLED')
+
+
+def config_payload(profile):
+    """配置候选必须显式补齐方向；不由模拟值或网页图标生成。"""
+    if (profile.get('domain') != 'commissioning' or type(profile.get('yaw_sign')) is not int
+            or profile['yaw_sign'] not in (-1, 1)):
+        raise ValueError('试验配置缺少明确的IMU方向；不得用模拟值补齐')
+    geometry = [profile[key] for key in ('wheel_radius_m', 'half_length_m', 'half_width_m')]
+    if any(type(v) not in (int, float) or not math.isfinite(v) or not 0 < v <= .5 for v in geometry):
+        raise ValueError('试验几何无效')
+    counts, maximum = profile['counts_per_rev'], profile['max_rpm']
+    if counts != 65536 or type(maximum) is not int or not 1 <= maximum <= 10:
+        raise ValueError('反馈单位或试验轮速不符合本阶段范围')
+    addresses = profile['addresses']
+    if (len(addresses) != 4 or len(set(addresses)) != 4
+            or any(type(v) is not int or not 1 <= v <= 255 for v in addresses)):
+        raise ValueError('轮地址无效')
+    signs = profile['command_sign'] + profile['feedback_sign']
+    if len(signs) != 8 or any(type(v) is not int or v not in (-1, 1) for v in signs):
+        raise ValueError('轮极性无效')
+    return CONFIG_DATA.pack(profile['version'], *geometry, 1, counts, profile['yaw_sign'],
+                            profile['angle_scale_rad'], profile['gyro_scale_rad_s'], maximum,
+                            *addresses, *signs)
+
+
+def trial(name, action_id=1):
+    """目标相对动作开始的车体，X前/Y左/逆时针正；不表示实测通过。"""
+    options = {'straight': (1, .10, 0., 0.), 'side': (1, 0., .08, 0.),
+               'turn': (2, 0., 0., math.radians(10)),
+               'diagonal': (1, .06, .06, 0.)}
+    if name not in options or type(action_id) is not int or not 0 < action_id < 2 ** 32:
+        raise ValueError('目标必须是已定义短段且动作ID非零')
+    kind, x, y, yaw = options[name]
+    # 所有未使用字段清零；二进制96字节布局由M4及主机断言共同检查。
+    spec = SPEC_DATA.pack(kind, x, y, yaw, 0, 0, 0, 0, 0, 0,
+                          .03, .08, .3, .10, .3, 1.0, 0, 0, 0, 0, 0, 0)
+    return struct.pack('<II', action_id, 20000) + spec
+
+
+def trials():
+    return dict(domain='commissioning', executable=False,
+                frame='本次动作起点车体：X前、Y左、逆时针正',
+                cases=[dict(name=n, target_m_rad=v) for n, v in (
+                    ('straight', [.10, 0, 0]), ('side', [0, .08, 0]),
+                    ('turn', [0, 0, math.radians(10)]))],
+                next_cases=['diagonal', 'arc', 'whole_route'],
+                blockers=['尚未烧录GC-BASE-0.3.0', '需核对配置与现场条件',
+                          '整图及弧线暂不开放，模拟页面不向实车下发'])
+
+
+class MotionLink(Link):
+    def __init__(self):
+        super().__init__(capabilities=5)
+        self.command = None
+        self.result = None
+        self.execution = None
+        self.execution_at = None
+        self.last_execution = -1.
+        self.failed = False
+        self.urgent_stop = False
+        self.samples = {}
+        self.last_sample = -1.
+        self.sample_kind = 4
+
+    def reset(self, reason):
+        # 重连只恢复观察。未决命令作未知，不排队重放，不自动使能。
+        if (self.command is not None or self.execution is not None
+                or (self.pending and self.pending[0].kind in (CONFIG, ARM, GOAL))):
+            self.failed = True
+        self.command = None
+        self.execution = self.execution_at = None
+        self.samples.clear()
+        super().reset(reason)
+
+    def submit(self, kind, payload=b''):
+        if (not self.bound or self.failed or self.command is not None
+                or (self.pending and self.pending[0].kind in (CONFIG, ARM, GOAL))
+                or kind not in (CONFIG, ARM, GOAL)):
+            raise ValueError('会话未就绪、命令未决或执行已中断')
+        self.command = (kind, payload)
+        self.result = None
+
+    def stop(self):
+        self.command = None
+        self.urgent_stop = True
+
+    def step(self, now):
+        if self.urgent_stop:
+            self.urgent_stop = False
+            self.request = (self.request + 1) & 0xffffffff
+            packet = p.Packet(p.STOP, self.boot or 0, self.session, self.request, 250)
+            # 丢弃普通等待；迟到应答不再匹配。仅STOP可以抢占。
+            self.pending = (packet, now)
+            return packet.encode()
+        return super().step(now)
+
+    def extra_request(self, now):
+        if self.command:
+            command = self.command
+            self.command = None
+            return command
+        if now - self.last_execution >= .05:
+            self.last_execution = now
+            return STATUS, b''
+        if now - self.last_sample >= .05:
+            self.last_sample = now
+            self.sample_kind = 5 if self.sample_kind == 4 else 4
+            return FEEDBACK, bytes([self.sample_kind, 0])
+        return None
+
+    def custom_reply(self, packet, request, now, sent=None):
+        if request.kind == FEEDBACK:
+            if packet.payload[:1] == bytes([p.OK]):
+                try:
+                    sample = Feedback.read(packet, request, sent, now)
+                    self.samples[sample.kind] = sample
+                except ValueError:
+                    self.samples.clear()
+            return True
+        if request.kind not in (CONFIG, ARM, GOAL, STATUS, p.STOP):
+            return False
+        if packet.boot != self.boot or not packet.payload or packet.payload[0] != p.OK:
+            self.failed = True
+            self.result = dict(kind=request.kind, accepted=False, outcome='rejected_or_unknown')
+            return True
+        if request.kind != STATUS:
+            self.result = dict(kind=request.kind, accepted=True)
+            return True
+        if len(packet.payload) != 1 + STATUS_DATA.size:
+            self.reset('执行状态长度不正确')
+            self.failed = True
+            return True
+        raw = STATUS_DATA.unpack(packet.payload[1:])
+        if raw[0] >= len(MODE) or raw[3] >= len(ACTION) or any(not math.isfinite(v) for v in raw[11:]):
+            self.reset('执行状态数值无效')
+            self.failed = True
+            return True
+        self.execution = dict(zip(('mode', 'fault', 'action_id', 'action_state', 'action_fault',
+                                   'stop_confirmed', 'board_ms', 'config_version', 'can_errors',
+                                   'can_rx_sequence', 'odom_valid', 'x_m', 'y_m', 'yaw_rad',
+                                   'position_error_m', 'yaw_error_rad', 'fl_rpm', 'fr_rpm',
+                                   'rl_rpm', 'rr_rpm'), raw))
+        self.execution.update(mode_name=MODE[raw[0]], action_name=ACTION[raw[3]])
+        self.execution_at = now
+        return True
+
+    def snapshot(self, now):
+        state = super().snapshot(now)
+        age = None if self.execution_at is None else (now - self.execution_at) * 1000
+        state.update(execution=self.execution if age is not None and age < 250 else None,
+                     execution_age_ms=age, control_capable=True,
+                     raw_imu={str(kind): dict(values=list(sample.values), age_ms=sample.age_ms(now),
+                                             first_ms=sample.first_ms, last_ms=sample.last_ms,
+                                             sequence=sample.sequence, epoch=sample.epoch,
+                                             source_epoch=sample.source_epoch)
+                              for kind, sample in self.samples.items() if sample.age_ms(now) < 250},
+                     message='短段执行核心；网页只读，未自动下发目标')
+        return state

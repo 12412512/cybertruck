@@ -27,6 +27,11 @@ def create_app(runtime=DEFAULT_RUNTIME):
     def state():
         return load_snapshot(snapshot)
 
+    @app.get('/api/base/trials')
+    def base_trials():
+        from ..device.execution import trials
+        return trials()
+
     @app.websocket('/ws')
     async def stream(socket: WebSocket):
         await socket.accept()

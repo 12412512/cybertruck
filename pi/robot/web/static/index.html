@@ -16,6 +16,18 @@
     </header>
     <main>
         <section class="notice" id="source" role="status">正在读取控制核心状态…</section>
+        <section class="panel" aria-label="实车短段准备">
+            <h2>实车短段准备</h2>
+            <p id="base-ready">执行入口已准备，尚未烧录或使能。本页路线仍为离线模拟。</p>
+            <p class="muted">先验证前进100毫米、左移80毫米、逆时针10度；跳过重复单轮测试。每次独立启动，停车后再核对尺量结果。</p>
+            <dl>
+                <dt>执行状态</dt><dd id="base-state">未连接新执行固件</dd>
+                <dt>当前动作</dt><dd id="base-action">未下发</dd>
+                <dt>停止确认</dt><dd id="base-stop">待实车反馈</dd>
+                <dt>IMU原始航向 / 陀螺Z</dt><dd id="base-imu">未接入，方向待核对</dd>
+                <dt>后续顺序</dt><dd>短段 → 斜线 → 弧线 → 整图</dd>
+            </dl>
+        </section>
         <section class="panel" id="nav-panel" hidden>
             <h2>场地路径 · 两批离线导航</h2>
             <p class="muted">名义场地＋主体轮廓，完整突出物及实测坐标待补。以下只模拟导航，不执行扫码或搬运，不代表比赛耗时。</p>

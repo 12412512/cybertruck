@@ -1,0 +1,37 @@
+/* 复用CARCAN13已核对CAN链；本阶段仅改名、归类和增加接收序号。 */
+#ifndef BUS_H
+#define BUS_H
+#include "can_tx.h"
+typedef struct
+{
+    MotorReply speed, position, status;
+    MotorConfig config;
+} BusWheel;
+typedef struct
+{
+    uint8_t active, locked, stop_pending, ack_observed_mask, motion_uncertain;
+    uint32_t error, queue_depth, replaced, rejected;
+    uint32_t speed_sequence, speed_sent_sequence, query_count, speed_span_ms;
+    /* 完整四轮TXOK批次计数，仅诊断；不能用目标sequence跳号冒充实发漏样。 */
+    uint32_t speed_batches;
+    /* 整批四轮各自TXOK后冻结，同speed_sent_sequence对应。signed协议RPM；
+     * 只读诊断，不改变调度，不表示四轮同时发送或电机已执行。 */
+    int16_t sent_rpm[4];
+    uint32_t sent_tick;
+    uint32_t finite_sequence, finite_sent_sequence, finite_sent_mask;
+    uint32_t rx_overflow, stop_retries, cancel_count;
+    uint32_t pending_stop_count, wait_ms;
+    /* 新Stop地址保留序号；全部地址TXOK后才更新sent，两者均非物理停车。 */
+    uint32_t stop_sequence, stop_sent_sequence;
+} BusDiag;
+enum
+{
+    BUS_ERROR_STOP = 1U,
+    BUS_ERROR_CAN = 2U,
+    BUS_ERROR_RX = 4U,
+    BUS_ERROR_DRIVER = 8U
+};
+extern volatile BusDiag bus_diag;
+/* 主循环唯一CAN接收消费者；业务层不得调用私有Bus/Can运动原语。 */
+void Bus_Poll(void);
+#endif

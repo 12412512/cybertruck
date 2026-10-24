@@ -1,0 +1,17 @@
+{
+  "domain": "commissioning",
+  "version": 1,
+  "wheel_radius_m": 0.05,
+  "half_length_m": 0.094,
+  "half_width_m": 0.11,
+  "counts_per_rev": 65536,
+  "addresses": [1, 2, 3, 4],
+  "command_sign": [1, -1, 1, -1],
+  "feedback_sign": [1, -1, 1, -1],
+  "yaw_sign": null,
+  "angle_scale_rad": 0.00009587379924285257,
+  "gyro_scale_rad_s": 0.0010652644360316954,
+  "max_rpm": 6,
+  "hardware_verified": false,
+  "source": "CAR/Chassis/drive_config.c与智能搬运小车/User/Config/drive_cfg.c的声明参数；IMU符号尚未确认，几何/量程仍为候选，不是本车标定完成记录"
+}

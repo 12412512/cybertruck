@@ -20,6 +20,11 @@ USER_FILES = {FW / 'User' / name for name in (
     'Device/motor.c', 'Device/motor.h', 'Device/imu.c', 'Device/imu.h',
     'Comm/feedback.c', 'Comm/feedback.h', 'Control/odom.c', 'Control/odom.h',
     'Control/ref.c', 'Control/ref.h', 'Control/track.c', 'Control/track.h')}
+USER_FILES.update(FW / 'User' / name for name in (
+    'Control/exec.c', 'Control/exec.h', 'Comm/execute.c', 'Comm/execute.h', 'Board/base_port.c', 'Board/base_port.h',
+    'Device/can_tx.c', 'Device/can_tx.h', 'Device/can_internal.h',
+    'Device/bus.c', 'Device/bus.h', 'Device/bus_internal.h', 'Device/bus_board.h',
+    'Device/drive.c', 'Device/drive.h', 'Config/bus_config.h', 'Config/addresses.h'))
 
 
 def check(ok, message):
@@ -259,10 +264,10 @@ def verify_sources(data):
 
 def verify_readonly_app(data):
     actual = {path for path in (FW / "User").rglob("*") if path.suffix.lower() in (".c", ".h")}
-    check(actual == USER_FILES, "当前只读阶段User文件与已审核清单不一致")
+    check(actual == USER_FILES, "当前短段接入阶段User文件与已审核清单不一致")
     app = clean_c(read(FW / "User/App/app.c"))
-    check(compact(body(app, 'App_Init')) == 'Port_Init();', '只读App_Init仅允许Port_Init')
-    check(compact(body(app, 'App_Run')) == 'Port_Run();', '只读App_Run仅允许Port_Run')
+    check(compact(body(app, 'App_Init')) == 'Port_Init();Base_Init();', 'App_Init仅允许接收/未使能入口')
+    check(compact(body(app, 'App_Run')) == 'Port_Run();Base_Run();', 'App_Run仅允许唯一通信与底盘调度')
     definitions = re.findall(r"\b(\w+)\s*\([^;{}]*\)\s*\{", app)
     check(sorted(definitions) == ["App_Init", "App_Run"], "App不得定义额外业务函数")
     forbidden = (r"\bHAL_CAN_(?:Start|AddTxMessage|ActivateNotification)\s*\(",
@@ -274,14 +279,28 @@ def verify_readonly_app(data):
                 continue
             source = clean_c(read(path))
             for pattern in forbidden:
-                match = re.search(pattern, source)
-                check(match is None, f"只读阶段禁止执行器通信或输出：{path.relative_to(ROOT)} {match[0] if match else ''}")
+                matches = list(re.finditer(pattern, source))
+                can_owner = path == FW / 'User/Device/can_tx.c'
+                can_init = path == FW / 'User/Board/base_port.c'
+                allowed = all((((can_owner and 'AddTxMessage' in match[0]) or
+                                (can_init and 'AddTxMessage' not in match[0]))
+                               and 'HAL_CAN_' in match[0]) for match in matches)
+                check(allowed, f"执行器只能经唯一CAN所有者，PWM仍禁止：{path.relative_to(ROOT)}")
             uart_calls = re.findall(r'\bHAL_UART(?:Ex)?_(?:Receive\w*|Transmit\w*)\s*\(', source)
             check(not uart_calls or path == FW / 'User/Board/port.c',
                   f'只读串口只能由Board/port.c管理：{path.relative_to(ROOT)}')
     port = clean_c(read(FW / 'User/Board/port.c'))
-    check(not re.search(r'\bhuart[26]\b', port), '只读入口只允许USART1')
+    check(not re.search(r'\bhuart6\b', port), '本阶段不启用屏幕串口')
     check('HAL_UART_Receive_IT' in port and 'HAL_UART_Transmit_IT' in port, '串口必须使用中断非阻塞收发')
+    base = clean_c(read(FW / 'User/Board/base_port.c'))
+    check(not re.search(r'\b(?:Bus_(?:Start|Speed|Send)|Exec_(?:Arm|Goal))\s*\(', body(base, 'Base_Init')),
+          'Base_Init禁止使能、下发动作或自动开始查询')
+    execute = clean_c(read(FW / 'User/Control/exec.c'))
+    check('EXEC_DISABLED' in execute and 'EXEC_ARMING' in execute, '执行入口必须显式配置和使能')
+    addresses = json.loads(read(ROOT / 'config/base_trials.json'))['addresses']
+    expected_addresses = 'BASE_SAFE_ADDRESSES{' + ','.join(map(str, addresses)) + '}'
+    check(expected_addresses in compact(read(FW / 'User/Config/addresses.h')), '启动停止地址必须与唯一配置一致')
+    check('Bus_Stop();' in body(base, 'Base_Init'), '启动先停止旧驱动目标，不自动续跑')
     rng = clean_c(read(FW / 'Core/Src/rng.c'))
     call(rng, 'HAL_RNG_Init', '&hrng', '随机启动身份')
     call(clean_c(read(FW / 'Core/Src/main.c')), 'MX_RNG_Init', '', '随机模块初始化')

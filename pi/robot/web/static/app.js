@@ -17,6 +17,17 @@ function stageName(stage) {
 }
 function render(state) {
     const fresh = state.core_fresh === true;
+    const execution = fresh && state.connected && state.execution_age_ms < 250 ? state.execution : null;
+    set('base-ready', state.mode === 'sim'
+        ? '本页为离线模拟；实车执行入口已准备，尚未烧录或使能。'
+        : '短段需独立启动；本页仅监控，不下发运动。IMU方向与现场条件待核对。');
+    set('base-state', execution?.mode_name ?? '未连接新执行固件');
+    set('base-action', execution ? `${execution.action_id} / ${execution.action_name}` : '未下发');
+    set('base-stop', execution?.stop_confirmed ? '新反馈确认停止' : '待实车反馈');
+    const raw = fresh && state.connected ? state.raw_imu : null;
+    set('base-imu', raw?.['4'] && raw?.['5']
+        ? `${raw['4'].values[2]} / ${raw['5'].values[2]}（原始计数，符号/量程待确认）`
+        : '未接入，方向待核对');
     renderTracking(fresh && state.mode === 'sim' ? state.tracking : null);
     renderNavigation(fresh && state.mode === 'sim' ? state.navigation : null);
     document.getElementById('odom-panel').hidden = fresh && state.tracking?.domain === 'simulation';
@@ -28,7 +39,8 @@ function render(state) {
     set('source', !fresh ? '控制核心状态过期或未启动' : state.mode === 'sim'
         ? '模拟数据 · 未连接实车，不能作为实机验收' : state.mode === 'offline'
         ? '离线模式 · 未打开设备' : state.mode === 'observer'
-        ? '旧固件实车观察 · 经现有串口所有者读取，GC新协议尚未验收' : '实机只读模式 · 动作接口未开放');
+        ? '旧固件实车观察 · 经现有串口所有者读取，GC新协议尚未验收'
+        : state.control_capable ? '实车执行监控 · 网页只读，目标由执行核心下发' : '实机只读模式 · 动作接口未开放');
     set('connection', board ? '只读在线' : '状态未知');
     set('message', state.message);
     set('core', fresh ? '运行中' : '状态未知');

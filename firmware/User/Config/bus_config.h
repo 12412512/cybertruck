@@ -1,0 +1,15 @@
+#ifndef BUS_CONFIG_H
+#define BUS_CONFIG_H
+
+/* 沿用CARCAN13实发节拍；不是车辆几何或允许行驶速度。 */
+#define CAN_RING_SIZE 16U
+#define CAN_TX_TIMEOUT_MS 50U
+#define CAN_TX_TURNAROUND_MS 2U
+#define BUS_QUERY_INTERVAL_MS 5U
+#define BUS_QUERIES_PER_BATCH 2U
+#define BUS_STOP_RETRY_MS 10U
+#define MOTOR_CHECK_BYTE 0x6BU
+#define MOTOR_MAX_COMMAND_RPM 3000U
+#define MOTOR_MAX_REPLY_RPM 5000U
+
+#endif

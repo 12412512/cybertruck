@@ -1,0 +1,47 @@
+[
+  {
+    "source": "C:\\Users\\RISI\\Desktop\\ros小车\\CAR\\Chassis\\can_transport.c",
+    "sha256": "a91d49de77b7b5c3bb29ac688bf0cff2da7c58867d4b4ab8c75dff7cd2e67431",
+    "target": "firmware\\User\\Device\\can_tx.c"
+  },
+  {
+    "source": "C:\\Users\\RISI\\Desktop\\ros小车\\CAR\\Chassis\\motor_bus.c",
+    "sha256": "c359d246f5bf8be37f45f79b9aca123abb291d4350fca3ae85f02876fa8c1d30",
+    "target": "firmware\\User\\Device\\bus.c"
+  },
+  {
+    "source": "C:\\Users\\RISI\\Desktop\\ros小车\\CAR\\Chassis\\motor_protocol.c",
+    "sha256": "d1c1a48baeeb3f87b9bcda85663d7a38cc5af1e93e02133965415b9fb92b1bd5",
+    "target": "firmware\\User\\Device\\drive.c"
+  },
+  {
+    "source": "C:\\Users\\RISI\\Desktop\\ros小车\\CAR\\Chassis\\transport.h",
+    "sha256": "c4132b71e887e949a0d859336397d556cc754ee4aee026a162b03401bf05b448",
+    "target": "firmware\\User\\Device\\can_tx.h"
+  },
+  {
+    "source": "C:\\Users\\RISI\\Desktop\\ros小车\\CAR\\Chassis\\transport_internal.h",
+    "sha256": "ac2ba01f7888f759470b6c308516fd5055f2d70fd49106b53b483294fe89b9fd",
+    "target": "firmware\\User\\Device\\can_internal.h"
+  },
+  {
+    "source": "C:\\Users\\RISI\\Desktop\\ros小车\\CAR\\Chassis\\bus.h",
+    "sha256": "0407f20c8d8995b9551f6f9d48049353c0ab532c6af96f34048d847672513945",
+    "target": "firmware\\User\\Device\\bus.h"
+  },
+  {
+    "source": "C:\\Users\\RISI\\Desktop\\ros小车\\CAR\\Chassis\\bus_internal.h",
+    "sha256": "89bdcb1ec3aaebcff828a3e7171c9da441cebab3d5bb074ff45083d576596f8d",
+    "target": "firmware\\User\\Device\\bus_internal.h"
+  },
+  {
+    "source": "C:\\Users\\RISI\\Desktop\\ros小车\\CAR\\Chassis\\protocol.h",
+    "sha256": "5be3f357298f76e36276c5b9a755220081856c40b66dee844fa220d9336e92e5",
+    "target": "firmware\\User\\Device\\drive.h"
+  },
+  {
+    "source": "C:\\Users\\RISI\\Desktop\\ros小车\\CAR\\Chassis\\board.h",
+    "sha256": "7edac89f35f70f7eb7dbdd7a7a4d041f38bdfbbe72c61b970e425816417b77d1",
+    "target": "firmware\\User\\Device\\bus_board.h"
+  }
+]

@@ -1,5 +1,6 @@
 """恢复 CubeMX 生成后的 Keil 工具链和手写文件清单，不改外设源码。"""
 from pathlib import Path
+import json
 import sys
 import xml.etree.ElementTree as ET
 from keil_policy import enforce, save, OPTIONS
@@ -17,6 +18,15 @@ def put(parent, path, value):
 
 
 def sync():
+    profile = json.loads((ROOT / 'config/base_trials.json').read_text(encoding='utf-8'))
+    addresses = profile['addresses']
+    if (len(addresses) != 4 or len(set(addresses)) != 4
+            or any(type(value) is not int or not 1 <= value <= 255 for value in addresses)):
+        raise ValueError('启动停止地址必须与唯一试验配置一致')
+    header = ('/* 由sync_project.py从config/base_trials.json生成；勿手改。 */\n'
+              '#ifndef ADDRESSES_H\n#define ADDRESSES_H\n'
+              '#define BASE_SAFE_ADDRESSES {' + ', '.join(str(v) for v in addresses) + '}\n#endif\n')
+    (ROOT / 'firmware/User/Config/addresses.h').write_text(header, encoding='utf-8')
     tree = ET.parse(PROJECT)
     targets = tree.findall("./Targets/Target")
     if len(targets) != 1 or targets[0].findtext("TargetName") != "Car":

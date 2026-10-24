@@ -28,7 +28,7 @@ class FeedbackTests(unittest.TestCase):
     def setUpClass(cls):
         output = ROOT / 'output/tests'
         output.mkdir(exist_ok=True, parents=True)
-        target = output / ('feedback.dll' if os.name == 'nt' else 'feedback.so')
+        target = output / (f'feedback-{os.getpid()}.dll' if os.name == 'nt' else 'feedback.so')
         device = ROOT / 'firmware/User/Device'
         comm = ROOT / 'firmware/User/Comm'
         command = [sys.executable, '-m', 'ziglang', 'cc', '-shared', '-std=c99', '-O2',

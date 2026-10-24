@@ -18,6 +18,12 @@ static uint32_t rejected;
 static uint32_t dropped;
 static uint32_t faults;
 static uint32_t uptime_ms;
+static CommHooks executor;
+
+void Comm_Bind(CommHooks hooks)
+{
+    executor = hooks;
+}
 
 void Comm_Init(uint64_t boot, uint32_t now_ms)
 {
@@ -29,10 +35,15 @@ void Comm_Init(uint64_t boot, uint32_t now_ms)
     last_heart_ms = uptime_ms = now_ms;
     progress = heart_count = rejected = dropped = 0;
     faults = boot ? 0U : 1U;
+    memset(&executor, 0, sizeof(executor));
 }
 
 void Comm_Fault(uint32_t reason)
 {
+    if (executor.stop)
+    {
+        executor.stop(0x100U | reason, uptime_ms);
+    }
     faults |= reason;
     normal_ready = 0;
     session_id = 0;
@@ -47,6 +58,10 @@ void Comm_Tick(uint32_t now_ms, uint8_t key_pressed)
     key = key_pressed;
     if (session_id && (uint32_t)(now_ms - last_heart_ms) >= 500U)
     {
+        if (executor.stop)
+        {
+            executor.stop(0x200U, now_ms);
+        }
         normal_ready = 0;
         session_id = 0;
         generation++;
@@ -81,7 +96,9 @@ static void Reply(const Frame *request, uint8_t result, const uint8_t *data, uin
 
 static void Dispatch(const Frame *frame, uint32_t now_ms)
 {
-    uint8_t data[48] = {0};
+    uint8_t data[FRAME_PAYLOAD_MAX - 1U] = {0};
+    uint16_t size = 0;
+    uint8_t result;
     uint32_t next;
     if (frame->type & 0x80U)
     {
@@ -104,8 +121,15 @@ static void Dispatch(const Frame *frame, uint32_t now_ms)
     if (frame->type == COMM_HELLO && frame->size == 0U && frame->session == 0U)
     {
         Frame_Put(data, generation, 4);
-        Frame_Put(data + 4, 1, 4); /* 能力位1：只读；不报告执行器能力。 */
-        memcpy(data + 8, "GC-RO-0.2.0", 12);
+        Frame_Put(data + 4, executor.command ? 5U : 1U, 4);
+        if (executor.command)
+        {
+            memcpy(data + 8, "GC-BASE-0.3.0", sizeof("GC-BASE-0.3.0"));
+        }
+        else
+        {
+            memcpy(data + 8, "GC-RO-0.2.0", 12);
+        }
         Reply(frame, COMM_OK, data, 24);
         return;
     }
@@ -113,6 +137,12 @@ static void Dispatch(const Frame *frame, uint32_t now_ms)
         (frame->boot == 0U || frame->boot == boot_id))
     {
         stopped = 1;
+        if (executor.stop)
+        {
+            executor.stop(0, now_ms);
+            Reply(frame, COMM_OK, 0, 0);
+            return;
+        }
         /* 锁存禁止标记；没有电机反馈，不能声称实车已经停稳。 */
         Reply(frame, COMM_READONLY, 0, 0);
         return;
@@ -149,7 +179,12 @@ static void Dispatch(const Frame *frame, uint32_t now_ms)
         Reply(frame, COMM_SESSION, 0, 0);
         return;
     }
-    if (frame->type == COMM_HEART && frame->size == 4U)
+    if (executor.command && (frame->type == 16 || (frame->type >= 32 && frame->type <= 35)))
+    {
+        result = executor.command(frame->type, frame->data, frame->size, data, &size, now_ms);
+        Reply(frame, result, data, size);
+    }
+    else if (frame->type == COMM_HEART && frame->size == 4U)
     {
         next = (uint32_t)Frame_Get(frame->data, 4);
         /* 重复保活不延长期限；无符号差同时允许32位进度计数回绕。 */

@@ -1,4 +1,4 @@
-"""新反馈时间负载的离线接收链。尚未接入Link或真实设备。"""
+"""反馈时间负载；离线模型与新MotionLink共用，实车仍待新固件验收。"""
 
 from dataclasses import dataclass
 import math
@@ -37,7 +37,7 @@ class Feedback:
     def read(cls, packet, request, sent_s, received_s):
         # 上层先用正式COBS/CRC Decoder解帧；此处核对本次读请求和身份。
         if (request.kind != FEEDBACK or not request.boot or not request.session
-                or request.payload or packet.kind != FEEDBACK | 0x80
+                or len(request.payload) not in (0, 2) or packet.kind != FEEDBACK | 0x80
                 or (packet.boot, packet.session, packet.request) !=
                    (request.boot, request.session, request.request)
                 or len(packet.payload) != WIRE.size + 1 or packet.payload[0] != p.OK):
@@ -48,6 +48,8 @@ class Feedback:
         if sent_s < 0 or not 0 <= rtt < 250:
             raise ValueError('反馈请求往返超时或时间倒退')
         version, kind, address, flags, *fields = WIRE.unpack(packet.payload[1:])
+        if request.payload and request.payload != bytes([kind, address]):
+            raise ValueError('反馈通道与本次选择不一致')
         first, last, handled, sequence, epoch, source_epoch, report, *values = fields
         if version != 1 or flags != 0 or not epoch or not source_epoch:
             raise ValueError('反馈版本、时钟代次或采样标志无效')

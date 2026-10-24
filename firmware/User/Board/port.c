@@ -13,6 +13,12 @@ static volatile uint16_t rx_head;
 static volatile uint16_t rx_tail;
 static volatile uint8_t rx_error;
 static uint8_t tx_data[FRAME_WIRE_MAX];
+static uint8_t imu_byte, imu_data[RX_CAPACITY];
+static uint32_t imu_tick[RX_CAPACITY];
+static volatile uint16_t imu_head, imu_tail;
+static volatile uint8_t imu_error;
+static uint32_t imu_source = 1;
+static ImuParser imu;
 
 void Port_Init(void)
 {
@@ -26,15 +32,40 @@ void Port_Init(void)
         boot = ((uint64_t)high << 32) | low;
     }
     Comm_Init(boot, HAL_GetTick());
+    Imu_Init(&imu, imu_source);
     if (HAL_UART_Receive_IT(&huart1, &rx_byte, 1) != HAL_OK)
     {
         rx_error = 1;
+    }
+    if (HAL_UART_Receive_IT(&huart2, &imu_byte, 1) != HAL_OK)
+    {
+        imu_error = 1;
     }
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *uart)
 {
     uint16_t next;
+    if (uart == &huart2)
+    {
+        next = (uint16_t)((imu_head + 1U) % RX_CAPACITY);
+        if (next == imu_tail)
+        {
+            imu_error = 1;
+        }
+        else
+        {
+            imu_data[imu_head] = imu_byte;
+            imu_tick[imu_head] = HAL_GetTick();
+            __DMB();
+            imu_head = next;
+        }
+        if (HAL_UART_Receive_IT(&huart2, &imu_byte, 1) != HAL_OK)
+        {
+            imu_error = 1;
+        }
+        return;
+    }
     if (uart != &huart1)
     {
         return;
@@ -63,6 +94,22 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *uart)
     {
         rx_error = 1;
     }
+    if (uart == &huart2)
+    {
+        imu_error = 1;
+    }
+}
+
+int Port_Imu(ImuSample *sample)
+{
+    while (Imu_Read(&imu, sample))
+    {
+        if (Imu_Valid(&imu, sample, HAL_GetTick()))
+        {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 void Port_Run(void)
@@ -73,6 +120,36 @@ void Port_Run(void)
     uint8_t byte;
     uint32_t tick;
     uint32_t irq;
+    if (imu_error)
+    {
+        irq = __get_PRIMASK();
+        __disable_irq();
+        imu_tail = imu_head;
+        imu_error = 0;
+        __set_PRIMASK(irq);
+        Imu_Loss(&imu, ++imu_source);
+        Comm_Fault(8U);
+        (void)HAL_UART_AbortReceive(&huart2);
+        if (HAL_UART_Receive_IT(&huart2, &imu_byte, 1) != HAL_OK)
+        {
+            imu_error = 1;
+        }
+    }
+    while (imu_tail != imu_head && count++ < RX_CAPACITY)
+    {
+        tail = imu_tail;
+        __DMB();
+        byte = imu_data[tail];
+        tick = imu_tick[tail];
+        __DMB();
+        imu_tail = (uint16_t)((tail + 1U) % RX_CAPACITY);
+        Imu_Feed(&imu, byte, tick, HAL_GetTick(), imu_source);
+    }
+    if (imu_tail == imu_head)
+    {
+        Imu_Tick(&imu, HAL_GetTick());
+    }
+    count = 0;
     Comm_Tick(HAL_GetTick(), HAL_GPIO_ReadPin(START_KEY_GPIO_Port, START_KEY_Pin) == GPIO_PIN_RESET);
     if (rx_error)
     {

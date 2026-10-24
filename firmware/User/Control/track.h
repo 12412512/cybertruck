@@ -65,7 +65,7 @@ typedef struct
 
 typedef struct
 {
-    double rpm[4]; /* 理论轮整数RPM，仅为输出数据，未连接任何发送者 */
+    double rpm[4]; /* 理论轮整数RPM；发送及极性转换归Exec/Bus */
     RefPoint reference;
     double position_error_m;
     double yaw_error_rad;
@@ -113,7 +113,7 @@ ODOM_API int Track_Start(Track *track, const TrackGoal *goal,
                          const TrackObservation *observation, uint32_t now_ms);
 ODOM_API int Track_Step(Track *track, const TrackObservation *observation, uint32_t now_ms);
 /* 仅由唯一发送管理者在四轮当前零速批次TXOK后调用；接收/入队成功不等于Sent。
- * 本轮只由模拟传输回调，不写CAN；过期/错动作/错序号/重复ACK不推进。 */
+ * 模型或唯一Bus适配回调；本模块不写CAN。过期/错动作/错序号/重复ACK不推进。 */
 ODOM_API int Track_Sent(Track *track, uint32_t id, uint32_t output_id, uint32_t sent_ms);
 ODOM_API void Track_Cancel(Track *track);
 ODOM_API void Track_Read(const Track *track, TrackOutput *output);
