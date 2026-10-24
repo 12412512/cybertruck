@@ -171,6 +171,10 @@ class TrackingTests(unittest.TestCase):
         different = clone(model.goal)
         different.reference.x_m += .1
         self.assertEqual(model.tracker.start(different, model.observation, now), -2)
+        for field in ('path_heading_rad','curve_velocity_m_s','yaw_begin_m','yaw_end_m','tail_velocity_m_s'):
+            different = clone(model.goal)
+            setattr(different.reference,field,.01)
+            self.assertEqual(model.tracker.start(different,model.observation,now),-2)
         self.assertEqual(model.tracker.start(goal('line', 2), model.observation, now), -3)
         previous_output = model.tracker.output()['output_id']
         model.tracker.cancel()
@@ -181,6 +185,21 @@ class TrackingTests(unittest.TestCase):
         self.assertEqual(model.tracker.output()['done_ms'], 0)
         self.assertGreater(model.tracker.output()['output_id'], previous_output)
         self.assertEqual(model.tracker.start(goal('line', 2), model.observation, now + 10), -1)
+
+    def test_pose_reference_without_zero_ack_cannot_complete(self):
+        model = self.model(ack=False,auto_start=False)
+        while model.elapsed_ms < 120:
+            model.advance()
+        target = goal('diagonal')
+        target.reference.kind = 5
+        target.reference.yaw_rad = .4
+        target.reference.angular.acceleration = 2
+        target.reference.angular.jerk = 12
+        model.begin(target)
+        report = model.run()
+        self.assertEqual(report['state'],'FAILED')
+        self.assertEqual(report['output']['fault'],7)
+        self.assertEqual(report['output']['done_ms'],0)
 
     def test_wrong_or_pre_request_ack_rejected(self):
         model = self.model(ack=False)

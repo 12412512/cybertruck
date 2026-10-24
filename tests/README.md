@@ -17,3 +17,5 @@
 `test_tracking.py`增加18项正式C跟踪/到位回归，闭环覆盖11类轨迹；同时校验独立车体真值、零速发送屏障、最慢新反馈稳定窗口、失败/取消、动作幂等、连续原点及Web/账本隔离。误差结果写`output/tests/tracking_summary.json`，仅为合成模型，非实车精度。运行入口仍为`tools/test.ps1`。
 
 `test_navigation.py`新增20项导航回归，含500组SE(2)往返、北向起点、蓝区通行、未知/封路/无路、转动中间碰撞、斜线中间障碍、正式C速率界、冻结参考、有界检查、连续弧段、两启停区条件规划和同一odom的完整巡回。最终147项主机回归、818项静态检查通过；报告位于output/navigation与output/tests/navigation_summary.json。只证明合成模型，不证明实场可达或180秒目标。
+
+连续导航节点更新起点1/2为0/180°，默认两批8段跨区；导航现有24项、跟踪19项、轨迹9项，合计154项主机回归通过，818项静态检查通过。增加正式C分段变速边界V/A连续、末端档位、移姿/弯道/转姿窗口的笛卡尔与角V/A/J、±π方向保持、长侧移、重叠道路保守状态、关闭走廊禁止捷径和新参考丢ACK超时。最终日志`output/flow/release-tests.log`，同速四场景A/B见`output/flow/release/comparison.json`及`docs/flow.md`，未包含真实串口或物理动作。

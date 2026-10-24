@@ -70,6 +70,8 @@
 
 ## 坐标与路径规划复用
 
+连续导航节点进一步迁入旧 `User/Chassis/motion/scurve.c` 的 `PathTimeMake/PathTimeSample` 到现有 `curve.*`，保留有界分段变速和边界连续，增加SI接口、末端接近档及新参考约束。源SHA256 `7bae3d24d1c7a7ac139969e4e5f6c80a4b76e65668d6527af43a36a84cb116d8`，具体复用范围和A/B验收见[连续导航](flow.md)。旧参考树未修改。
+
 - 新`nav/geometry.py`沿用旧`competition_map/geometry.py`的凸包与凸多边形SAT，原SHA256为`c9c38293019fc83b31fb70f615a1303d590fa028ef0492237972b1f23efbe1ab`。不复用“只支持固定朝向平移”的限制，扩展偏心四边和来自正式C变化率界的区间包络。
 - 新`nav/planner.py`复用旧`competition_navigation/planner.py`的堆A*、道路状态过滤、came重建和拒绝原因结构，原SHA256为`ffc5ac3a1e40df90ff2f6ef42840b6706a4d3ee62cbecc0a594dcc4e9f6e7d9b`。状态扩展为节点加朝向、代价改为参考时间，增加共线合并和经扫掠/轮速检查的局部弧段。用户已明确蓝区可行，旧途中蓝区禁入规则不迁入。
 - 新名义地图沿用旧site_measurements的黄区、工作台和场地总框；候选停靠点为满足条件模型净空而调整，未伪装成实测。路径、弧线、参考时间和闭环继续调用已迁入的正式C；不复制另一套Python运动曲线。

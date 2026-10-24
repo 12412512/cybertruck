@@ -1,7 +1,8 @@
 // 仅渲染核心给出的同一计划与模拟结果；画布Y反转不进入物理坐标。
 const names = {start_1:'启停区1', start_2:'启停区2', qr:'扫码', raw:'原料', rough:'粗加工', staging:'暂存'};
-const actions = {LINE:'直线', DIAGONAL:'短斜移/侧移', TURN:'停车转向', ARC:'平滑弯道'};
-const states = {READY:'待模拟', RUNNING:'闭环运行', COMPLETE:'巡回完成', FAILED:'失败', NO_PATH:'无可行路线'};
+const actions = {LINE:'直线', DIAGONAL:'斜线/侧移', TURN:'停车转向', ARC:'平滑弯道',
+    POSE:'平移与转姿同步', FLOW:'直线与弯道连续衔接', WINDOW:'直线低速转姿'};
+const states = {READY:'待模拟', RUNNING:'闭环运行', COMPLETE:'导航模拟完成', FAILED:'失败', NO_PATH:'无可行路线'};
 const svgNS = 'http://www.w3.org/2000/svg';
 const point = p => [40+p[0]*230, 600-p[1]*230];
 const set = (id,value) => {document.getElementById(id).textContent=value;};
@@ -48,11 +49,14 @@ export function renderNavigation(nav) {
     const valid=nav?.domain==='simulation' && nav.frame_id==='map';
     document.getElementById('nav-panel').hidden=!valid;
     if (!valid) {document.getElementById('nav-map').replaceChildren(); return;}
-    set('nav-frame',`${names[nav.start]??'启停区1'}名义中心，朝扫码区 +90°；map：X右/Y上，车体：X前/Y左`);
+    const initial=nav.initial_pose[2]*180/Math.PI;
+    set('nav-frame',`${names[nav.start]}名义中心，初始${initial.toFixed(0)}°（${nav.start==='start_1'?'+X':'−X'}）；map：X右/Y上，车体：X前/Y左；扫码0°、原料90°、粗加工−90°、暂存180°`);
     set('nav-state',`${states[nav.status]??nav.status} / 已确认 ${nav.completed}/${nav.actions} / 第${nav.leg+1}段`);
     const heading=Math.atan2(Math.sin(nav.map_pose[2]),Math.cos(nav.map_pose[2]))*180/Math.PI;
     set('nav-pose',`${nav.map_pose[0].toFixed(3)} m / ${nav.map_pose[1].toFixed(3)} m / ${heading.toFixed(1)}°（模拟；展开角${(nav.map_pose[2]*180/Math.PI).toFixed(1)}°）`);
-    set('nav-time',`${nav.estimate_s.toFixed(1)} s（优化前${nav.before_s.toFixed(1)} s） / ${(nav.elapsed_ms/1000).toFixed(2)} s（模拟时间；演示目标5倍速）`);
+    set('nav-time',`${nav.estimate_s.toFixed(1)} s（停车方案参考估计${nav.before_s.toFixed(1)} s） / ${(nav.elapsed_ms/1000).toFixed(2)} s（模型时间，演示目标5倍速）`);
+    set('nav-budget',`${nav.scope}。完整两批目标60 s；当前巡航上限${nav.cruise_m_s.toFixed(2)} m/s，忽略障碍和停车的距离下界${nav.minimum_distance_m.toFixed(2)} m / 时间下界${nav.ideal_minimum_s.toFixed(2)} s`);
+    set('nav-turns',`独立停车转向${nav.inplace_actions}次；模型低速近原地转姿${(nav.inplace_turn_ms/1000).toFixed(2)} s，移动转姿${(nav.moving_turn_ms/1000).toFixed(2)} s；累计行程${nav.travel_m.toFixed(2)} m`);
     set('nav-origin',`${nav.origin_ms??'待建立'} ms / ${nav.origin_consistent?'全程未清零':'发生改变'}`);
     set('nav-conditions',`实车执行关闭；道路开放为合成场景；待验：${nav.assumptions.join('、')}`);
     set('nav-reason',nav.reason||'—');
@@ -60,7 +64,9 @@ export function renderNavigation(nav) {
     nav.legs.forEach((leg,index)=>{
         const row=document.createElement('tr');
         for (const text of [`${names[leg.start]??leg.start} → ${names[leg.goal]??leg.goal}`,
-            `${leg.status} / ${leg.nodes.join(' → ')}`,leg.segments.map(s=>actions[s.kind]??s.kind).join(' / '),
+            `${leg.status} / ${leg.segments.map(s=>s.road).join(' → ')}`,
+            leg.segments.map(s=>s.kind==='POSE' && Math.abs(s.end[2]-s.start[2])<.001?
+                '平移（保持朝向）':actions[s.kind]??s.kind).join(' / '),
             `${(leg.estimate_s??0).toFixed(1)} s`]) {
             const cell=document.createElement('td');cell.textContent=text;row.appendChild(cell);
         }

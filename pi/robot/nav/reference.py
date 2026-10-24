@@ -4,7 +4,7 @@ import ctypes as c
 import math
 
 from ..device.tracking import Spec, Limit, PathSpec, Reference
-from .frames import Pose, relative
+from .frames import Pose, relative, angle
 
 CRUISE_M_S = .14
 DOCK_M_S = .025
@@ -29,6 +29,57 @@ def specification(kind, start, end, radius=.1, reverse=False, velocity=CRUISE_M_
         spec.linear.velocity = min(velocity, radius * .6)
     else:
         raise ValueError('未知路线动作')
+    return spec
+
+
+def flow_specification(library, kind, start, end, corner=None, radius=.1, terminal=False, window_m=.08):
+    """位置曲线与车身朝向解耦；内部低速区不创建第二个动作或停车状态。"""
+    local = relative(start, end)
+    spec = specification('LINE', start, end)
+    spec.yaw_rad = angle(end.yaw_rad-start.yaw_rad)
+    spec.kind = 5
+    spec.angular = Limit(.7, 2.0, 12.0)
+    if kind == 'FLOW':
+        if corner is None:
+            raise ValueError('连续弯道缺少拐点')
+        incoming = math.atan2(corner.y_m-start.y_m, corner.x_m-start.x_m)
+        outgoing = math.atan2(end.y_m-corner.y_m, end.x_m-corner.x_m)
+        turn = angle(outgoing-incoming)
+        if abs(abs(turn)-math.pi/2) > 1e-5:
+            raise ValueError('当前平滑几何仅支持90度连接')
+        measure = specification('ARC',Pose(0,0,0),Pose(0,0,turn),radius)
+        measure.tangent = 0
+        displacement = abs(NativeReference(library,Pose(0,0,0),measure).end.x_m)
+        lead = math.dist(start.values()[:2],corner.values()[:2])-displacement
+        tail = math.dist(end.values()[:2],corner.values()[:2])-displacement
+        if min(lead,tail) <= .02:
+            raise ValueError('直线长度不足以容纳连续弯道')
+        spec.kind, spec.x_m, spec.y_m = 4, 0, 0
+        spec.path = PathSpec(lead,tail,radius,radius*.35,1 if turn>0 else -1,0)
+        spec.path_heading_rad = angle(incoming-start.yaw_rad)
+        # 预留向心加速度及曲率变化jerk预算，巡航上限保持原0.14m/s。
+        spec.curve_velocity_m_s = min(CRUISE_M_S,math.sqrt(.125*radius),(.4*radius*radius/4.5)**(1/3))
+        spec.tail_velocity_m_s = DOCK_M_S if terminal else CRUISE_M_S
+    elif kind == 'WINDOW':
+        if corner is None:
+            raise ValueError('转姿段缺少安全窗口')
+        along = math.dist(start.values()[:2],corner.values()[:2])
+        distance = math.hypot(local.x_m,local.y_m)
+        if along <= window_m or along >= distance-window_m:
+            raise ValueError('转姿窗口不在直线内部')
+        spec.kind = 6
+        spec.yaw_begin_m, spec.yaw_end_m = along-window_m, along+window_m
+        spec.curve_velocity_m_s = CRUISE_M_S
+        spec.tail_velocity_m_s = DOCK_M_S if terminal else CRUISE_M_S
+    elif terminal:
+        distance = math.hypot(local.x_m,local.y_m)
+        if distance <= .07:
+            spec.linear.velocity = DOCK_M_S
+        else:
+            spec.kind = 6
+            spec.yaw_begin_m, spec.yaw_end_m = distance-.05, distance-.03
+            spec.curve_velocity_m_s = DOCK_M_S
+            spec.tail_velocity_m_s = DOCK_M_S
     return spec
 
 

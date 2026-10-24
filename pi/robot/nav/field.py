@@ -41,7 +41,7 @@ class Field:
         margin = self.data['margin_m'] + (self.data['tracking_margin_m'] if tracking else 0)
         polygon = footprint(pose, self.body, margin, movement)
         # 仅蓝区内部起步/返回允许名义主体贴近场界，明确不证明20mm余量。
-        boundary = footprint(pose, self.body, 0 if compact else margin, movement)
+        boundary = footprint(pose, self.body, 0, movement) if compact else polygon
         a, b = bounds(boundary), self.data['bounds_m']
         errors = ['FIELD_BOUNDARY'] if a[0] < b[0]-1e-9 or a[1] < b[1]-1e-9 or a[2] > b[2]+1e-9 or a[3] > b[3]+1e-9 else []
         # 蓝色是可通行的地面标记；仅黄区、工作台包络参与禁入碰撞。
@@ -53,10 +53,19 @@ class Field:
         radius = math.hypot(max(self.body['front_m'], self.body['rear_m']) + margin,
                             max(self.body['left_m'], self.body['right_m']) + margin)
         rate = reference.velocity_bound + radius * reference.yaw_bound
-        step = min(.04, .0015 / max(rate, .001))
-        samples = reference.samples(step)
-        for (at, pose), (next_at, next_pose) in zip(samples, samples[1:]):
-            errors = self.errors(pose, allowed_start, rate * (next_at-at) + .00002, next_pose)
-            if errors:
+        errors=self.errors(reference.end,allowed_start)
+        if errors:
+            return errors
+        pending=[(0.,reference.start,reference.duration_s,reference.end)]
+        while pending:
+            at,pose,next_at,next_pose=pending.pop()
+            movement=rate*(next_at-at)+.00002
+            errors=self.errors(pose,allowed_start,movement,next_pose)
+            if not errors:
+                continue
+            if movement<=.00152 or self.errors(pose,allowed_start):
                 return errors
-        return self.errors(reference.end, allowed_start)
+            middle=(at+next_at)/2
+            point=reference.at(middle)
+            pending.extend(((middle,point,next_at,next_pose),(at,pose,middle,point)))
+        return []

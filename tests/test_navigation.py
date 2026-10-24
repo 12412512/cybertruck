@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT / 'pi'))
 from robot.nav.frames import Pose, compose, relative, legacy, canvas, angle
 from robot.nav.field import Field
 from robot.nav.geometry import rectangle, simplify
-from robot.nav.reference import specification, NativeReference
+from robot.nav.reference import specification, flow_specification, NativeReference
 from robot.nav.planner import Planner, view
 from robot.odom_sim import fixture
 from robot.route_sim import RouteSimulation
@@ -92,16 +92,15 @@ class NavigationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Planner(self.lib, bad)
 
-    def test_correct_north_start_and_short_exit_then_x_travel(self):
+    def test_confirmed_east_start_and_holonomic_travel(self):
         result = self.planner.plan('start_1', 'qr', roads=self.open_roads)
         self.assertEqual(result['status'], 'OK')
-        self.assertEqual(result['segments'][0].kind, 'DIAGONAL')
-        self.assertAlmostEqual(result['segments'][0].reference.start.yaw_rad, math.pi/2)
+        self.assertAlmostEqual(result['segments'][0].reference.start.yaw_rad, 0)
+        self.assertAlmostEqual(result['segments'][-1].reference.end.yaw_rad, 0)
         self.assertFalse(result['executable'])
-        for segment in result['segments']:
-            if segment.kind == 'LINE':
-                local = relative(segment.reference.start, segment.reference.end)
-                self.assertAlmostEqual(local.y_m, 0, delta=1e-6)
+        side, errors = self.planner.make('DIAGONAL', Pose(1.2,.4,0), Pose(1.2,1.2,0), 'test', None)
+        self.assertIsNotNone(side, errors)
+        self.assertGreater(relative(side.reference.start, side.reference.end).y_m, .3)
 
     def test_blue_zones_are_traversable_but_start_rotation_must_fit(self):
         self.assertEqual(self.planner.plan('start_1','start_2',roads=self.open_roads)['status'], 'OK')
@@ -142,10 +141,11 @@ class NavigationTests(unittest.TestCase):
                 self.assertLessEqual(abs(p.wz_rad_s),reference.yaw_bound*1.0001)
 
     def test_smoothing_has_safe_arcs_and_lower_time_cost(self):
-        plan = self.planner.plan('staging','start_1',start_heading=2,roads=self.open_roads)
+        plan = self.planner.plan('qr','raw',start_heading=0,roads=self.open_roads)
         self.assertEqual(plan['status'],'OK')
-        self.assertTrue(any(s.kind=='ARC' for s in plan['segments']))
-        self.assertLess(plan['estimate_s'],plan['before_s'])
+        self.assertTrue(any(s.kind=='FLOW' for s in plan['segments']))
+        baseline = self.planner.plan('qr','raw',start_heading=0,roads=self.open_roads,flow=False)
+        self.assertLess(plan['estimate_s'],baseline['estimate_s'])
         for a,b in zip(plan['segments'],plan['segments'][1:]):
             self.assertLess(math.dist(a.reference.end.values()[:2],b.reference.start.values()[:2]),1e-6)
             self.assertLess(abs(a.reference.end.yaw_rad-b.reference.start.yaw_rad),1e-5)
@@ -167,7 +167,66 @@ class NavigationTests(unittest.TestCase):
     def test_mirrored_start_is_separately_checked(self):
         result=self.planner.plan('start_2','qr',assigned_start='start_2',roads=self.open_roads)
         self.assertEqual(result['status'],'OK')
-        self.assertAlmostEqual(result['segments'][0].reference.start.yaw_rad,math.pi/2)
+        self.assertAlmostEqual(result['segments'][0].reference.start.yaw_rad,math.pi)
+
+    def test_shared_road_names_cannot_bypass_blocked_or_unknown(self):
+        for state in ('UNKNOWN','BLOCKED'):
+            result = self.planner.plan('raw','rough',roads=self.open_roads|{'center_east':state})
+            self.assertEqual(result['road_states']['rough_approach'],state)
+            self.assertTrue(all('rough_approach' not in s.road.split('+') for s in result['segments']))
+
+    def test_shortcut_cannot_cut_back_through_closed_corridor(self):
+        result = self.planner.plan('raw','rough',start_heading=1,goal_heading=1,
+                                   roads=self.open_roads|{'center_east':'BLOCKED'})
+        self.assertEqual(result['status'],'OK')
+        for segment in result['segments']:
+            self.assertFalse(set(segment.road.split('+')) & {'center_east','rough_approach'})
+            for _,pose in segment.reference.samples(.02):
+                self.assertFalse(1.3 < pose.x_m < 1.8 and 1.15 < pose.y_m < 1.25,
+                                 '捷径切回关闭的中间走廊')
+
+    def test_flow_native_cartesian_limits_and_no_internal_stops(self):
+        start = Pose(.3,.4,.2)
+        for kind,end,corner in (
+                ('FLOW',Pose(1.3,1.4,.2+math.pi/2),Pose(1.3,.4,.2)),
+                ('WINDOW',Pose(2.3,.4,.2+math.pi),Pose(1.3,.4,.2)),
+                ('POSE',Pose(1.3,1.4,.2-math.pi/2),None)):
+            spec = flow_specification(self.lib,kind,start,end,corner,radius=.16)
+            ref = NativeReference(self.lib,start,spec)
+            previous = None
+            for i in range(3001):
+                t = ref.duration_s*i/3000
+                point = ref.point(t)
+                self.assertLessEqual(math.hypot(point.vx_m_s,point.vy_m_s),.14005)
+                self.assertLessEqual(math.hypot(point.ax_m_s2,point.ay_m_s2),.25008)
+                self.assertLessEqual(math.hypot(point.jx_m_s3,point.jy_m_s3),.80025)
+                self.assertLessEqual(abs(point.wz_rad_s),.7001)
+                self.assertLessEqual(abs(point.angular_accel_rad_s2),2.0001)
+                self.assertLessEqual(abs(point.angular_jerk_rad_s3),12.001)
+                if 0 < i < 3000:
+                    self.assertGreater(math.hypot(point.vx_m_s,point.vy_m_s),0)
+                if previous:
+                    dt = ref.duration_s/3000
+                    self.assertLess(math.hypot(point.vx_m_s-previous.vx_m_s,
+                                               point.vy_m_s-previous.vy_m_s),.2501*dt+1e-6)
+                previous = point
+            for a,b in zip(ref.end.values(),end.values()):
+                self.assertAlmostEqual(a,b,delta=2e-6)
+
+    def test_half_turn_keeps_selected_winding_when_next_goal_is_built(self):
+        model = RouteSimulation(self.library)
+        index = next(i for i,(_,s) in enumerate(model.actions) if s.kind=='WINDOW')
+        model.index = index
+        segment = model.actions[index][1]
+        current = relative(model.map_to_odom,segment.reference.start)
+        model.model.pose.update(x_m=current.x_m,y_m=current.y_m,yaw_rad=current.yaw_rad+1e-5)
+        captured = []
+        with patch.object(model.model,'begin',side_effect=captured.append):
+            model._begin()
+        planned = segment.reference.spec.yaw_rad
+        actual = captured[0].reference.yaw_rad
+        self.assertGreater(actual*planned,0)
+        self.assertAlmostEqual(actual,planned-1e-5,delta=1e-6)
 
     def test_missing_full_envelope_remains_a_blocker(self):
         result=self.planner.plan('start_1','qr',roads=self.open_roads)
@@ -210,6 +269,9 @@ class NavigationTests(unittest.TestCase):
         self.assertTrue(all(r['stable_ms']>=150 and r['zero_ack_ms']>0 for r in report['results']))
         self.assertIsNone(report['actual_pose'])
         self.assertFalse(report['executable'])
+        self.assertEqual(len(report['legs']),8)
+        self.assertFalse(report['budget_complete'])
+        self.assertGreater(report['ideal_minimum_s'],60)
         self.assertLess(math.dist(report['truth_pose'][:2],report['initial_pose'][:2]),.006)
         self.assertGreater(max(p[0] for p in report['trace'])-min(p[0] for p in report['trace']),1.5)
         self.assertGreater(max(p[1] for p in report['trace'])-min(p[1] for p in report['trace']),1.5)

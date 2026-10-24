@@ -41,4 +41,32 @@ typedef struct
 int Curve_Make(CurvePlan *plan, float distance, CurveLimit limit);
 int Curve_At(const CurvePlan *plan, double seconds, CurvePoint *point);
 
+#define CURVE_TIME_PHASES 15U
+typedef struct
+{
+    double time[CURVE_TIME_PHASES + 1U];
+    double position[CURVE_TIME_PHASES + 1U];
+    double velocity[CURVE_TIME_PHASES + 1U];
+    double acceleration[CURVE_TIME_PHASES + 1U];
+    double jerk[CURVE_TIME_PHASES];
+    double distance;
+    double total;
+    double peak_velocity;
+    double curve_velocity;
+    double start_end;
+    double stop_begin;
+    double lead_peak;
+    double tail_peak;
+    unsigned count;
+    unsigned valid;
+    unsigned split;
+} CurveTiming;
+
+/* 复用旧PathTimePlan：首末直线高速、内部曲线低速，边界V/A连续且不停车。
+ * 全部距离米；tail_velocity单独约束末端接近档，不改变全局速度上限。 */
+int Curve_TimeMake(CurveTiming *plan, float distance_m, float lead_m, float tail_m,
+                   CurveLimit slow, float fast_velocity_m_s, float buffer_m, float tail_velocity_m_s);
+int Curve_TimeAt(const CurveTiming *plan, double seconds, CurvePoint *point);
+double Curve_TimeFind(const CurveTiming *plan, double position_m);
+
 #endif

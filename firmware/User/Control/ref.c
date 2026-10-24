@@ -32,7 +32,12 @@ int Ref_Bounds(const RefPlan *plan, double *velocity_m_s, double *yaw_rad_s)
     }
     *velocity_m_s = plan->spec.kind == 2 ? 0 : plan->spec.linear.velocity;
     *yaw_rad_s = plan->spec.kind == 2 ? plan->spec.angular.velocity : 0;
-    if (plan->spec.kind != 3)
+    if (plan->spec.kind >= 4 && plan->heading_end_s > plan->heading_begin_s)
+    {
+        *yaw_rad_s = plan->heading.peak_velocity * plan->heading.total /
+            (plan->heading_end_s - plan->heading_begin_s);
+    }
+    if (plan->spec.kind != 3 && plan->spec.kind != 4)
     {
         return 1;
     }
@@ -59,7 +64,7 @@ int Ref_Bounds(const RefPlan *plan, double *velocity_m_s, double *yaw_rad_s)
         speed = hypot(dx, dy) * plan->spec.linear.velocity;
         yaw = (dx * ddy + dy * ddx) / (lower * lower) * plan->spec.linear.velocity;
         *velocity_m_s = fmax(*velocity_m_s, speed);
-        if (plan->spec.tangent)
+        if (plan->spec.kind == 3 && plan->spec.tangent)
         {
             *yaw_rad_s = fmax(*yaw_rad_s, yaw);
         }
@@ -77,11 +82,177 @@ static void Transform(const RefPlan *plan, RefPoint *point)
     double y = point->y_m;
     double vx = point->vx_m_s;
     double vy = point->vy_m_s;
+    double ax = point->ax_m_s2;
+    double ay = point->ay_m_s2;
+    double jx = point->jx_m_s3;
+    double jy = point->jy_m_s3;
     point->x_m = plan->origin[0] + cosine * x - sine * y;
     point->y_m = plan->origin[1] + sine * x + cosine * y;
     point->yaw_rad += plan->origin[2];
     point->vx_m_s = cosine * vx - sine * vy;
     point->vy_m_s = sine * vx + cosine * vy;
+    point->ax_m_s2 = cosine * ax - sine * ay;
+    point->ay_m_s2 = sine * ax + cosine * ay;
+    point->jx_m_s3 = cosine * jx - sine * jy;
+    point->jy_m_s3 = sine * jx + cosine * jy;
+}
+
+static int ExtendedAt(const RefPlan *plan, double seconds, RefPoint *point)
+{
+    CurvePoint scalar;
+    CurvePoint heading;
+    LinePoint line;
+    PathPoint path;
+    double scale;
+    double local;
+    double co = cos(plan->spec.path_heading_rad);
+    double si = sin(plan->spec.path_heading_rad);
+    if (plan->spec.kind == 5)
+    {
+        scale = plan->duration_s > 0 ? plan->position_time_s / plan->duration_s : 0;
+        if (!Line_At(&plan->line, seconds * scale, &line))
+        {
+            return 0;
+        }
+        point->x_m = line.x_m;
+        point->y_m = line.y_m;
+        point->vx_m_s = line.vx_m_s * scale;
+        point->vy_m_s = line.vy_m_s * scale;
+        point->ax_m_s2 = line.ax_m_s2 * scale * scale;
+        point->ay_m_s2 = line.ay_m_s2 * scale * scale;
+        if (!Curve_At(&plan->line.curve, seconds * scale, &scalar))
+        {
+            return 0;
+        }
+        point->jx_m_s3 = plan->line.ux * scalar.jerk * scale * scale * scale;
+        point->jy_m_s3 = plan->line.uy * scalar.jerk * scale * scale * scale;
+    }
+    else
+    {
+        if (!Curve_TimeAt(&plan->timing, seconds, &scalar))
+        {
+            return 0;
+        }
+        if (plan->spec.kind == 4)
+        {
+            if (!Path_At(&plan->path, scalar.position, &path))
+            {
+                return 0;
+            }
+            point->x_m = co * path.x_m - si * path.y_m;
+            point->y_m = si * path.x_m + co * path.y_m;
+            point->vx_m_s = (co * path.tx - si * path.ty) * scalar.velocity;
+            point->vy_m_s = (si * path.tx + co * path.ty) * scalar.velocity;
+            {
+                double ax = path.tx * scalar.acceleration + path.dtx * scalar.velocity * scalar.velocity;
+                double ay = path.ty * scalar.acceleration + path.dty * scalar.velocity * scalar.velocity;
+                double jx = path.tx * scalar.jerk + 3 * path.dtx * scalar.velocity * scalar.acceleration +
+                    path.ddtx * scalar.velocity * scalar.velocity * scalar.velocity;
+                double jy = path.ty * scalar.jerk + 3 * path.dty * scalar.velocity * scalar.acceleration +
+                    path.ddty * scalar.velocity * scalar.velocity * scalar.velocity;
+                point->ax_m_s2 = co * ax - si * ay;
+                point->ay_m_s2 = si * ax + co * ay;
+                point->jx_m_s3 = co * jx - si * jy;
+                point->jy_m_s3 = si * jx + co * jy;
+            }
+        }
+        else
+        {
+            point->x_m = plan->line.ux * scalar.position;
+            point->y_m = plan->line.uy * scalar.position;
+            point->vx_m_s = plan->line.ux * scalar.velocity;
+            point->vy_m_s = plan->line.uy * scalar.velocity;
+            point->ax_m_s2 = plan->line.ux * scalar.acceleration;
+            point->ay_m_s2 = plan->line.uy * scalar.acceleration;
+            point->jx_m_s3 = plan->line.ux * scalar.jerk;
+            point->jy_m_s3 = plan->line.uy * scalar.jerk;
+        }
+    }
+    scale = plan->heading_end_s > plan->heading_begin_s ?
+        plan->heading.total / (plan->heading_end_s - plan->heading_begin_s) : 0;
+    local = fmax(0, fmin(plan->heading.total, (seconds - plan->heading_begin_s) * scale));
+    if (!Curve_At(&plan->heading, local, &heading))
+    {
+        return 0;
+    }
+    point->yaw_rad = heading.position;
+    if (seconds >= plan->heading_begin_s && seconds < plan->heading_end_s)
+    {
+        point->wz_rad_s = heading.velocity * scale;
+        point->angular_accel_rad_s2 = heading.acceleration * scale * scale;
+        point->angular_jerk_rad_s3 = heading.jerk * scale * scale * scale;
+    }
+    point->done = seconds >= plan->duration_s;
+    return hypot(point->vx_m_s, point->vy_m_s) <= plan->spec.linear.velocity * 1.0003 &&
+        hypot(point->ax_m_s2, point->ay_m_s2) <= plan->spec.linear.acceleration * 1.0003 &&
+        hypot(point->jx_m_s3, point->jy_m_s3) <= plan->spec.linear.jerk * 1.0003;
+}
+
+static int ExtendedMake(RefPlan *plan)
+{
+    const RefSpec *input = &plan->spec;
+    CurveLimit slow = input->linear;
+    double distance;
+    double lead;
+    double tail;
+    double core;
+    if (input->tangent || !Curve_Make(&plan->heading, input->yaw_rad, input->angular))
+    {
+        return 0;
+    }
+    if (input->kind == 5)
+    {
+        if (!Line_Make(&plan->line, input->x_m, input->y_m, input->linear))
+        {
+            return 0;
+        }
+        plan->position_time_s = plan->line.curve.total;
+        plan->duration_s = fmax(plan->position_time_s, plan->heading.total);
+        plan->heading_end_s = plan->duration_s;
+        return 1;
+    }
+    if (input->kind == 4)
+    {
+        if (input->x_m || input->y_m || !Path_Make(&plan->path, &input->path))
+        {
+            return 0;
+        }
+        distance = plan->path.length_m;
+        lead = input->path.lead_m;
+        tail = input->path.tail_m;
+    }
+    else
+    {
+        if (!Line_Make(&plan->line, input->x_m, input->y_m, input->linear))
+        {
+            return 0;
+        }
+        distance = plan->line.curve.distance;
+        lead = input->yaw_begin_m;
+        tail = distance - input->yaw_end_m;
+    }
+    core = distance - lead - tail;
+    if (!isfinite(input->curve_velocity_m_s) || input->curve_velocity_m_s <= 0 ||
+        input->curve_velocity_m_s > input->linear.velocity || core <= 0)
+    {
+        return 0;
+    }
+    slow.velocity = input->curve_velocity_m_s;
+    if (plan->heading.total > 0)
+    {
+        slow.velocity = (float)fmin(slow.velocity, core / (plan->heading.total * 1.001));
+    }
+    if (!Curve_TimeMake(&plan->timing, (float)distance, (float)lead, (float)tail, slow,
+        input->linear.velocity, 0.0f,
+        input->tail_velocity_m_s > 0 ? input->tail_velocity_m_s : input->linear.velocity))
+    {
+        return 0;
+    }
+    plan->position_time_s = plan->duration_s = plan->timing.total;
+    plan->heading_begin_s = Curve_TimeFind(&plan->timing, lead);
+    plan->heading_end_s = Curve_TimeFind(&plan->timing, distance - tail);
+    return plan->heading_begin_s >= 0 && plan->heading_end_s > plan->heading_begin_s &&
+        plan->heading.total <= (plan->heading_end_s - plan->heading_begin_s) * 1.000001;
 }
 
 int Ref_At(const RefPlan *plan, double seconds, RefPoint *point)
@@ -100,7 +271,14 @@ int Ref_At(const RefPlan *plan, double seconds, RefPoint *point)
     {
         return 0;
     }
-    if (plan->spec.kind == 1)
+    if (plan->spec.kind >= 4)
+    {
+        if (!ExtendedAt(plan, seconds, point))
+        {
+            return 0;
+        }
+    }
+    else if (plan->spec.kind == 1)
     {
         if (!Line_At(&plan->line, seconds, &line))
         {
@@ -110,6 +288,14 @@ int Ref_At(const RefPlan *plan, double seconds, RefPoint *point)
         point->y_m = line.y_m;
         point->vx_m_s = line.vx_m_s;
         point->vy_m_s = line.vy_m_s;
+        point->ax_m_s2 = line.ax_m_s2;
+        point->ay_m_s2 = line.ay_m_s2;
+        if (!Curve_At(&plan->line.curve, seconds, &scalar))
+        {
+            return 0;
+        }
+        point->jx_m_s3 = plan->line.ux * scalar.jerk;
+        point->jy_m_s3 = plan->line.uy * scalar.jerk;
         point->done = line.reference_done;
     }
     else
@@ -138,6 +324,12 @@ int Ref_At(const RefPlan *plan, double seconds, RefPoint *point)
             point->y_m = path.y_m;
             point->vx_m_s = path.tx * velocity;
             point->vy_m_s = path.ty * velocity;
+            point->ax_m_s2 = path.tx * accel + path.dtx * velocity * velocity;
+            point->ay_m_s2 = path.ty * accel + path.dty * velocity * velocity;
+            point->jx_m_s3 = path.tx * scalar.jerk + 3 * path.dtx * velocity * accel +
+                path.ddtx * velocity * velocity * velocity;
+            point->jy_m_s3 = path.ty * scalar.jerk + 3 * path.dty * velocity * accel +
+                path.ddty * velocity * velocity * velocity;
             if (plan->spec.tangent)
             {
                 point->yaw_rad = path.yaw_rad;
@@ -172,7 +364,10 @@ int Ref_Make(RefPlan *plan, const RefSpec *spec, double x_m, double y_m, double 
     if (!spec || !isfinite(x_m) || !isfinite(y_m) || !isfinite(yaw_rad) ||
         fabs(x_m) > 1e6 || fabs(y_m) > 1e6 || fabs(yaw_rad) > 1e6 ||
         !isfinite(input.x_m) || !isfinite(input.y_m) || !isfinite(input.yaw_rad) ||
-        input.kind < 1 || input.kind > 3 || input.tangent > 1 ||
+        input.kind < 1 || input.kind > 6 || input.tangent > 1 ||
+        !isfinite(input.path_heading_rad) || !isfinite(input.curve_velocity_m_s) ||
+        !isfinite(input.yaw_begin_m) || !isfinite(input.yaw_end_m) ||
+        !isfinite(input.tail_velocity_m_s) || input.tail_velocity_m_s < 0 ||
         !isfinite(input.angular.velocity) || input.angular.velocity <= 0 ||
         !isfinite(input.angular.acceleration) || input.angular.acceleration <= 0 ||
         !isfinite(input.angular.jerk) || input.angular.jerk <= 0)
@@ -183,7 +378,14 @@ int Ref_Make(RefPlan *plan, const RefSpec *spec, double x_m, double y_m, double 
     plan->origin[0] = x_m;
     plan->origin[1] = y_m;
     plan->origin[2] = yaw_rad;
-    if (input.kind == 1)
+    if (input.kind >= 4)
+    {
+        if (!ExtendedMake(plan))
+        {
+            return 0;
+        }
+    }
+    else if (input.kind == 1)
     {
         if (input.yaw_rad || input.tangent || !Line_Make(&plan->line, input.x_m, input.y_m, input.linear))
         {

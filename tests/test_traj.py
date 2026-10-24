@@ -41,6 +41,12 @@ class TrajectoryTests(unittest.TestCase):
             getattr(cls.lib, name).argtypes = [c.c_double, c.POINTER(c.c_float)]
         cls.lib.Test_Reached.argtypes = [c.c_uint, c.c_float, c.c_float, c.POINTER(c.c_float)]
         cls.lib.Test_Corrupt.restype = None
+        cls.lib.Test_Timing.argtypes = [c.c_float] * 6
+        cls.lib.Test_TimingTime.restype = c.c_double
+        cls.lib.Test_TimingCount.restype = c.c_uint
+        cls.lib.Test_TimingBoundary.argtypes = [c.c_uint]
+        cls.lib.Test_TimingBoundary.restype = c.c_double
+        cls.lib.Test_TimingAt.argtypes = [c.c_double, c.POINTER(c.c_float)]
 
     def at(self, name, time):
         output = (c.c_float * 14)()
@@ -71,6 +77,36 @@ class TrajectoryTests(unittest.TestCase):
                 self.assertLessEqual(abs(point[3]), jerk * 1.00001)
                 self.assertAlmostEqual(point[0] + mirror[0], distance, delta=1e-5)
                 self.assertAlmostEqual(point[1], mirror[1], delta=1e-5)
+
+    def test_variable_speed_timing_limits_continuity_and_terminal_cap(self):
+        for lead, tail, end in ((.8, .7, .14), (.3, .8, .025), (.07, .07, .14)):
+            self.assertEqual(self.lib.Test_Timing(2, lead, tail, .04, .14, end), 1)
+            total = self.lib.Test_TimingTime()
+            count = self.lib.Test_TimingCount()
+            self.assertLessEqual(count, 15)
+            previous = 0
+            for i in range(1001):
+                p = self.at('Test_TimingAt', total*i/1000)
+                self.assertGreaterEqual(p[0]+1e-6, previous)
+                previous = p[0]
+                self.assertLessEqual(abs(p[1]), .14001)
+                self.assertLessEqual(abs(p[2]), .25001)
+                self.assertLessEqual(abs(p[3]), .80001)
+                if 2-tail+.001 < p[0] < 1.999:
+                    self.assertLessEqual(p[1], max(end,.04)+1e-6)
+            for i in range(1, count):
+                at = self.lib.Test_TimingBoundary(i)
+                before, after = [self.at('Test_TimingAt', at+d) for d in (-1e-7, 1e-7)]
+                for field in range(3):
+                    self.assertAlmostEqual(before[field], after[field], delta=2e-6)
+                self.assertGreater(before[1], 0)
+            self.assertEqual(self.at('Test_TimingAt', total)[1:5], [0,0,0,1])
+
+    def test_variable_speed_timing_rejects_invalid_geometry_and_nonfinite(self):
+        for values in ((2,0,.5,.04,.14,.14), (2,1,1,.04,.14,.14),
+                       (2,.5,.5,.2,.14,.14), (2,.5,.5,.04,.14,0),
+                       (float('nan'),.5,.5,.04,.14,.14)):
+            self.assertEqual(self.lib.Test_Timing(*values), 0)
 
     def test_curve_phase_boundaries_continuous_and_invalid_inputs(self):
         self.assertEqual(self.lib.Test_Curve(2, .3, .5, 2), 1)

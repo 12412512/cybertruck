@@ -111,6 +111,6 @@ $env:PYTHONPATH = Join-Path (Get-Location) 'pi'
 
 ## 统一坐标与导航巡回
 
-当前本机8000改用`--mode sim --route-library output/native/navigation.dll --runtime output/preview`，启停区1朝扫码区+90度，蓝区可通行。构建：`python -B tools/build_odom.py --output output/native/navigation.dll`；独立回放：`python -B -m robot.route_sim --library output/native/navigation.dll`。均用根目录虚拟环境并设置PYTHONPATH=pi，详情见[导航验收](../docs/navigation.md)。
+当前本机8000使用`--mode sim --route-library output/native/flow.dll --runtime output/preview`，启停区1车头+X、启停区2车头−X、扫码+X。上面各模型接入段落为历史记录，以本节为现行入口。构建：`python -B tools/build_odom.py --output output/native/flow.dll`；独立回放：`python -B -m robot.route_sim --library output/native/flow.dll --start start_1`。均用根目录虚拟环境并设置PYTHONPATH=pi，详情见[连续导航](../docs/flow.md)。
 
-新页面显示同一规划器的名义地图、车身、轨迹、逐段结果和未验证条件。23段导航闭环完成，不推进扫码/搬运账本，不填真实位姿或成绩；默认调试速度下约130.97秒，未满足比赛导航预算。模型与独立odom/track标志互斥，真实模式拒绝加载；Pi8080和本机8001未改动。
+新页面显示同一规划器的名义地图、车身、轨迹、逐段类型、原点和未验证项。默认8段两批跨区导航，不推进扫码/搬运账本，不填真实位姿或成绩。启停区1模型135.46s、启停区2模型137.33s，未满足完整60秒预算，工位内移位和视觉修正还待建模。`--stopped`回放停车基准，`--scope tour`仅作五站巡回对照；同速A/B工具为`tools/compare_nav.py`。模型与独立odom/track标志互斥，真实模式拒绝加载；Pi8080和本机8001未改动。

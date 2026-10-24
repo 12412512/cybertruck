@@ -13,6 +13,7 @@ from .device.tracking import Goal, Spec
 from .nav.frames import Pose, compose, relative, angle
 from .nav.planner import Planner, view
 from .nav.geometry import simplify
+from .nav.reference import CRUISE_M_S
 
 
 def odom_pose(values):
@@ -20,7 +21,7 @@ def odom_pose(values):
 
 
 class RouteSimulation:
-    def __init__(self, library, *, blocked=(), start='start_1'):
+    def __init__(self, library, *, blocked=(), start='start_1', flow=True, scope='two_batch'):
         config = settings(fixture())
         config.position_tol_m, config.yaw_tol_rad = .003, .012
         self.model = ClosedLoop(library, config=config, auto_start=False)
@@ -29,16 +30,25 @@ class RouteSimulation:
         self.start = start
         if start not in ('start_1', 'start_2'):
             raise ValueError('起点只能为启停区1/2')
-        self.map_to_odom = self.planner.pose(start, 1)
+        self.flow, self.scope = flow, scope
+        if scope not in ('tour','two_batch'):
+            raise ValueError('导航范围无效')
+        initial_heading=self.planner.data['station_heading_quarters'][start]
+        self.map_to_odom = self.planner.pose(start, initial_heading)
         self.roads = {row[0]: 'OPEN' for row in self.planner.data['edges']}
         if set(blocked) - set(self.roads):
             raise ValueError('封路编号无效')
         self.roads.update({key: 'BLOCKED' for key in blocked})
         self.legs = []
         self.actions = []
-        node, heading = start, 1
-        for target in ('qr', 'raw', 'rough', 'staging', start):
-            plan = self.planner.plan(node, target, start_heading=heading, roads=self.roads, assigned_start=start)
+        node, heading = start, initial_heading
+        targets=('qr','raw','rough','staging',start) if scope=='tour' else (
+            'qr','raw','rough','staging','raw','rough','staging',start)
+        for target in targets:
+            plan = self.planner.plan(node,target,start_heading=heading,roads=self.roads,assigned_start=start,flow=flow)
+            if flow:
+                baseline=self.planner.plan(node,target,start_heading=heading,roads=self.roads,assigned_start=start,flow=False)
+                plan['before_s']=baseline.get('estimate_s',0)
             plan['assumed_roads'] = True
             self.legs.append(plan)
             if plan['status'] != 'OK':
@@ -47,7 +57,7 @@ class RouteSimulation:
                 self.actions.append((len(self.legs)-1, segment))
             node = target
             heading = self.planner.data['station_heading_quarters'][target]
-        self.status = 'READY' if len(self.legs) == 5 and all(p['status'] == 'OK' for p in self.legs) else 'NO_PATH'
+        self.status = 'READY' if len(self.legs) == len(targets) and all(p['status'] == 'OK' for p in self.legs) else 'NO_PATH'
         self.index = 0
         self.active = False
         self.reason = ''
@@ -56,6 +66,10 @@ class RouteSimulation:
         self.trace_count = -1
         self.results = []
         self.last_truth_ms = -1
+        self.previous_truth = None
+        self.inplace_turn_ms = 0
+        self.moving_turn_ms = 0
+        self.travel_m = 0.
         self.origin_ms = None
         self.min_origin_consistent = True
         self.started = time.monotonic()
@@ -63,15 +77,26 @@ class RouteSimulation:
         for _, segment in self.actions:
             self.reference_trace.extend(p.values() for _, p in segment.reference.samples(.12))
         self.view_legs = [view(p) for p in self.legs]
+        points=[self.planner.data['nodes'][name] for name in (start,*targets)]
+        self.minimum_distance_m=sum(math.dist(a,b) for a,b in zip(points,points[1:]))
 
     def _begin(self):
         leg, segment = self.actions[self.index]
         current = odom_pose(self.model.pose)
         desired = relative(self.map_to_odom, segment.reference.end)
         spec = Spec.from_buffer_copy(bytes(segment.reference.spec))
-        if spec.kind == 1:
+        if spec.kind in (1,5,6):
             local = relative(current, desired)
             spec.x_m, spec.y_m = local.x_m, local.y_m
+            if spec.kind in (5,6):
+                planned=segment.reference.spec.yaw_rad
+                spec.yaw_rad=planned+angle(desired.yaw_rad-current.yaw_rad-planned)
+        elif spec.kind==4:
+            actual_map=compose(self.map_to_odom,current)
+            bearing=segment.reference.start.yaw_rad+spec.path_heading_rad
+            spec.path_heading_rad=angle(bearing-actual_map.yaw_rad)
+            planned=segment.reference.spec.yaw_rad
+            spec.yaw_rad=planned+angle(desired.yaw_rad-current.yaw_rad-planned)
         elif spec.kind == 2:
             spec.yaw_rad = angle(desired.yaw_rad - current.yaw_rad)
         self.model.begin(Goal(self.index + 1, 30000, spec))
@@ -88,6 +113,17 @@ class RouteSimulation:
             if ms <= self.last_truth_ms:
                 continue
             pose = compose(self.map_to_odom, Pose(x, y, yaw))
+            if self.previous_truth:
+                old_ms,old_x,old_y,old_yaw=self.previous_truth
+                dt=ms-old_ms
+                distance=math.hypot(x-old_x,y-old_y)
+                self.travel_m+=distance
+                if dt>0 and abs(yaw-old_yaw)*1000/dt>.05:
+                    if distance*1000/dt<.006:
+                        self.inplace_turn_ms+=dt
+                    else:
+                        self.moving_turn_ms+=dt
+            self.previous_truth=(ms,x,y,yaw)
             # 该2ms模型区间轮速单调趋近固定命令，两端最大值界定实际位移。
             rpm = max(map(abs, (*speeds[ms], *speeds.get(ms-2, speeds[ms]))))
             wheel_m_s = rpm * 2 * math.pi * .05 / 60
@@ -153,20 +189,28 @@ class RouteSimulation:
             self.trace = simplify(self.raw_trace)
             self.trace_count = len(self.raw_trace)
         return dict(domain='simulation', frame_id='map', start=self.start, status=self.status, executable=False,
+                    budget_scope=self.scope,flow=self.flow,budget_s=60,
+                    budget_complete=False,
+                    missing_navigation=['工位内三个目标间移位', '视觉精对准修正'],
                     actual_pose=None, initial_pose_source='启停区1名义中心，朝向按人工确认' if self.start=='start_1'
-                    else '启停区2位置与朝向均为独立合成假设',
+                    else '启停区2名义中心，朝向按人工确认',
                     initial_pose=self.map_to_odom.values(), map_pose=pose.values(), truth_pose=truth.values(),
                     action=self.index+1 if self.index<len(self.actions) else self.index,
                     actions=len(self.actions), completed=len(self.results), elapsed_ms=self.model.elapsed_ms,
                     leg=self.actions[self.index][0] if self.index<len(self.actions) else len(self.legs)-1,
                     legs=self.view_legs, results=list(self.results), reason=self.reason,
                     estimate_s=sum(p.get('estimate_s', 0) for p in self.legs),
+                    cruise_m_s=CRUISE_M_S,minimum_distance_m=self.minimum_distance_m,
+                    ideal_minimum_s=self.minimum_distance_m/CRUISE_M_S,
+                    inplace_actions=sum(s.kind=='TURN' for _,s in self.actions),
+                    inplace_turn_ms=self.inplace_turn_ms,moving_turn_ms=self.moving_turn_ms,travel_m=self.travel_m,
                     before_s=sum(p.get('before_s', 0) for p in self.legs),
                     origin_ms=self.origin_ms, origin_consistent=self.min_origin_consistent,
                     tracking=self.model.tracker.output(), field=self.field.data, road_states=self.roads,
                     reference_trace=self.reference_trace, trace=list(self.trace), trace_tolerance_m=.0005,
                     assumptions=self.planner.data['unverified'], simulation_roads_assumed_open=True,
-                    scope='仅导航巡回，不推进扫码/机构任务或物理成功账本')
+                    scope='两批跨区导航小计；尚缺工位内移位与视觉修正，不代表完整60秒验收' if self.scope=='two_batch'
+                    else '单次空载巡回对照，不作为两批导航预算成绩')
 
     def run(self, limit_ms=240000):
         while self.model.elapsed_ms < limit_ms and self.status not in ('COMPLETE', 'FAILED', 'NO_PATH'):
@@ -199,8 +243,11 @@ def main():
     parser.add_argument('--library', type=Path, required=True)
     parser.add_argument('--output', type=Path, default=Path('output/navigation/report.json'))
     parser.add_argument('--blocked', action='append', default=[])
+    parser.add_argument('--start',choices=('start_1','start_2'),default='start_1')
+    parser.add_argument('--scope',choices=('tour','two_batch'),default='two_batch')
+    parser.add_argument('--stopped',action='store_true',help='同朝向同速度的逐段停车基准')
     args = parser.parse_args()
-    report = RouteSimulation(args.library, blocked=args.blocked).run()
+    report = RouteSimulation(args.library,blocked=args.blocked,start=args.start,scope=args.scope,flow=not args.stopped).run()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps({key:report[key] for key in ('status','reason','completed','actions','elapsed_ms','estimate_s','origin_consistent')},ensure_ascii=False))

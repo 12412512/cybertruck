@@ -10,6 +10,40 @@
 static CurvePlan curve;
 static PathPlan path;
 static LinePlan line;
+static CurveTiming timing;
+
+EXPORT int Test_Timing(float distance, float lead, float tail, float slow, float fast, float end)
+{
+    CurveLimit limit = {slow, 0.25f, 0.8f};
+    return Curve_TimeMake(&timing, distance, lead, tail, limit, fast, 0, end);
+}
+
+EXPORT double Test_TimingTime(void)
+{
+    return timing.total;
+}
+
+EXPORT unsigned Test_TimingCount(void)
+{
+    return timing.count;
+}
+
+EXPORT double Test_TimingBoundary(unsigned index)
+{
+    return index <= timing.count ? timing.time[index] : -1;
+}
+
+EXPORT int Test_TimingAt(double seconds, float *out)
+{
+    CurvePoint point;
+    int ok = Curve_TimeAt(&timing, seconds, &point);
+    out[0] = point.position;
+    out[1] = point.velocity;
+    out[2] = point.acceleration;
+    out[3] = point.jerk;
+    out[4] = (float)point.done;
+    return ok;
+}
 EXPORT int Test_Curve(float distance, float velocity, float accel, float jerk)
 {
     CurveLimit limit = {velocity, accel, jerk};

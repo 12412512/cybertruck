@@ -102,11 +102,14 @@ static int SameGoal(const TrackGoal *first, const TrackGoal *last)
     const RefSpec *b = &last->reference;
     if (first->id != last->id || first->timeout_ms != last->timeout_ms || a->kind != b->kind ||
         a->x_m != b->x_m || a->y_m != b->y_m || a->yaw_rad != b->yaw_rad || a->tangent != b->tangent ||
+        a->path_heading_rad != b->path_heading_rad || a->curve_velocity_m_s != b->curve_velocity_m_s ||
+        a->yaw_begin_m != b->yaw_begin_m || a->yaw_end_m != b->yaw_end_m ||
+        a->tail_velocity_m_s != b->tail_velocity_m_s ||
         !SameLimit(a->angular, b->angular) || (a->kind != 2 && !SameLimit(a->linear, b->linear)))
     {
         return 0;
     }
-    return a->kind != 3 || (a->path.lead_m == b->path.lead_m && a->path.tail_m == b->path.tail_m &&
+    return (a->kind != 3 && a->kind != 4) || (a->path.lead_m == b->path.lead_m && a->path.tail_m == b->path.tail_m &&
         a->path.radius_m == b->path.radius_m && a->path.blend_m == b->path.blend_m &&
         a->path.turn == b->path.turn && a->path.reverse == b->path.reverse);
 }

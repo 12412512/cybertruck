@@ -7,7 +7,7 @@ import math
 
 from .field import Field
 from .frames import Pose, angle
-from .reference import NativeReference, specification, CRUISE_M_S, DOCK_M_S, SHORT_MOVE_M, SETTLE_ESTIMATE_S
+from .reference import NativeReference, specification, CRUISE_M_S, SETTLE_ESTIMATE_S, flow_specification
 
 
 @dataclass
@@ -16,6 +16,7 @@ class Segment:
     reference: NativeReference
     road: str
     reverse: bool = False
+    corner: Pose | None = None
 
     @property
     def cost_s(self):
@@ -42,32 +43,36 @@ class Planner:
     def pose(self, node, heading):
         return Pose(*self.nodes[node], heading * math.pi / 2)
 
-    def make(self, kind, start, end, road, allowed_start, reverse=False, radius=.1):
-        key = (kind, start, end, road, allowed_start, reverse, radius)
+    def make(self, kind, start, end, road, allowed_start, reverse=False, radius=.1, corner=None, window_m=.08):
+        key = (kind, start, end, road, allowed_start, reverse, radius, corner, window_m)
         if key in self.cache:
             return self.cache[key]
         try:
             terminal = any(math.dist(end.values()[:2], self.nodes[node]) < 1e-6
                            for node in self.field.terminals(allowed_start))
-            velocity = DOCK_M_S if terminal and kind in ('LINE', 'DIAGONAL') else CRUISE_M_S
-            spec = specification(kind, start, end, radius, reverse, velocity)
+            if kind in ('POSE','FLOW','WINDOW') or (terminal and kind in ('LINE','DIAGONAL')):
+                spec = flow_specification(self.library,kind,start,end,corner,radius,terminal,window_m)
+            else:
+                spec = specification(kind,start,end,radius,reverse,CRUISE_M_S)
             reference = NativeReference(self.library, start, spec)
             # 正式C多项式变化率界推导最坏理论轮速；无法容纳的候选直接排除。
             wheel_bound = (math.sqrt(2) * reference.velocity_bound +
                            (self.geometry.half_length_m + self.geometry.half_width_m) * reference.yaw_bound)
             wheel_bound *= 60 / (2 * math.pi * self.geometry.radius_m)
             errors = ['WHEEL_LIMIT'] if wheel_bound > self.max_rpm else self.field.check(reference, allowed_start)
-            value = (None, errors) if errors else (Segment(kind, reference, road, reverse), [])
+            value = (None, errors) if errors else (Segment(kind, reference, road, reverse, corner), [])
         except ValueError as exc:
             value = None, [str(exc)]
         self.cache[key] = value
         return value
 
-    def plan(self, start, goal, *, start_heading=1, goal_heading=None, roads=None,
-             assigned_start='start_1', mode='simulation', smooth=True):
+    def plan(self, start, goal, *, start_heading=None, goal_heading=None, roads=None,
+             assigned_start='start_1', mode='simulation', smooth=True, flow=True):
         result = dict(status='NO_PATH', frame_id='map', domain='simulation', executable=False,
                       deployment_blockers=list(self.data['unverified']), start=start, goal=goal,
                       segments=[], nodes=[], rejected={}, assumed_roads=False)
+        if start_heading is None:
+            start_heading = self.data['station_heading_quarters'].get(start,0)
         if mode != 'simulation':
             return dict(result, status='NOT_READY')
         if (start not in self.nodes or goal not in self.nodes or type(start_heading) is not int
@@ -81,6 +86,11 @@ class Planner:
         roads = {} if roads is None else dict(roads)
         if set(roads) - names or any(v not in ('OPEN', 'UNKNOWN', 'BLOCKED') for v in roads.values()):
             return dict(result, status='INVALID_REQUEST')
+        # 重叠路段共享通行证据，不能借另一条边的名字绕过封路或未知状态。
+        for group in self.data.get('shared_roads', []):
+            state = 'BLOCKED' if any(roads.get(r, 'UNKNOWN') == 'BLOCKED' for r in group) else (
+                'UNKNOWN' if any(roads.get(r, 'UNKNOWN') != 'OPEN' for r in group) else 'OPEN')
+            roads.update({road: state for road in group})
         allowed = tuple(n for n in (start, goal) if n.startswith('start_')) or None
         for node, heading in ((start, start_heading), (goal, goal_heading)):
             errors = self.field.errors(self.pose(node, heading), allowed)
@@ -117,23 +127,46 @@ class Planner:
                 else:
                     rejected[f'{node}@{heading}:turn{turn}'] = errors
             for nxt, road, policy in adjacency[node]:
-                end = self.pose(nxt, heading)
-                dx, dy = end.x_m - pose.x_m, end.y_m - pose.y_m
-                bearing = math.atan2(dy, dx)
-                forward = math.cos(angle(bearing - pose.yaw_rad))
-                aligned = abs(math.sin(bearing - pose.yaw_rad)) < 1e-6
-                if not aligned and policy != 'short':
-                    continue
-                if not aligned and math.hypot(dx, dy) > SHORT_MOVE_M:
-                    rejected[road] = ['LATERAL_TOO_LONG']
-                    continue
-                segment, errors = self.make('LINE' if aligned else 'DIAGONAL', pose, end, road,
-                                            allowed, reverse=forward < 0)
-                if segment:
-                    penalty = 1.0 if aligned and forward >= 0 else 1.08 if aligned else 1.25
-                    candidates.append(((nxt, heading), segment, segment.cost_s * penalty))
-                else:
-                    rejected[f'{road}@{heading}'] = errors
+                headings = {heading,goal_heading} if flow else {heading}
+                for final_heading in headings:
+                    for end in self.ends(nxt,pose,final_heading):
+                        aligned = abs(math.sin(math.atan2(end.y_m-pose.y_m,end.x_m-pose.x_m)-pose.yaw_rad)) < 1e-6
+                        kind = 'POSE' if final_heading != heading else 'LINE' if aligned else 'DIAGONAL'
+                        segment, errors = self.make(kind,pose,end,road,allowed)
+                        if segment:
+                            candidates.append(((nxt,final_heading),segment,segment.cost_s))
+                        else:
+                            rejected[f'{road}@{heading}->{final_heading}'] = errors
+                if flow:
+                    for final, second_road, _ in adjacency[nxt]:
+                        if final == node:
+                            continue
+                        middle = self.pose(nxt,heading)
+                        roads_used = road+'+'+second_road
+                        headings = {heading,goal_heading} if final == goal or nxt == 'center' else {heading}
+                        for final_heading in headings:
+                            for end in self.ends(final,pose,final_heading):
+                                direct, _ = self.make('POSE' if final_heading != heading else 'DIAGONAL',
+                                                      pose,end,roads_used,allowed)
+                                if direct:
+                                    candidates.append(((final,final_heading),direct,direct.cost_s))
+                                first_bearing = math.atan2(middle.y_m-pose.y_m,middle.x_m-pose.x_m)
+                                last_bearing = math.atan2(end.y_m-middle.y_m,end.x_m-middle.x_m)
+                                bend = angle(last_bearing-first_bearing)
+                                if abs(bend) < 1e-5 and final_heading != heading and nxt == 'center':
+                                    for width in (.08,.04,.02,.01,.006):
+                                        window, _ = self.make('WINDOW',pose,end,roads_used,allowed,corner=middle,window_m=width)
+                                        if window:
+                                            candidates.append(((final,final_heading),window,window.cost_s))
+                                elif abs(abs(bend)-math.pi/2) < 1e-5:
+                                    best_curve = None
+                                    for radius in (.04,.08,.12,.16,.20):
+                                        curve, _ = self.make('FLOW',pose,end,roads_used,allowed,
+                                                             radius=radius,corner=middle)
+                                        if curve and (best_curve is None or curve.cost_s < best_curve.cost_s):
+                                            best_curve = curve
+                                    if best_curve:
+                                        candidates.append(((final,final_heading),best_curve,best_curve.cost_s))
             for nxt, segment, edge_cost in candidates:
                 new = cost + edge_cost
                 if new + 1e-9 < best.get(nxt, math.inf):
@@ -156,12 +189,45 @@ class Planner:
         # 同一节点的±2pi表示先统一为连续角，再交给冻结参考；不重置odom。
         chain = self.continuous(chain, allowed)
         chain = self.merge(chain, allowed)
+        # 跨多条边的自由捷径只用于全部道路已开放的条件模型。
+        # 存在封路/未知时保留搜索得到的局部连接，不能用几何可见性跨回关闭走廊。
+        if flow and all(roads.get(name,'UNKNOWN') == 'OPEN' for name in names):
+            chain = self.shortcut(chain,allowed)
         reasons = []
-        if smooth:
-            chain, reasons = self.smooth(chain, allowed)
+        if smooth and not flow:
+            # 基准保留工位间停车，避免把非法的侧移当成切线弯道。
+            reasons = []
         return dict(result, status='OK', nodes=node_chain, segments=chain, rejected=rejected,
                     estimate_s=sum(s.cost_s for s in chain), before_s=before, smoothing=reasons,
                     road_states=roads)
+
+    def shortcut(self,chain,allowed):
+        """只消除同一工位间的非必要中间点；真实任务停靠点不跨越。"""
+        result=[]
+        index=0
+        while index<len(chain):
+            selected=None
+            for last in range(index+1,len(chain)):
+                group=chain[index:last+1]
+                roads='+'.join(dict.fromkeys('+'.join(s.road for s in group).split('+')))
+                move,_=self.make('POSE',group[0].reference.start,group[-1].reference.end,roads,allowed)
+                start,end=group[0].reference.start,group[-1].reference.end
+                if abs(start.x_m-end.x_m)>.08 and abs(start.y_m-end.y_m)>.08:
+                    for corner in (Pose(start.x_m,end.y_m,start.yaw_rad),Pose(end.x_m,start.y_m,start.yaw_rad)):
+                        for radius in (.04,.08,.12,.16,.20):
+                            curve,_=self.make('FLOW',start,end,roads,allowed,corner=corner,radius=radius)
+                            if curve and (move is None or curve.cost_s<move.cost_s):
+                                move=curve
+                gain=sum(s.cost_s for s in group)-move.cost_s if move else 0
+                if gain>1e-6 and (selected is None or gain>selected[0]):
+                    selected=gain,last,move
+            if selected:
+                result.append(selected[2])
+                index=selected[1]+1
+            else:
+                result.append(chain[index])
+                index+=1
+        return result
 
     def merge(self, chain, allowed):
         result = []
@@ -170,9 +236,12 @@ class Planner:
                 last = result[-1]
                 first, end = last.reference.start, segment.reference.end
                 dx, dy = end.x_m - first.x_m, end.y_m - first.y_m
-                if (last.kind == segment.kind == 'LINE' and last.reverse == segment.reverse
-                        and abs(angle(last.reference.end.yaw_rad - end.yaw_rad)) < 1e-7
-                        and abs(dx * math.sin(first.yaw_rad) - dy * math.cos(first.yaw_rad)) < 1e-6):
+                first_dx = last.reference.end.x_m-first.x_m
+                first_dy = last.reference.end.y_m-first.y_m
+                if (last.kind in ('LINE','DIAGONAL') and segment.kind in ('LINE','DIAGONAL')
+                        and abs(angle(last.reference.end.yaw_rad-end.yaw_rad)) < 1e-7
+                        and abs(first_dx*dy-first_dy*dx) < 1e-6
+                        and first_dx*dx+first_dy*dy > first_dx*first_dx+first_dy*first_dy):
                     merged, _ = self.make('LINE', first, end, last.road + '+' + segment.road, allowed, last.reverse)
                     if merged:
                         result[-1] = merged
@@ -180,71 +249,23 @@ class Planner:
             result.append(segment)
         return result
 
+    def ends(self,node,start,heading):
+        delta = angle(heading*math.pi/2-start.yaw_rad)
+        yield Pose(*self.nodes[node],start.yaw_rad+delta)
+        if abs(abs(delta)-math.pi)<1e-6:
+            yield Pose(*self.nodes[node],start.yaw_rad-delta)
+
     def continuous(self, chain, allowed):
         result = []
         for segment in chain:
-            start = segment.reference.start
-            if result:
-                start = result[-1].reference.end
-            end = segment.reference.end
-            if segment.kind == 'TURN':
-                end = Pose(end.x_m, end.y_m, start.yaw_rad + angle(end.yaw_rad - segment.reference.start.yaw_rad))
-            else:
-                end = Pose(end.x_m, end.y_m, start.yaw_rad)
-            rebuilt, errors = self.make(segment.kind, start, end, segment.road, allowed, segment.reverse)
-            if not rebuilt:
+            start = result[-1].reference.end if result else segment.reference.start
+            reference = NativeReference(self.library,start,segment.reference.spec)
+            errors = self.field.check(reference,allowed)
+            if errors:
                 raise ValueError(f'连续角转换失效：{errors}')
-            result.append(rebuilt)
+            result.append(Segment(segment.kind,reference,segment.road,segment.reverse,segment.corner))
         return result
 
-    def smooth(self, chain, allowed):
-        result, reasons = [], []
-        index = 0
-        while index < len(chain):
-            group = chain[index:index+3]
-            best = None
-            errors_seen = set()
-            if (len(group) == 3 and [s.kind for s in group] == ['LINE', 'TURN', 'LINE']
-                    and group[0].reverse == group[2].reverse):
-                a, turn, b = group
-                for radius in (.04, .06, .08, .10, .12, .16, .20):
-                    direction = turn.reference.end.yaw_rad - turn.reference.start.yaw_rad
-                    spec = specification('ARC', turn.reference.start, turn.reference.end, radius, a.reverse)
-                    try:
-                        local = NativeReference(self.library, Pose(0, 0, 0), spec)
-                    except ValueError as exc:
-                        errors_seen.add(str(exc))
-                        continue
-                    distance = abs(local.end.x_m)
-                    if min(math.dist(a.reference.start.values()[:2], a.reference.end.values()[:2]),
-                           math.dist(b.reference.start.values()[:2], b.reference.end.values()[:2])) <= distance + .02:
-                        continue
-                    sign = -1 if a.reverse else 1
-                    corner = turn.reference.start
-                    entry = Pose(corner.x_m - sign * distance * math.cos(corner.yaw_rad),
-                                 corner.y_m - sign * distance * math.sin(corner.yaw_rad), corner.yaw_rad)
-                    exit = Pose(corner.x_m + sign * distance * math.cos(corner.yaw_rad + direction),
-                                corner.y_m + sign * distance * math.sin(corner.yaw_rad + direction), corner.yaw_rad + direction)
-                    proposals = [self.make('LINE', a.reference.start, entry, a.road, allowed, a.reverse),
-                                 self.make('ARC', entry, exit, turn.road, allowed, a.reverse, radius),
-                                 self.make('LINE', exit, b.reference.end, b.road, allowed, b.reverse)]
-                    errors_seen.update(e for _, errors in proposals for e in errors)
-                    if any(s is None for s, _ in proposals):
-                        continue
-                    candidates = [s for s, _ in proposals]
-                    cost = sum(s.cost_s for s in candidates)
-                    if cost < sum(s.cost_s for s in group) and (best is None or cost < best[0]):
-                        best = cost, candidates, radius
-                if best:
-                    result.extend(best[1])
-                    reasons.append(dict(node=turn.road, selected_radius_m=best[2], reason='扫掠/轮速通过且预计更快'))
-                    index += 3
-                    continue
-                reasons.append(dict(node=turn.road, selected_radius_m=None,
-                                    reason='保留停车转向', rejected=sorted(errors_seen)))
-            result.append(chain[index])
-            index += 1
-        return result, reasons
 
 
 def view(plan):

@@ -16,7 +16,9 @@ class PathSpec(c.Structure):
 
 class Spec(c.Structure):
     _fields_ = [('kind', c.c_uint32), ('x_m', c.c_float), ('y_m', c.c_float), ('yaw_rad', c.c_float),
-                ('path', PathSpec), ('linear', Limit), ('angular', Limit), ('tangent', c.c_uint32)]
+                ('path', PathSpec), ('linear', Limit), ('angular', Limit), ('tangent', c.c_uint32)] + [
+                    (key,c.c_float) for key in ('path_heading_rad','curve_velocity_m_s','yaw_begin_m',
+                                               'yaw_end_m','tail_velocity_m_s')]
 
 
 class Goal(c.Structure):
@@ -25,7 +27,8 @@ class Goal(c.Structure):
 
 class Reference(c.Structure):
     _fields_ = [(key, c.c_double) for key in ('x_m', 'y_m', 'yaw_rad', 'vx_m_s', 'vy_m_s',
-                                             'wz_rad_s', 'angular_accel_rad_s2', 'angular_jerk_rad_s3')] + [('done', c.c_uint32)]
+                                             'wz_rad_s', 'angular_accel_rad_s2', 'angular_jerk_rad_s3',
+                                             'ax_m_s2','ay_m_s2','jx_m_s3','jy_m_s3')] + [('done', c.c_uint32)]
 
 
 class Config(c.Structure):

@@ -13,7 +13,7 @@
 
 typedef struct
 {
-    uint32_t kind; /* 1直线/斜线，2转向，3平滑90度弧线 */
+    uint32_t kind; /* 1平移，2转向，3切线弧，4连续弯道，5移姿同步，6直线转姿窗口 */
     float x_m;
     float y_m;
     float yaw_rad;
@@ -21,6 +21,11 @@ typedef struct
     CurveLimit linear;
     CurveLimit angular;
     uint32_t tangent;
+    float path_heading_rad;
+    float curve_velocity_m_s;
+    float yaw_begin_m;
+    float yaw_end_m;
+    float tail_velocity_m_s;
 } RefSpec;
 
 typedef struct
@@ -33,6 +38,10 @@ typedef struct
     double wz_rad_s;
     double angular_accel_rad_s2;
     double angular_jerk_rad_s3;
+    double ax_m_s2;
+    double ay_m_s2;
+    double jx_m_s3;
+    double jy_m_s3;
     uint32_t done;
 } RefPoint;
 
@@ -46,6 +55,11 @@ typedef struct
     double target[3];
     double duration_s;
     unsigned valid;
+    CurvePlan heading;
+    CurveTiming timing;
+    double position_time_s;
+    double heading_begin_s;
+    double heading_end_s;
 } RefPlan;
 
 /* 目标固定于动作开始的车体，输出在连续odom坐标；构建后由所有者冻结。
