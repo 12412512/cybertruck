@@ -7,6 +7,8 @@ import time
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
+from .can_diag import diagnose
+
 
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -48,6 +50,7 @@ class Observer:
     def reset(self, reason):
         self.source = None
         self.received = self.rtt_ms = None
+        self.sent = None
         self.uptime = self.advanced = None
         self.verified = False
         self.message = reason
@@ -79,6 +82,7 @@ class Observer:
         self.uptime = uptime
         self.source = deepcopy(state)
         self.received = received
+        self.sent = sent
         self.rtt_ms = (received - sent) * 1000
         self.message = '既有服务只读观察；运动接口关闭'
 
@@ -125,6 +129,12 @@ class Observer:
         if board and (board['state'] == 5 or board['bus_error']):
             message = '实车报告故障；只读观察，禁止运动'
         events = [message]
+        can_report = None
+        if fresh:
+            try:
+                can_report = diagnose(source)
+            except (ValueError, KeyError, TypeError):
+                pass
         if fresh and isinstance(source.get('events'), list):
             for event in source['events'][-8:]:
                 if isinstance(event, dict) and isinstance(event.get('message'), str):
@@ -134,8 +144,12 @@ class Observer:
                     boot_id=None, session_id=None, state_age_ms=age, board=board,
                     source_protocol='CARCAN13-owner-http', gc_verified=False,
                     feedback_timing_verified=False,
+                    observation=dict(request_monotonic_s=self.sent, response_monotonic_s=self.received,
+                                     cache_age_ms=local_ms, device_sample_time=None,
+                                     clock_domain='observer_host_monotonic'),
                     wheels=wheels, imu=imu, diagnostics=dict(
                         source_stopped=source.get('stopped') if fresh else None,
+                        can_report=can_report,
                         can_error_event=source.get('can_error_event') if fresh else None,
                         uart_bad_crc=source.get('uart_bad_crc') if fresh else None,
                         uart_bad_line=source.get('uart_bad_line') if fresh else None,

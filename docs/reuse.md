@@ -48,3 +48,10 @@
 - `Control/line.c/.h`迁用旧`motion/motion.c`的XY距离归一化和共用标量时间轴投影；原SHA256：`98cc7782c0843fb377c0fa08e156d93f49ac0196b9789726591ba3c7ef4e15cc`。移除全局运动状态和驱动耦合，调用者持有独立冻结Plan，不含真实完成状态。
 - `device/observer.py`直接读取已核对旧服务`/api/state`，复用其串口反馈结果，未复制或打开另一个旧串口管理器。旧控制权、租约、失焦释放、地图和雷达接口逐项核对后按`web_merge.md`安排合并；当前只接只读诊断。
 - 原来源文件均未写入，移植以新测试和真实观察分别验收，详细证据与未验证项见`motion_readonly.md`。
+
+## 接收时间链复用
+
+- `Device/motor.*`仅迁入旧CAR `Chassis/motor_protocol.c`的35/36/3A接收分支；原SHA256为`d1c1a48baeeb3f87b9bcda85663d7a38cc5af1e93e02133965415b9fb92b1bd5`。保留5000RPM回复保护和完整有符号编码器幅值；新增主循环处理时间、接收序号/源代校验，不迁入任何构帧或控制函数。
+- `Device/imu.*`改编旧智能车`User/Device/imu/imu.c`的11字节格式、校验、重叠移窗同步搬运tick、原始样本、16槽及连续性代号；原SHA256为`1fa9c777a8073684acff1acb8977a3de09757bb044341f9fc44c3d148fd6dfa7`。抽离UART/HAL/全局应用耦合，加入handled时刻与溢出失效，保留原始三轴，不复制未标定量程假设。
+- `can_diag.py`依据旧CAR错误冻结上下文及本地ST寄存器位定义做只读解释。旧`Chassis/can_transport.c`本次SHA256为`a91d49de77b7b5c3bb29ac688bf0cff2da7c58867d4b4ab8c75dff7cd2e67431`，没有迁入其发包/重试/清HAL错误入口。
+- `stamp.*`、`feedback.*`及Python反馈缓存为新接口适配，复用既有GC帧/CRC而不另起传输协议；时间负载先离线验证，不改变当前Comm能力。详细新旧时间语义与物理出口见`feedback_time.md`。

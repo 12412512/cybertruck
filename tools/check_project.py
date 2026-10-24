@@ -16,7 +16,9 @@ USER_FILES = {FW / 'User' / name for name in (
     'Comm/frame.c', 'Comm/frame.h', 'Comm/comm.c', 'Comm/comm.h',
     'Control/kin.c', 'Control/kin.h', 'Control/yaw.c', 'Control/yaw.h',
     'Control/curve.c', 'Control/curve.h', 'Control/line.c', 'Control/line.h',
-    'Control/path.c', 'Control/path.h')}
+    'Control/path.c', 'Control/path.h', 'Device/stamp.c', 'Device/stamp.h',
+    'Device/motor.c', 'Device/motor.h', 'Device/imu.c', 'Device/imu.h',
+    'Comm/feedback.c', 'Comm/feedback.h')}
 
 
 def check(ok, message):

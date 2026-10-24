@@ -719,6 +719,16 @@
               <FilePath>../User/Comm/comm.h</FilePath>
             </File>
             <File>
+              <FileName>feedback.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Comm/feedback.c</FilePath>
+            </File>
+            <File>
+              <FileName>feedback.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Comm/feedback.h</FilePath>
+            </File>
+            <File>
               <FileName>frame.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/Comm/frame.c</FilePath>
@@ -782,6 +792,41 @@
               <FileName>yaw.h</FileName>
               <FileType>5</FileType>
               <FilePath>../User/Control/yaw.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>User/Device</GroupName>
+          <Files>
+            <File>
+              <FileName>imu.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Device/imu.c</FilePath>
+            </File>
+            <File>
+              <FileName>imu.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Device/imu.h</FilePath>
+            </File>
+            <File>
+              <FileName>motor.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Device/motor.c</FilePath>
+            </File>
+            <File>
+              <FileName>motor.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Device/motor.h</FilePath>
+            </File>
+            <File>
+              <FileName>stamp.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Device/stamp.c</FilePath>
+            </File>
+            <File>
+              <FileName>stamp.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Device/stamp.h</FilePath>
             </File>
           </Files>
         </Group>

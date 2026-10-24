@@ -43,8 +43,11 @@ function render(state) {
     const errorEvent = observed ? state.diagnostics?.can_error_event : null;
     const hex = value => Number.isInteger(value) ? `0x${value.toString(16).toUpperCase()}` : '—';
     set('can-event', errorEvent?.valid ? `序号 ${errorEvent.sequence}，板时 ${errorEvent.tick_ms} ms，HAL ${hex(errorEvent.hal_error)}，ESR ${hex(errorEvent.esr)}，发送ID ${hex(errorEvent.tx_id)}` : '无有效快照');
+    const canReport = observed ? state.diagnostics?.can_report : null;
+    set('can-decoded', canReport ? `当前 ESR ${hex(canReport.current.esr)}；冻结记录：${canReport.latched?.decoded_esr.lec_name ?? '未知'}，${canReport.latched?.is_stop_frame ? '停止帧发送期间' : '帧用途待核对'}；软件锁存保留` : '未接入');
     set('legacy-uart', observed ? `${state.diagnostics?.uart_bad_crc ?? '—'} / ${state.diagnostics?.uart_bad_line ?? '—'}` : '未接入');
     set('legacy-owner', observed ? `${state.diagnostics?.owner_busy ? '旧服务有其他控制者' : '未报告其他控制者'}；本页不申请控制权` : '未接入');
+    set('timing', observed ? `HTTP往返 ${ageText(state.diagnostics?.rtt_ms)} ms，本机缓存 ${ageText(state.observation?.cache_age_ms)} ms；MCU接收时刻尚未导出` : '未接入');
     const imu = observed ? state.imu : null;
     set('imu', imu?.angle_reported ? `${imu.yaw_deg}°（旧服务报告，原设备方向）` : '未知或源报告过期');
     set('gyro', imu?.gyro_reported ? `${imu.gz_dps} °/s（旧服务报告，原始Z轴）` : '未知或源报告过期');

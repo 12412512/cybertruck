@@ -55,3 +55,11 @@ $taskPython = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-ru
 以上输出由 Git 忽略；可追踪的结果摘要保存到 [docs/baseline.md](../docs/baseline.md)。生成脚本同时检查退出结果与本次生成文件，编译脚本检查零错误零警告及本次产物时间，不把旧日志当作本次结果。
 
 后续工具继续放本目录，正式运行实现不从工具目录导入。
+
+## CAN只读取证
+
+```powershell
+.\.venv\Scripts\python.exe -B tools/inspect_can.py --owner-url http://172.20.10.4:8080 --seconds 10 --output output/can-time/新文件名.json
+```
+
+只用既有所有者固定GET，不打开UART、不请求控制权、不发STOP或清故障。窗口0.5～60秒，拒绝覆盖既有证据；原始样本与前后诊断写output。解析实现位于正式`pi/robot/device/can_diag.py`，工具仅组织采样与文件输出。

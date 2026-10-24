@@ -1,6 +1,7 @@
 """协议/固件状态机/Web只读性回归；所有传输均为主机模拟。"""
 
 import ctypes
+import json
 import os
 from pathlib import Path
 import random
@@ -121,6 +122,10 @@ class ProtocolTests(unittest.TestCase):
         for kind in (0x10, 0x11, 0x12, 0x20):
             self.assertEqual(self.native.request(kind, payload=b'move').payload[0], p.READONLY)
 
+    def test_reserved_feedback_is_not_an_active_board_interface(self):
+        self.assertEqual(self.native.open().payload[0], p.OK)
+        self.assertEqual(self.native.request(0x10).payload[0], p.READONLY)
+
     def test_no_random_boot_disables_open(self):
         self.native.reset(boot=0)
         self.assertEqual(self.native.open().payload[0], p.BOOT)
@@ -233,7 +238,7 @@ class WebTests(unittest.TestCase):
 
     def snapshot(self, age=0):
         return dict(snapshot_at_s=time.monotonic() - age, snapshot_wall_s=time.time(), mode='sim',
-                    connected=True, readonly=True, ready=False, board={'flags': 3},
+                    connected=True, state_age_ms=0, readonly=True, ready=False, board={'flags': 3},
                     events=[], message='模拟数据', pose=None, pose_valid=False,
                     zero_valid=False, physical_stop_confirmed=False)
 
@@ -253,6 +258,33 @@ class WebTests(unittest.TestCase):
             self.assertFalse(client.get('/api/state').json()['core_fresh'])
             for path in ('/api/state', '/api/move', '/api/zero', '/api/stop', '/api/config'):
                 self.assertIn(client.post(path, json={'target': 100}).status_code, (404, 405))
+
+    def test_web_adds_core_cache_age_before_device_validity(self):
+        path = self.runtime / 'state.json'
+        snapshot = self.snapshot()
+        snapshot.update(mode='observer', state_age_ms=100, wheels=[{'rpm': 0}], imu={'yaw_deg': 0},
+                        observation={'cache_age_ms': 20}, diagnostics={'can_report': {'current': 0}})
+        save_snapshot(path, snapshot)
+        still_fresh = load_snapshot(path, now=snapshot['snapshot_at_s'] + .1)
+        self.assertTrue(still_fresh['connected'])
+        self.assertAlmostEqual(still_fresh['state_age_ms'], 200, delta=.01)
+        self.assertAlmostEqual(still_fresh['observation']['cache_age_ms'], 120, delta=.01)
+        expired = load_snapshot(path, now=snapshot['snapshot_at_s'] + .2)
+        self.assertTrue(expired['core_fresh'])
+        self.assertFalse(expired['connected'])
+        self.assertIsNone(expired['board'])
+        self.assertIsNone(expired['imu'])
+        self.assertEqual(expired['wheels'], [])
+        self.assertIsNone(expired['diagnostics']['can_report'])
+
+    def test_online_snapshot_without_finite_device_age_is_unknown(self):
+        for age in (None, -1, float('inf'), True):
+            snapshot = self.snapshot()
+            snapshot['state_age_ms'] = age
+            # 模拟损坏/第三方写入快照；正式save_snapshot禁止非有限JSON。
+            path = self.runtime / 'state.json'
+            path.write_text(json.dumps(snapshot), encoding='utf-8')
+            self.assertFalse(load_snapshot(path)['connected'])
 
     def test_websocket_multiple_readers_and_core_expiry(self):
         save_snapshot(self.runtime / 'state.json', self.snapshot())

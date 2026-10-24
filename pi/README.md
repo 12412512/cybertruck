@@ -66,6 +66,8 @@ $env:PYTHONPATH = Join-Path (Get-Location) 'pi'
 
 新页展示原始四轮、IMU、CAN快照、串口错误与原服务控制权状态；设备过期立即撤销有效值。真实状态与任务模拟计数隔离；本模式不推进模拟账本或实际任务。合并安排见[Web合并](../docs/web_merge.md)，实测及故障记录见[本轮验收](../docs/motion_readonly.md)。
 
+`device/can_diag.py`将当前寄存器、冻结帧和软件锁存分开解释，`tools/inspect_can.py`可在明确的GET窗口留证。`device/feedback.py`为未来新时间负载的严格解码/去重缓存，未接入Link、observer或真实串口；当前真实观察仅补HTTP请求/应答/缓存时间，MCU接收与物理采样时刻仍未知。规范、故障结论和本轮验收见[CAN及反馈时间](../docs/feedback_time.md)。
+
 ## 任务离线联调
 
 只运行任务模型并生成报告（不需要通信进程）：

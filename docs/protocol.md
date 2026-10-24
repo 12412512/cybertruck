@@ -58,3 +58,5 @@
 - 核心事件日志按1MiB、3份备份轮换；启动身份、通信或故障位变化时保留当时的设备状态/诊断，状态快照覆盖保存。异常握手后至少间隔250毫秒重试。浏览器关闭不影响核心推进，核心停止会使MCU租约失效。
 
 FastAPI/WebSocket接口依据[官方WebSocket文档](https://fastapi.tiangolo.com/advanced/websockets/)；串口独占与超时依据[pySerial API](https://pyserial.readthedocs.io/en/latest/pyserial_api.html)。本版仅提供GET状态与WebSocket推送，没有参数写入、建零、使能或运动HTTP接口。
+
+接收/处理/上报时间负载的离线V1规范见[反馈时间链](feedback_time.md)。type0x10仅预留，当前`comm.c`和Link均未开放，固件仍拒绝；不能将独立编码器的存在当作在线支持。当前真实CARCAN13通过observer观察，不使用此新负载。

@@ -1,6 +1,7 @@
 """同机原子快照与单进程锁；Web读取快照，不继承设备对象。"""
 
 import json
+import math
 import os
 import time
 from pathlib import Path
@@ -59,6 +60,24 @@ def load_snapshot(path, now=None):
             raise ValueError('快照阶段或模式不符')
         state['core_fresh'] = True
         state['core_age_ms'] = int(age * 1000)
+        if state.get('connected') is True:
+            device_age = state.get('state_age_ms')
+            if (type(device_age) not in (int, float) or not math.isfinite(device_age)
+                    or device_age < 0 or not isinstance(state.get('board'), dict)):
+                raise ValueError('在线设备缺少有效时间信息')
+            # 设备龄不能停留在核心写文件的时刻，网页每次读取都加入快照存留时间。
+            state['state_age_ms'] = device_age + age * 1000
+            observation = state.get('observation')
+            if isinstance(observation, dict):
+                cache_age = observation.get('cache_age_ms')
+                if type(cache_age) in (int, float) and math.isfinite(cache_age) and cache_age >= 0:
+                    observation['cache_age_ms'] = cache_age + age * 1000
+            if state['state_age_ms'] >= 250:
+                state.update(connected=False, ready=False, board=None, wheels=[], imu=None,
+                             pose=None, pose_valid=False, zero_valid=False, physical_stop_confirmed=False,
+                             message='设备状态已过期，等待新反馈')
+                if isinstance(state.get('diagnostics'), dict):
+                    state['diagnostics'].update(can_report=None, source_stopped=None)
         return state
     except (OSError, ValueError, TypeError, KeyError):
         return dict(core_fresh=False, connected=False, readonly=True, ready=False,
