@@ -67,3 +67,10 @@
 - 旧`User/Chassis/drive.c`的参考在位置/航向各自时间回查、连续odom、零速批次TXOK屏障、发送后新反馈和静止窗口迁入新`Control/ref.*`、`track.*`。原SHA256为`a954c9c7269650013f41a76976e2cd778ab679589c5a37a431c2921f9004b720`。
 - 旧`heading.c`（SHA256 `f6939aca741a6fbdc88934f9fa35ec0217db0415de952035f933dd4a8f4fff13`）及`position.c`（SHA256 `fe0f436e6808eacc3a5d87591b64f2a1877b7fc5d8a898bbc1338642bfc2c50c`）的有界P、滞回和误差方向用于新接口。新增角速度误差阻尼与整体轮速平滑，未复制其旧全局状态和整数配对算法；新实现仍须实车验收。
 - 沿用正式Kin/Curve/Line/Path/Odom/反馈编码，不复制测试公式作为生产控制。独立Plant是模拟对象，明确分离参考、模型真值和观察输出；本轮零速确认仅为模型回调。参考源只读，App/CAN/PWM保持未接入；详见`tracking.md`。
+
+## 坐标与路径规划复用
+
+- 新`nav/geometry.py`沿用旧`competition_map/geometry.py`的凸包与凸多边形SAT，原SHA256为`c9c38293019fc83b31fb70f615a1303d590fa028ef0492237972b1f23efbe1ab`。不复用“只支持固定朝向平移”的限制，扩展偏心四边和来自正式C变化率界的区间包络。
+- 新`nav/planner.py`复用旧`competition_navigation/planner.py`的堆A*、道路状态过滤、came重建和拒绝原因结构，原SHA256为`ffc5ac3a1e40df90ff2f6ef42840b6706a4d3ee62cbecc0a594dcc4e9f6e7d9b`。状态扩展为节点加朝向、代价改为参考时间，增加共线合并和经扫掠/轮速检查的局部弧段。用户已明确蓝区可行，旧途中蓝区禁入规则不迁入。
+- 新名义地图沿用旧site_measurements的黄区、工作台和场地总框；候选停靠点为满足条件模型净空而调整，未伪装成实测。路径、弧线、参考时间和闭环继续调用已迁入的正式C；不复制另一套Python运动曲线。
+- `route_sim.py`复用已有ClosedLoop/Plant/反馈编解码，逐段共享odom并核对独立真值。C Ref只新增主机查询/变化率界，未接App或硬件；详细数学边界、场景假设和验收见`navigation.md`。

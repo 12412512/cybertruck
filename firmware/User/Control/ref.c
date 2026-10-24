@@ -4,6 +4,71 @@
 
 #define REF_PI 3.14159265358979323846
 
+size_t Ref_Bytes(void)
+{
+    return sizeof(RefPlan);
+}
+
+double Ref_Time(const RefPlan *plan)
+{
+    return plan && plan->valid ? plan->duration_s : -1;
+}
+
+int Ref_Bounds(const RefPlan *plan, double *velocity_m_s, double *yaw_rad_s)
+{
+    unsigned cell;
+    unsigned power;
+    double width;
+    double dx;
+    double dy;
+    double ddx;
+    double ddy;
+    double lower;
+    double speed;
+    double yaw;
+    if (!plan || !plan->valid || !velocity_m_s || !yaw_rad_s)
+    {
+        return 0;
+    }
+    *velocity_m_s = plan->spec.kind == 2 ? 0 : plan->spec.linear.velocity;
+    *yaw_rad_s = plan->spec.kind == 2 ? plan->spec.angular.velocity : 0;
+    if (plan->spec.kind != 3)
+    {
+        return 1;
+    }
+    /* 每格t在[0,1]，系数绝对值和给导数上界；常数项减余项给下界。
+     * |yaw_s| <= |r' x r''| / |r'|²，分母不能证明大于零则拒绝。 */
+    for (cell = 0; cell < PATH_CELLS; cell++)
+    {
+        width = cell < PATH_RAMP_CELLS || cell >= PATH_RAMP_CELLS + PATH_ARC_CELLS ?
+            plan->spec.path.blend_m / PATH_RAMP_CELLS : plan->path.arc_length / PATH_ARC_CELLS;
+        dx = dy = ddx = ddy = 0;
+        for (power = 1; power <= 7; power++)
+        {
+            dx += power * fabs(plan->path.cell[cell].cx[power - 1]) / width;
+            dy += power * fabs(plan->path.cell[cell].cy[power - 1]) / width;
+            ddx += power * (power - 1) * fabs(plan->path.cell[cell].cx[power - 1]) / (width * width);
+            ddy += power * (power - 1) * fabs(plan->path.cell[cell].cy[power - 1]) / (width * width);
+        }
+        lower = fmax(2 * fabs(plan->path.cell[cell].cx[0]) / width - dx,
+                     2 * fabs(plan->path.cell[cell].cy[0]) / width - dy);
+        if (lower <= 0)
+        {
+            return 0;
+        }
+        speed = hypot(dx, dy) * plan->spec.linear.velocity;
+        yaw = (dx * ddy + dy * ddx) / (lower * lower) * plan->spec.linear.velocity;
+        *velocity_m_s = fmax(*velocity_m_s, speed);
+        if (plan->spec.tangent)
+        {
+            *yaw_rad_s = fmax(*yaw_rad_s, yaw);
+        }
+    }
+    *velocity_m_s *= 1.0001;
+    *yaw_rad_s *= 1.0001;
+    return isfinite(*velocity_m_s) && isfinite(*yaw_rad_s);
+}
+
 static void Transform(const RefPlan *plan, RefPoint *point)
 {
     double cosine = cos(plan->origin[2]);

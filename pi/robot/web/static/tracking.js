@@ -37,6 +37,6 @@ export function renderTracking(state) {
         (out.state === 4 ? '所有到位条件满足（仅模拟）' : '等待运行或查看故障') : '未接入');
     set('track-targets', out ? out.rpm.join(' / ') : '未接入');
     set('track-speeds', state ? state.plant.rpm.map(value => value.toFixed(2)).join(' / ') : '未接入');
-    set('track-history', state ? state.transitions.map(item => `${seconds(item.at_ms)} ${names[item.state] ?? item.state}`).join(' → ') : '未接入');
+    set('track-history', state ? state.transitions.slice(-8).map(item => `${seconds(item.at_ms)} ${names[item.state] ?? item.state}`).join(' → ') : '未接入');
     draw(state?.reference_trace ?? [], state?.trace ?? []);
 }

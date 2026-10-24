@@ -71,3 +71,5 @@ $taskPython = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-ru
 模型由`robot.main --mode sim --odom-library <库路径>`显式加载，或用`robot.odom_sim`独立回放；不开设备、不自动构建、不在真实模式加载。详细运行与验收见`docs/odometry.md`。
 
 跟踪节点的主机库增加正式Ref/Track及其Curve/Line/Path依赖，默认旧库入口保持兼容；可用`--output output/native/tracking.dll`单独构建。`robot.main --mode sim --track-library <路径>`显式选择闭环，真实模式拒绝；Windows库正被核心持有时先停对应本机模拟。详见`docs/tracking.md`。
+
+导航主机模型沿用`build_odom.py`，可显式输出`output/native/navigation.dll`；`robot.main --mode sim --route-library <路径>`加载统一坐标/规划与多段闭环，不能与独立odom/track库参数同用。`robot.route_sim --library <路径> --blocked <道路编号>`可独立运行封路场景，默认报告output/navigation/report.json；所有执行权限仍关闭。

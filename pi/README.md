@@ -108,3 +108,9 @@ $env:PYTHONPATH = Join-Path (Get-Location) 'pi'
 当前本机8000已改为`--mode sim --track-library output/native/tracking.dll --runtime output/preview`，保留既有任务账本，未新建模拟任务。模型包含正式里程计，不能同时传`--odom-library`；真实模式拒绝加载。构建命令为`python -B tools/build_odom.py --output output/native/tracking.dll`；单独报告为`python -B -m robot.track_sim --library output/native/tracking.dll`。两者均在根目录使用虚拟环境，运行时设置`PYTHONPATH=pi`。
 
 页面显示参考/实走双轨迹、误差、命令与模型轮速、参考结束和到位的不同时间、零速批次确认及新反馈稳定窗口。8001及Pi旧服务未修改。运行步骤、复用与未验证项见[跟踪与到位](../docs/tracking.md)。
+
+## 统一坐标与导航巡回
+
+当前本机8000改用`--mode sim --route-library output/native/navigation.dll --runtime output/preview`，启停区1朝扫码区+90度，蓝区可通行。构建：`python -B tools/build_odom.py --output output/native/navigation.dll`；独立回放：`python -B -m robot.route_sim --library output/native/navigation.dll`。均用根目录虚拟环境并设置PYTHONPATH=pi，详情见[导航验收](../docs/navigation.md)。
+
+新页面显示同一规划器的名义地图、车身、轨迹、逐段结果和未验证条件。23段导航闭环完成，不推进扫码/搬运账本，不填真实位姿或成绩；默认调试速度下约130.97秒，未满足比赛导航预算。模型与独立odom/track标志互斥，真实模式拒绝加载；Pi8080和本机8001未改动。

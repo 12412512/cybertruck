@@ -75,10 +75,12 @@ class Plant:
         self.gains = [1.] * 4 if ideal else [.96, 1.04, .98, 1.02]
         self.tau = [.08] * 4 if ideal else [.07, .09, .11, .08]
         self.history = deque(maxlen=80)
+        self.positions = deque(maxlen=80)
         self.record()
 
     def record(self):
         self.history.append((self.ms, tuple(self.rpm), tuple(self.turns), self.yaw, self.wz))
+        self.positions.append((self.ms, self.x, self.y, self.yaw))
 
     def integrate(self, disturbance=False):
         dt = .002
@@ -106,7 +108,7 @@ class Plant:
 
 class ClosedLoop:
     def __init__(self, library, kind='diagonal', *, config=None, stalled=False,
-                 ack=True, disturbance=True, base_ms=0, ideal=False):
+                 ack=True, disturbance=True, base_ms=0, ideal=False, auto_start=True):
         self.calibration = fixture()
         self.native = Odometry(library, self.calibration, base_ms)
         self.config = config if config is not None else settings(self.calibration)
@@ -122,6 +124,7 @@ class ClosedLoop:
         self.elapsed_ms = -10
         self.sequence = self.request = self.frames = 0
         self.started = False
+        self.auto_start = auto_start
         self.pending = []
         self.last_output = 0
         self.acknowledged = set()
@@ -159,7 +162,7 @@ class ClosedLoop:
             if len(trace) > 300:
                 trace[:] = trace[::2]
 
-    def advance(self):
+    def advance(self, report=True):
         self.elapsed_ms += 10
         tick = self.elapsed_ms
         now = (self.base_ms + tick + 6) & MASK
@@ -187,7 +190,7 @@ class ClosedLoop:
         self.native.step(now)
         self.pose = self.native.snapshot(now)
         self.observation = self.tracker.observation(self.cache, now, GYRO_SCALE)
-        if not self.started and tick >= 120:
+        if self.auto_start and not self.started and tick >= 120:
             result = self.tracker.start(self.goal, self.observation, now)
             if result != 1:
                 raise RuntimeError(f'模拟目标未被接受：{result}')
@@ -209,7 +212,17 @@ class ClosedLoop:
         if self.started and self.pose['valid']:
             self.append(self.trace, self.pose)
             self.append(self.reference_trace, output['reference'])
-        return self.snapshot()
+        return self.snapshot() if report else None
+
+    def begin(self, target):
+        """多段模拟共用同一个里程计/车体；完成前不能接受下一动作。"""
+        if self.observation is None:
+            raise ValueError('尚无模拟反馈')
+        result = self.tracker.start(target, self.observation, (self.base_ms + self.elapsed_ms + 6) & MASK)
+        if result != 1:
+            raise ValueError(f'下一段未被接受：{result}')
+        self.goal, self.started = target, True
+        self.reference_end_ms = None
 
     def snapshot(self):
         output = self.tracker.output()

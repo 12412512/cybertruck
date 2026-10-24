@@ -9,13 +9,29 @@
 <body>
     <header>
         <div>
-            <p class="eyebrow">智能搬运小车 / 阶段 1</p>
-            <h1>通信与设备总览</h1>
+            <p class="eyebrow">智能搬运小车 / 只读调试</p>
+            <h1>搬运小车调试工作台</h1>
         </div>
         <span class="badge">只读工作台</span>
     </header>
     <main>
         <section class="notice" id="source" role="status">正在读取控制核心状态…</section>
+        <section class="panel" id="nav-panel" hidden>
+            <h2>场地路径 · 坐标与离线巡回</h2>
+            <p class="muted">名义场地＋主体轮廓，完整突出物及实测坐标待补。以下只模拟导航，不执行扫码或搬运，不代表比赛耗时。</p>
+            <dl>
+                <dt>起点 / 坐标约定</dt><dd id="nav-frame">未接入</dd>
+                <dt>巡回状态 / 当前路段</dt><dd id="nav-state">未接入</dd>
+                <dt>模型位姿 X / Y / 航向</dt><dd id="nav-pose">未接入</dd>
+                <dt>参考估计 / 模拟耗时</dt><dd id="nav-time">未接入</dd>
+                <dt>连续里程原点</dt><dd id="nav-origin">未接入</dd>
+                <dt>道路与部署条件</dt><dd id="nav-conditions">未接入</dd>
+                <dt>异常原因</dt><dd id="nav-reason">—</dd>
+            </dl>
+            <p class="muted">蓝区可通行；黄区和工作台包络禁入。蓝线：规划参考；橙线：模拟里程计；白色车身：模拟位置与朝向。原点在左下角，X向右、Y向上。</p>
+            <svg id="nav-map" viewBox="0 0 650 650" role="img" aria-label="启停区1朝上出发的条件模拟地图及斜线弧线路径"></svg>
+            <div class="table-scroll"><table><thead><tr><th>导航段</th><th>状态 / 节点</th><th>动作类型</th><th>参考估计</th></tr></thead><tbody id="nav-legs"></tbody></table></div>
+        </section>
         <section class="grid" aria-label="通信状态">
             <article>
                 <h2>通信链路</h2>

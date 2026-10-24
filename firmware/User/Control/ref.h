@@ -3,6 +3,13 @@
 
 #include "line.h"
 #include "path.h"
+#include <stddef.h>
+
+#if defined(ODOM_HOST) && defined(_WIN32)
+#define REF_API __declspec(dllexport)
+#else
+#define REF_API
+#endif
 
 typedef struct
 {
@@ -44,7 +51,11 @@ typedef struct
 /* 目标固定于动作开始的车体，输出在连续odom坐标；构建后由所有者冻结。
  * 大计划由所有者静态保存。曲线只构建一次，采样不推进游标，可回查反馈时刻。
  * 弧线先有界预验，且逐次检查角V/A/J；这不是整车扫掠/可通行证明。 */
-int Ref_Make(RefPlan *plan, const RefSpec *spec, double x_m, double y_m, double yaw_rad);
-int Ref_At(const RefPlan *plan, double seconds, RefPoint *point);
+REF_API size_t Ref_Bytes(void);
+REF_API double Ref_Time(const RefPlan *plan);
+REF_API int Ref_Make(RefPlan *plan, const RefSpec *spec, double x_m, double y_m, double yaw_rad);
+REF_API int Ref_At(const RefPlan *plan, double seconds, RefPoint *point);
+/* 全区间位置/航向变化率保守界，供上位机扫掠包络膨胀，不含反馈修正。 */
+REF_API int Ref_Bounds(const RefPlan *plan, double *velocity_m_s, double *yaw_rad_s);
 
 #endif
