@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "id": "832bb3819b7e461dbda9ed2cba7adcda",
+  "created_at_unix": 1792480402.257281,
+  "context": {
+    "station": "rough",
+    "site_label": "粗加工区",
+    "position_id": 2,
+    "anchor_id": 3
+  },
+  "profile_fingerprint": "321995ef1f3c8725aab9278cb8fa880a16972df2aafd155e4e1838ba81154419",
+  "mount_id": "actual_mount_20261020",
+  "image_size": [
+    1280,
+    720
+  ],
+  "plane": "empty_ring_plane",
+  "centers_px": {
+    "2": [
+      629.39,
+      361.91
+    ],
+    "3": [
+      627.71,
+      619.52
+    ]
+  },
+  "actual_pose_confirmed": true,
+  "metric_valid": false,
+  "vehicle_yaw_valid": false,
+  "source": "five_fresh_stable_numbered_ring_frames",
+  "samples": 5,
+  "span_ms": 876
+}

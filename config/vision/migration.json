@@ -1,0 +1,47 @@
+{
+  "modules": [
+    {
+      "source": "C:\\Users\\RISI\\Desktop\\智能搬运小车\\Pi\\material_vision\\core.py",
+      "sha256": "bc670f37333bf3a165239f2f659ac9ffe9bb60697d0be81e05c22106b8367635",
+      "target": "pi\\robot\\vision\\legacy\\material_vision\\core.py",
+      "change": "仅改包内相对导入并统一换行；保留旧算法与注释"
+    },
+    {
+      "source": "C:\\Users\\RISI\\Desktop\\智能搬运小车\\Pi\\ring_vision\\core.py",
+      "sha256": "8834a16c58982367aa47f7596a04521f33c57bfdd8648e2b599e4b14eaa55ce4",
+      "target": "pi\\robot\\vision\\legacy\\ring_vision\\core.py",
+      "change": "仅改包内相对导入并统一换行；保留旧算法与注释"
+    },
+    {
+      "source": "C:\\Users\\RISI\\Desktop\\智能搬运小车\\Pi\\ring_vision\\digits.py",
+      "sha256": "a25d1c1d5ce84e8aa2c685809e033cef2819fa21677bbe89af4608cc719d23cb",
+      "target": "pi\\robot\\vision\\legacy\\ring_vision\\digits.py",
+      "change": "仅改包内相对导入并统一换行；保留旧算法与注释"
+    },
+    {
+      "source": "C:\\Users\\RISI\\Desktop\\智能搬运小车\\Pi\\placement_vision\\core.py",
+      "sha256": "4e3095bff65a99a970c579f729051f5084f346a4c58a36bc1c867bb588af9fd7",
+      "target": "pi\\robot\\vision\\legacy\\placement_vision\\core.py",
+      "change": "仅改包内相对导入并统一换行；保留旧算法与注释"
+    },
+    {
+      "source": "C:\\Users\\RISI\\Desktop\\智能搬运小车\\Pi\\alignment_vision\\core.py",
+      "sha256": "c9d19faf4ddce13dd6f50fdbdb47e8753c19dbdcbf48df3840ec99640876b23b",
+      "target": "pi\\robot\\vision\\legacy\\alignment_vision\\core.py",
+      "change": "仅改包内相对导入并统一换行；保留旧算法与注释"
+    },
+    {
+      "source": "C:\\Users\\RISI\\Desktop\\智能搬运小车\\Pi\\vision_runtime\\engine.py",
+      "sha256": "a3031fbd47c30006e820dd458120001f1c400cdc43151a87e4a1dda0634b61ec",
+      "target": "pi\\robot\\vision\\legacy\\vision_runtime\\engine.py",
+      "change": "仅改包内相对导入并统一换行；保留旧算法与注释"
+    },
+    {
+      "source": "C:\\Users\\RISI\\Desktop\\智能搬运小车\\Pi\\qr_camera\\task_codec.py",
+      "sha256": "3bf5e91414ade5c5e1413b816a3cd7c34d740fbaf2e2d5019efb6454eb3fb766",
+      "target": "pi\\robot\\vision\\legacy\\qr_camera\\task_codec.py",
+      "change": "仅改包内相对导入并统一换行；保留旧算法与注释"
+    }
+  ],
+  "motion_authority": false
+}

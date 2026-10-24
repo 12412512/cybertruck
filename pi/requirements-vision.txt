@@ -1,0 +1,5 @@
+# 视觉单独安装；不改变固件或串口依赖。Pi现用4.8.1/1.23.5另行兼容验证。
+opencv-python-headless==5.0.0.93; python_version >= '3.12'
+numpy==2.5.4; python_version >= '3.12'
+opencv-python-headless==4.8.1.78; python_version < '3.12'
+numpy==1.23.5; python_version < '3.12'
