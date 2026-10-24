@@ -16,6 +16,7 @@ from .scene import make_field, normalize
 from .storage import write_json, payload, versions
 from .simulation import Simulation
 from .mechanism import Mechanism
+from .transfer import Transfer
 from ..device.integration import preparation
 
 
@@ -30,6 +31,7 @@ class Workbench:
         self.lock = threading.RLock()
         self.sim = Simulation(self.library)
         self.mech = Mechanism(self.runtime, self.clock)
+        self.transfer = Transfer(self.mech)
         self.preparation = preparation()
         self.owner, self.token, self.lease_until, self.sequence = '', '', 0., -1
         self.manual_until = 0.
@@ -105,11 +107,14 @@ class Workbench:
             self.sim.halt('点动续约超时，已请求模型停车')
             self.record('自动停车', '点动帧超过350ms或控制权过期')
         if self.token and now >= self.lease_until:
+            self.transfer.cancel('离线控制权过期，不自动续跑')
             if self.mech.busy:
                 self.mech.stop('控制权过期，机构调试已停止')
             self.owner, self.token = '', ''
 
     def _idle(self):
+        if self.transfer.busy:
+            raise Rejected('转存流程未结束，底盘模型不能运动')
         if self.mech.busy:
             raise Rejected('机构运行中，禁止底盘运动')
         if self.mech.zero_version and not self.mech.transport_ready():
@@ -125,6 +130,7 @@ class Workbench:
         with self.lock:
             self._expire()
             if command.op == 'stop':
+                self.transfer.cancel('工作台停止')
                 self.sim.halt('工作台停止')
                 self.mech.stop('工作台停止，保持夹爪估计')
                 self.owner, self.token = '', ''
@@ -158,7 +164,22 @@ class Workbench:
             return copy.deepcopy(result)
 
     def _apply(self, op, arguments):
+        if self.transfer.busy and op not in ('transfer','mechanism','renew','release'):
+            raise Rejected('离线转存尚未结束，禁止修改或启动其他动作')
+        if op == 'transfer':
+            if not self.sim.stopped() or self.sim.mode == 'FAILED':
+                raise Rejected('转存流程要求底盘模型已停车且无故障')
+            try:
+                result=self.transfer.command(arguments)
+            except ValueError as exc:
+                raise Rejected(str(exc)) from exc
+            self.record('离线转存请求', arguments.action)
+            return result
         if op == 'mechanism':
+            if self.transfer.busy:
+                if arguments.action not in ('stop','invalidate'):
+                    raise Rejected('转存流程持有机构模型，不能插入单轴或示教动作')
+                self.transfer.cancel('机构模型停止/基准失效')
             if arguments.action not in ('stop', 'invalidate'):
                 if not self.sim.stopped() or self.sim.mode == 'FAILED':
                     raise Rejected('底盘模型未停稳或故障未处理，机构互锁拒绝')
@@ -172,6 +193,7 @@ class Workbench:
                 self.record('机构离线请求', f'{arguments.action} / {result.get("action_id", "配置")}')
             return result
         if op == 'release':
+            self.transfer.cancel('释放离线控制权')
             if self.mech.busy:
                 self.mech.stop('释放控制权，机构调试已停止')
             if self.sim.mode == 'MANUAL':
@@ -301,6 +323,13 @@ class Workbench:
             if self.mech.busy and (not self.sim.stopped() or self.sim.mode == 'FAILED'):
                 self.mech.fail('执行中底盘未停稳或发生故障')
             self.mech.tick(gap_s)
+            if self.transfer.busy and gap_s <= .1:
+                # 仅离线演示加速模型积分，不改变控制循环/反馈超时或实车参数。
+                for _ in range(self.transfer.frozen['configuration']['pace']-1):
+                    self.mech.tick(gap_s)
+            if self.transfer.busy and gap_s > .1:
+                self.transfer.cancel('离线控制循环超时',failed=True)
+            self.transfer.tick(self.sim.stopped() and self.sim.mode != 'FAILED')
             if mech_before != self.mech.mode and self.mech.mode in ('COMPLETE', 'FAILED', 'STOPPED'):
                 self.record('机构模型结果', f'{self.mech.mode} / {self.mech.reason}')
             if gap_s > .1 and self.sim.mode in ('MANUAL', 'RUNNING'):
@@ -322,7 +351,7 @@ class Workbench:
                         saved_versions=list(self.saved),
                         active_plan=copy.deepcopy(self.sim.plan.view) if self.sim.plan else None,
                         events=list(self.events), log_error=self.log_error,
-                        mechanism=self.mech.view(),
+                        mechanism=self.mech.view(), transfer=self.transfer.view(),
                         integration=copy.deepcopy(self.preparation),
                         capabilities=dict(manual=True, move=True, planning=True,
                                           real_motion=False, mechanism=True))
@@ -332,5 +361,6 @@ class Workbench:
             self.closed = True
             self.planning_cancel.set()
             self.sim.halt('离线核心退出')
+            self.transfer.cancel('离线核心退出')
             self.mech.stop('离线核心退出')
         self.executor.shutdown(wait=False, cancel_futures=True)

@@ -1,3 +1,4 @@
+import {initTransfer,renderTransfer} from './workbench-transfer.js';
 import { initDevice } from './workbench-device.js';
 // 机构页面只编辑草稿并调用统一核心，不打开设备、不产生真实PWM。
 import {initAcceptance} from './workbench-acceptance.js';
@@ -129,6 +130,7 @@ export function initMechanism(options) {
        </article>
       </div>`;
     initDevice($('mechanism-root'));
+    initTransfer($('mechanism-root'),api);
     $('mech-claim').onclick = () => $('claim').click();
     $('mech-stop').onclick = () => { cancelMechHeld(); invoke('stop'); };
     $('pose-next').onclick = () => {
@@ -224,6 +226,7 @@ export function initMechanism(options) {
 }
 
 export function renderMechanism(snapshot, canControl) {
+    renderTransfer(snapshot,canControl);
     state = snapshot?.mechanism;
     enabled = !!canControl;
     if (!state) {
@@ -301,6 +304,10 @@ export function renderMechanism(snapshot, canControl) {
     $('pose-load').disabled = !ready || !$('pose-version').value;
     $('mech-step').textContent=state.active?`#${state.active.id} · ${state.active.step}/${state.active.total}`:'无运行中动作';
     $('mech-active').textContent=state.active?`${statusNames[state.active.status]} · ${state.active.action} · 零点v${state.active.zero_version}`:'不自动执行示教或重放上次动作';
+    if (snapshot.transfer && ['RUNNING','WAIT_OBSERVATION'].includes(snapshot.transfer.mode)) {
+        for(const id of ['mech-zero','mech-anchor','mech-reset','axis-move','servo-move','pose-preview','pose-save','pose-run','pose-next'])$(id).disabled=true;
+        document.querySelectorAll('.mech-jog').forEach(b=>{b.disabled=true;});
+    }
     const resultKey=JSON.stringify(state.results);
     if (activeBefore!==resultKey) {
         activeBefore=resultKey;

@@ -11,7 +11,7 @@ class Input(BaseModel):
 
 class Command(Input):
     op: Literal['claim', 'renew', 'release', 'stop', 'manual_stop', 'manual', 'move', 'reset',
-                'plan', 'run', 'save', 'load', 'defaults', 'mechanism']
+                'plan', 'run', 'save', 'load', 'defaults', 'mechanism', 'transfer']
     client: str = Field(min_length=1, max_length=64, pattern=r'^[a-zA-Z0-9_-]+$')
     token: str = Field(default='', max_length=64)
     request_id: str = Field(min_length=1, max_length=64, pattern=r'^[a-zA-Z0-9_-]+$')
@@ -107,6 +107,23 @@ class MechGoal(Input):
         return self
 
 
+class TransferGoal(Input):
+    action: Literal['preview', 'run', 'confirm', 'stop', 'reset']
+    slot: int = Field(default=0, ge=0, le=2)
+    color: Literal['red','green','blue','yellow','cyan','black'] = 'red'
+    raw_lift_m: float = Field(default=.049, ge=0., le=.049)
+    raw_reach_m: float = Field(default=.05, ge=0., le=.05)
+    slot_lift_m: float = Field(default=.043, ge=0., le=.049)
+    place_lift_m: float = Field(default=.049, ge=0., le=.049)
+    place_reach_m: float = Field(default=.05, ge=0., le=.05)
+    auto_model: bool = False
+    pace: int = Field(default=1, ge=1, le=20)
+    confirmed: bool = False
+    action_id: int | None = Field(default=None, ge=1)
+    step_index: int | None = Field(default=None, ge=0, le=64)
+    verdict: Literal['PICKED','STORED','RETRIEVED','PLACED','UNKNOWN'] = 'UNKNOWN'
+
+
 ARGUMENTS = dict(claim=Empty, renew=Empty, release=Empty, stop=Empty, manual_stop=Empty,
                  manual=Manual, move=Move, reset=Reset, plan=PlanInput, run=Run, save=Run,
-                 load=Run, defaults=Empty, mechanism=MechGoal)
+                 load=Run, defaults=Empty, mechanism=MechGoal, transfer=TransferGoal)

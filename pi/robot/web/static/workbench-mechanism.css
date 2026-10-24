@@ -38,3 +38,9 @@
 .mech-test-guide ol, .mech-test-guide ul { line-height: 1.9; padding-left: 22px; }
 .mech-test-guide .button-row { display: flex; gap: 8px; flex-wrap: wrap; }
 #guide-records { max-height: 220px; overflow: auto; font-size: 13px; }
+
+.transfer-workflow { border-top: 3px solid #008b87; margin-bottom: 20px; }
+.transfer-workflow input[type='checkbox'] { width:18px; height:18px; min-height:18px; margin-right:6px; }
+#transfer-steps { max-height:280px; overflow:auto; line-height:1.8; padding-left:28px; }
+#transfer-steps .current { color:#007d78; font-weight:700; }
+#transfer-events { font-size:13px; }

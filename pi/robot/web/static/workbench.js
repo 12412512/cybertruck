@@ -183,20 +183,21 @@ $('release').onclick = async () => {
 function updateButtons() {
     const enabled = !!token && online();
     const mode = current?.simulation?.mode;
-    const mechReady = !current?.mechanism?.busy && (!current?.mechanism?.zero_version || current?.mechanism?.transport_ready);
+    const mechBusy = !!current?.mechanism?.busy || ['RUNNING','WAIT_OBSERVATION'].includes(current?.transfer?.mode);
+    const mechReady = !mechBusy && (!current?.mechanism?.zero_version || current?.mechanism?.transport_ready);
     const idle = current?.simulation?.stopped && mode !== 'FAILED' && mechReady;
     for (const button of document.querySelectorAll('.controlled')) button.disabled = !enabled;
     for (const button of document.querySelectorAll('.jog')) button.disabled = !enabled || (!idle && mode !== 'MANUAL');
     $('move').disabled = !enabled || !idle;
-    $('reset').disabled = !enabled || !current?.simulation?.stopped || !!current?.mechanism?.busy;
-    $('plan').disabled = !enabled || moving();
+    $('reset').disabled = !enabled || !current?.simulation?.stopped || mechBusy;
+    $('plan').disabled = !enabled || moving() || mechBusy;
     $('run').disabled = !enabled || !idle || dirty || !planId;
-    $('save').disabled = !enabled || dirty || !planId;
+    $('save').disabled = !enabled || dirty || !planId || mechBusy;
     $('claim').disabled = !online() || (!!current?.owner?.client && current.owner.client !== client);
     $('claim').hidden = !!token;
     $('release').hidden = !token;
-    $('defaults').disabled = !enabled || !current?.simulation?.stopped || !!current?.mechanism?.busy;
-    $('load-version').disabled = !enabled || !current?.simulation?.stopped || !!current?.mechanism?.busy || !$('saved-version').value;
+    $('defaults').disabled = !enabled || !current?.simulation?.stopped || mechBusy;
+    $('load-version').disabled = !enabled || !current?.simulation?.stopped || mechBusy || !$('saved-version').value;
     for (const item of document.querySelectorAll('.scene-input, #start, #source, #route-speed, #speed-range, #add-target')) item.disabled = moving();
 }
 function draftChanged() {
