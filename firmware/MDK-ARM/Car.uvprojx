@@ -794,6 +794,26 @@
               <FilePath>../User/Control/path.h</FilePath>
             </File>
             <File>
+              <FileName>ref.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Control/ref.c</FilePath>
+            </File>
+            <File>
+              <FileName>ref.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Control/ref.h</FilePath>
+            </File>
+            <File>
+              <FileName>track.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Control/track.c</FilePath>
+            </File>
+            <File>
+              <FileName>track.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Control/track.h</FilePath>
+            </File>
+            <File>
               <FileName>yaw.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/Control/yaw.c</FilePath>

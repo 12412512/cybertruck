@@ -13,3 +13,5 @@
 安装`tests/requirements.txt`后，在根目录执行`tools/test.ps1`，或`.venv/Scripts/python.exe -B -m unittest discover -s tests -v`。Zig构建原生C库到`output/tests/`；这项验证不是板端UART、电机停止或实物验收。
 
 正式实现可以被测试引用，正式程序不得从本目录导入运行实现。实物测试摘要归 `docs/`，原始日志和录像归 Git 忽略的 `output/`。
+
+`test_tracking.py`增加18项正式C跟踪/到位回归，闭环覆盖11类轨迹；同时校验独立车体真值、零速发送屏障、最慢新反馈稳定窗口、失败/取消、动作幂等、连续原点及Web/账本隔离。误差结果写`output/tests/tracking_summary.json`，仅为合成模型，非实车精度。运行入口仍为`tools/test.ps1`。

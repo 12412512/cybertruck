@@ -451,3 +451,23 @@ int Odom_Read(const Odom *odom, uint32_t now_ms, OdomPose *pose)
         (uint32_t)(now_ms - pose->tick_ms) < odom->config.fresh_ms;
     return (int)pose->valid;
 }
+
+int Odom_Heading(const Odom *odom, uint32_t now_ms, double *yaw_rad, RxStamp *stamp)
+{
+    unsigned latest;
+    if (!yaw_rad || !stamp)
+    {
+        return 0;
+    }
+    *yaw_rad = 0;
+    memset(stamp, 0, sizeof(*stamp));
+    if (!odom || odom->pose.fault || !odom->started || !odom->yaw_ready ||
+        !Stamp_Check(&odom->yaw_stamp, now_ms, odom->config.fresh_ms))
+    {
+        return 0;
+    }
+    latest = (odom->yaw.first + odom->yaw.count - 1) % YAW_SLOTS;
+    *yaw_rad = (double)odom->yaw.samples[latest].yaw_rad - odom->origin_yaw;
+    *stamp = odom->yaw_stamp;
+    return 1;
+}

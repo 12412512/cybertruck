@@ -61,3 +61,9 @@
 - `Control/odom.*`迁用旧`User/Chassis/odom.c`的连续轮增量、IMU历史、时效/计数跳变门槛、保留原点和整批提交；来源SHA256为`48607c8c51ac53c313ed225b3e915a23460c151f166575e5fd4c344f9c69d670`。
 - 为避免各轮积分区间不一致，改为四轮历史在共同时间边界插值，再按全部轮/IMU节点分段积分；继续复用正式Kin和Yaw，不复制另一套公式/角度展开。移除HAL/全局轮总线/路测档位，只接显式配置和带代次样本。
 - `device/odometry.py`只做正式C的模型绑定；`odom_sim.py`复用现有C反馈编码、Python GC/CRC和FeedbackCache，独立解析曲线作真值。主控仅sim显式加载，正式代码不导入tests/tools实现；详见`odometry.md`。
+
+## 轨迹跟踪与稳定到位复用
+
+- 旧`User/Chassis/drive.c`的参考在位置/航向各自时间回查、连续odom、零速批次TXOK屏障、发送后新反馈和静止窗口迁入新`Control/ref.*`、`track.*`。原SHA256为`a954c9c7269650013f41a76976e2cd778ab679589c5a37a431c2921f9004b720`。
+- 旧`heading.c`（SHA256 `f6939aca741a6fbdc88934f9fa35ec0217db0415de952035f933dd4a8f4fff13`）及`position.c`（SHA256 `fe0f436e6808eacc3a5d87591b64f2a1877b7fc5d8a898bbc1338642bfc2c50c`）的有界P、滞回和误差方向用于新接口。新增角速度误差阻尼与整体轮速平滑，未复制其旧全局状态和整数配对算法；新实现仍须实车验收。
+- 沿用正式Kin/Curve/Line/Path/Odom/反馈编码，不复制测试公式作为生产控制。独立Plant是模拟对象，明确分离参考、模型真值和观察输出；本轮零速确认仅为模型回调。参考源只读，App/CAN/PWM保持未接入；详见`tracking.md`。

@@ -102,3 +102,9 @@ $env:PYTHONPATH = Join-Path (Get-Location) 'pi'
 模型通过正式C负载编码、GC拆包/CRC、请求/时间缓存和正式C连续观察器，显示模拟odom、解析对照和近期轨迹。物料任务与里程模型各自标记simulation，NAV仍未接真实场地；顶层真实pose/grabs/places保持未知。`--odom-library`在offline/observer/serial模式均拒绝，主程序不自动编译或加载模型。
 
 只生成离线报告：`python -B -m robot.odom_sim --library output/native/odometry.dll`，默认输出`output/odometry/report.json`。来源、共同时间对齐及未验证项见[连续里程计](../docs/odometry.md)。
+
+## 轨迹跟踪联合闭环
+
+当前本机8000已改为`--mode sim --track-library output/native/tracking.dll --runtime output/preview`，保留既有任务账本，未新建模拟任务。模型包含正式里程计，不能同时传`--odom-library`；真实模式拒绝加载。构建命令为`python -B tools/build_odom.py --output output/native/tracking.dll`；单独报告为`python -B -m robot.track_sim --library output/native/tracking.dll`。两者均在根目录使用虚拟环境，运行时设置`PYTHONPATH=pi`。
+
+页面显示参考/实走双轨迹、误差、命令与模型轮速、参考结束和到位的不同时间、零速批次确认及新反馈稳定窗口。8001及Pi旧服务未修改。运行步骤、复用与未验证项见[跟踪与到位](../docs/tracking.md)。

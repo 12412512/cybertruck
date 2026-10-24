@@ -93,5 +93,7 @@ ODOM_API int Odom_Yaw(Odom *odom, const ImuSample *sample, uint32_t now_ms);
 /* 1本次提交，0等待新共同区间，-1锁存异常；等待不消费半批、不外推。 */
 ODOM_API int Odom_Step(Odom *odom, uint32_t now_ms);
 ODOM_API int Odom_Read(const Odom *odom, uint32_t now_ms, OdomPose *pose);
+/* 最新连续航向与其真实接收时间；与共同位置时间分开，供当前BODY变换使用。 */
+ODOM_API int Odom_Heading(const Odom *odom, uint32_t now_ms, double *yaw_rad, RxStamp *stamp);
 
 #endif

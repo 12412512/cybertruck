@@ -135,7 +135,7 @@ footer {
     text-align:center;
 }
 
-#odom-trace {
+#odom-trace,#track-trace {
     display:block;
     width:100%;
     max-height:240px;

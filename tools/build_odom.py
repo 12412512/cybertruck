@@ -22,7 +22,8 @@ def main():
     command = [sys.executable, '-m', 'ziglang', 'cc', '-shared', '-std=c99', '-O2',
                '-Wall', '-Wextra', '-Werror', '-DODOM_HOST', '-I', str(control),
                '-I', str(device), '-I', str(comm),
-               *(str(control / name) for name in ('odom.c', 'kin.c', 'yaw.c')),
+               *(str(control / name) for name in ('odom.c', 'kin.c', 'yaw.c', 'curve.c',
+                                                  'line.c', 'path.c', 'ref.c', 'track.c')),
                str(device / 'stamp.c'), str(comm / 'feedback.c'), '-o', str(library)]
     if os.name != 'nt':
         command += ['-fPIC', '-lm']

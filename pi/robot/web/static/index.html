@@ -74,7 +74,7 @@
             </div>
             <p class="muted">本阶段验证通信。设备在线不表示已具备运动或搬运条件。</p>
         </section>
-        <section class="panel">
+        <section class="panel" id="odom-panel">
             <h2>连续里程计 · 离线模型</h2>
             <p class="muted">仅合成反馈回放。下列位置属于模拟odom，本车真实位姿仍未接入。</p>
             <dl>
@@ -85,6 +85,22 @@
                 <dt>反馈帧 / 数据源</dt><dd id="odom-source">未接入</dd>
             </dl>
             <svg id="odom-trace" viewBox="0 0 600 240" role="img" aria-label="模拟里程轨迹，非真实地图"></svg>
+        </section>
+        <section class="panel">
+            <h2>轨迹跟踪与到位 · 离线闭环</h2>
+            <p class="muted">蓝线为参考，橙线为模拟里程计。车体真值由轮命令、电机滞后与载荷差异独立产生；所有参数均为合成测试参数。</p>
+            <dl>
+                <dt>动作 / 状态</dt><dd id="track-state">未运行</dd>
+                <dt>模拟位姿 X / Y / 航向</dt><dd id="track-pose">未接入</dd>
+                <dt>终点位置 / 航向误差</dt><dd id="track-error">未接入</dd>
+                <dt>参考结束 / 确认完成</dt><dd id="track-times">未接入</dd>
+                <dt>零速发送确认 / 新反馈稳定</dt><dd id="track-proof">未接入</dd>
+                <dt>当前未满足条件</dt><dd id="track-blockers">未接入</dd>
+                <dt>轮目标 RPM（FL/FR/RL/RR）</dt><dd id="track-targets">未接入</dd>
+                <dt>模型真实轮速 RPM</dt><dd id="track-speeds">未接入</dd>
+                <dt>模拟状态过程</dt><dd id="track-history">未接入</dd>
+            </dl>
+            <svg id="track-trace" viewBox="0 0 600 240" role="img" aria-label="蓝色参考与橙色闭环模拟轨迹，非真实地图"></svg>
         </section>
         <section class="panel">
             <h2>离线任务账本</h2>

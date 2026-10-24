@@ -1,4 +1,5 @@
 // 网页仅接收状态；掉线或失去核心快照时立即撤销在线显示。
+import {renderTracking} from './tracking.js';
 const set = (id, value) => { document.getElementById(id).textContent = value ?? '—'; };
 const ageText = value => Number.isFinite(value) ? Math.floor(value) : '—';
 let lastMessage = 0;
@@ -15,6 +16,8 @@ function stageName(stage) {
 }
 function render(state) {
     const fresh = state.core_fresh === true;
+    renderTracking(fresh && state.mode === 'sim' ? state.tracking : null);
+    document.getElementById('odom-panel').hidden = fresh && state.tracking?.domain === 'simulation';
     const board = fresh && state.connected ? state.board : null;
     const notice = document.getElementById('source');
     const hasFault = board && (state.mode === 'observer'

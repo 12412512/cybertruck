@@ -33,13 +33,17 @@ def open_transport(mode, port):
 
 
 def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None, task_code=None, start_zone=1,
-        owner_url=None, odom_library=None):
+        owner_url=None, odom_library=None, track_library=None):
     if mode not in ('offline', 'sim', 'serial', 'observer'):
         raise ValueError('未知运行模式')
     if task_code is not None and mode != 'sim':
         raise ValueError('任务演示仅允许sim模式')
     if odom_library is not None and mode != 'sim':
         raise ValueError('里程计模型仅允许sim模式')
+    if track_library is not None and mode != 'sim':
+        raise ValueError('闭环模型仅允许sim模式')
+    if track_library is not None and odom_library is not None:
+        raise ValueError('闭环模型已包含里程计，不能重复加载独立回放')
     observer = client = None
     if mode == 'observer':
         if port is not None:
@@ -62,7 +66,11 @@ def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None, task_code
     previous = None
     task_demo = None
     odom_demo = None
+    track_demo = None
     try:
+        if track_library is not None:
+            from .track_sim import TrackDemo
+            track_demo = TrackDemo(track_library)
         if odom_library is not None:
             from .odom_sim import OdomDemo
             odom_demo = OdomDemo(odom_library)
@@ -112,6 +120,8 @@ def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None, task_code
                     state['task'] = task_demo.snapshot()
                 if odom_demo is not None:
                     state['odometry'] = odom_demo.snapshot()
+                if track_demo is not None:
+                    state['tracking'] = track_demo.snapshot()
                 state.update(mode=mode, core_id=identity, core_sequence=sequence,
                              snapshot_at_s=now, snapshot_wall_s=time.time())
                 save_snapshot(runtime / 'state.json', state)
@@ -120,6 +130,8 @@ def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None, task_code
                 task_demo.step(now, link_ok=state['connected'])
             if odom_demo is not None:
                 odom_demo.step(now)
+            if track_demo is not None:
+                track_demo.step(now)
             time.sleep(.1 if mode == 'observer' else .005)
     finally:
         if task_demo is not None:
@@ -137,6 +149,7 @@ def main():
     parser.add_argument('--port', help='显式指定真实串口；不自动猜测或扫描')
     parser.add_argument('--owner-url', help='observer模式：已核对的既有串口所有者http地址')
     parser.add_argument('--odom-library', type=Path, help='仅sim：正式C观察器的主机模型库')
+    parser.add_argument('--track-library', type=Path, help='仅sim：正式C跟踪器与独立车体闭环模型')
     parser.add_argument('--runtime', type=Path, default=DEFAULT_RUNTIME)
     parser.add_argument('--task-demo', help='仅sim：模拟扫码、两批取放和返航，不执行实车动作')
     parser.add_argument('--start-zone', type=int, choices=(1, 2), default=1)
@@ -153,6 +166,10 @@ def main():
         parser.error('--task-demo仅允许--mode sim')
     if args.odom_library is not None and args.mode != 'sim':
         parser.error('--odom-library仅允许--mode sim')
+    if args.track_library is not None and args.mode != 'sim':
+        parser.error('--track-library仅允许--mode sim')
+    if args.track_library is not None and args.odom_library is not None:
+        parser.error('--track-library已包含里程计，不能同时指定--odom-library')
     stopped = False
 
     def finish(*_):
@@ -162,7 +179,7 @@ def main():
     signal.signal(signal.SIGINT, finish)
     signal.signal(signal.SIGTERM, finish)
     run(args.mode, args.port, args.runtime, lambda: stopped, args.task_demo, args.start_zone,
-        args.owner_url, args.odom_library)
+        args.owner_url, args.odom_library, args.track_library)
 
 
 if __name__ == '__main__':

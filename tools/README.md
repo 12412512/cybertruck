@@ -69,3 +69,5 @@ $taskPython = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-ru
 `python -B tools/build_odom.py`将正式Odom/Kin/Yaw/Stamp/反馈编码器构建到`output/native/odometry.dll`（Linux为so）；Zig依赖沿用tests/requirements.txt，不链接HAL、驱动、App或测试实现。`--output`可指定另一个产物文件；Windows旧模型正在运行时先停本机模拟或换新文件。
 
 模型由`robot.main --mode sim --odom-library <库路径>`显式加载，或用`robot.odom_sim`独立回放；不开设备、不自动构建、不在真实模式加载。详细运行与验收见`docs/odometry.md`。
+
+跟踪节点的主机库增加正式Ref/Track及其Curve/Line/Path依赖，默认旧库入口保持兼容；可用`--output output/native/tracking.dll`单独构建。`robot.main --mode sim --track-library <路径>`显式选择闭环，真实模式拒绝；Windows库正被核心持有时先停对应本机模拟。详见`docs/tracking.md`。
