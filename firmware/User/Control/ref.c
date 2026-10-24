@@ -74,6 +74,69 @@ int Ref_Bounds(const RefPlan *plan, double *velocity_m_s, double *yaw_rad_s)
     return isfinite(*velocity_m_s) && isfinite(*yaw_rad_s);
 }
 
+int Ref_TurnSpeed(const RefPlan *plan, double *velocity_m_s)
+{
+    double overall;
+    double yaw;
+    double peak = 0;
+    double begin;
+    double end;
+    double at[3];
+    double delta;
+    double velocity;
+    unsigned phase;
+    unsigned sample;
+    const CurveTiming *timing;
+    if (!velocity_m_s || !Ref_Bounds(plan, &overall, &yaw))
+    {
+        return 0;
+    }
+    *velocity_m_s = overall;
+    if (plan->spec.kind != 4 && plan->spec.kind != 6)
+    {
+        return 1;
+    }
+    if (plan->heading.total == 0)
+    {
+        *velocity_m_s = 0;
+        return 1;
+    }
+    timing = &plan->timing;
+    if (!timing->valid || !timing->count || timing->count > CURVE_TIME_PHASES)
+    {
+        return 0;
+    }
+    /* 直接覆盖查时后的真实区间，不假定二分得到的边界恰好位于匀速段。
+     * 每个速度二次多项式只在两端或加速度零点取得极值，最多15×3次。 */
+    for (phase = 0; phase < timing->count; phase++)
+    {
+        begin = fmax(plan->heading_begin_s, timing->time[phase]);
+        end = fmin(plan->heading_end_s, timing->time[phase + 1U]);
+        if (end < begin)
+        {
+            continue;
+        }
+        at[0] = begin;
+        at[1] = end;
+        at[2] = timing->jerk[phase] != 0 ? timing->time[phase] -
+            timing->acceleration[phase] / timing->jerk[phase] : begin;
+        for (sample = 0; sample < 3; sample++)
+        {
+            if (at[sample] < begin || at[sample] > end)
+            {
+                continue;
+            }
+            delta = at[sample] - timing->time[phase];
+            velocity = timing->velocity[phase] + delta * (timing->acceleration[phase] +
+                delta * timing->jerk[phase] / 2);
+            peak = fmax(peak, fabs(velocity));
+        }
+    }
+    /* overall/V给几何导数界；相位积分为double，额外覆盖采样转float的舍入。 */
+    *velocity_m_s = overall * peak / plan->spec.linear.velocity * 1.0001;
+    return isfinite(*velocity_m_s);
+}
+
 static void Transform(const RefPlan *plan, RefPoint *point)
 {
     double cosine = cos(plan->origin[2]);

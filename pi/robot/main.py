@@ -33,7 +33,7 @@ def open_transport(mode, port):
 
 
 def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None, task_code=None, start_zone=1,
-        owner_url=None, odom_library=None, track_library=None, route_library=None):
+        owner_url=None, odom_library=None, track_library=None, route_library=None, route_speed=None):
     if mode not in ('offline', 'sim', 'serial', 'observer'):
         raise ValueError('未知运行模式')
     if task_code is not None and mode != 'sim':
@@ -48,6 +48,8 @@ def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None, task_code
         raise ValueError('导航模型仅允许sim模式')
     if route_library is not None and (track_library is not None or odom_library is not None):
         raise ValueError('导航模型已包含跟踪器和里程计，不能重复加载')
+    if route_speed is not None and (mode != 'sim' or route_library is None):
+        raise ValueError('导航速度只允许显式导航模拟，不修改真实控制参数')
     observer = client = None
     if mode == 'observer':
         if port is not None:
@@ -75,7 +77,7 @@ def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None, task_code
     try:
         if route_library is not None:
             from .route_sim import RouteDemo
-            route_demo = RouteDemo(route_library)
+            route_demo = RouteDemo(route_library,**({'cruise_m_s':route_speed} if route_speed is not None else {}))
         if track_library is not None:
             from .track_sim import TrackDemo
             track_demo = TrackDemo(track_library)
@@ -164,6 +166,7 @@ def main():
     parser.add_argument('--odom-library', type=Path, help='仅sim：正式C观察器的主机模型库')
     parser.add_argument('--track-library', type=Path, help='仅sim：正式C跟踪器与独立车体闭环模型')
     parser.add_argument('--route-library', type=Path, help='仅sim：坐标、名义地图与多段闭环巡回')
+    parser.add_argument('--route-speed', type=float, help='仅导航sim：巡航m/s，不写实车参数')
     parser.add_argument('--runtime', type=Path, default=DEFAULT_RUNTIME)
     parser.add_argument('--task-demo', help='仅sim：模拟扫码、两批取放和返航，不执行实车动作')
     parser.add_argument('--start-zone', type=int, choices=(1, 2), default=1)
@@ -188,6 +191,8 @@ def main():
         parser.error('--route-library仅允许--mode sim')
     if args.route_library is not None and (args.odom_library is not None or args.track_library is not None):
         parser.error('--route-library已包含里程计和跟踪器，不能重复加载')
+    if args.route_speed is not None and (args.mode != 'sim' or args.route_library is None):
+        parser.error('--route-speed只允许显式导航模拟')
     stopped = False
 
     def finish(*_):
@@ -197,7 +202,7 @@ def main():
     signal.signal(signal.SIGINT, finish)
     signal.signal(signal.SIGTERM, finish)
     run(args.mode, args.port, args.runtime, lambda: stopped, args.task_demo, args.start_zone,
-        args.owner_url, args.odom_library, args.track_library, args.route_library)
+        args.owner_url, args.odom_library, args.track_library, args.route_library,args.route_speed)
 
 
 if __name__ == '__main__':

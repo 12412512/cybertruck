@@ -33,7 +33,7 @@ function draw(nav) {
     const corners=[[-body.rear_m,-body.right_m],[body.front_m,-body.right_m],
         [body.front_m,body.left_m],[-body.rear_m,body.left_m]].map(([x,y])=>[pose[0]+co*x-si*y,pose[1]+si*x+co*y]);
     svg.appendChild(element('polygon',{points:corners.map(p=>point(p).join(',')).join(' '),fill:'#ffffffc9',stroke:'#263e50','stroke-width':2}));
-    svg.appendChild(polyline([pose,[pose[0]+co*.18,pose[1]+si*.18]],'#263e50',3));
+    svg.appendChild(polyline([pose,[pose[0]+co*body.front_m*.8,pose[1]+si*body.front_m*.8]],'#263e50',3));
     for (const [text,p] of [['扫码',[1.2,2.39]],['原料',[.04,1.25]],['粗加工',[2.15,1.25]],['暂存',[1.1,.08]]]) {
         const [x,y]=point(p); svg.appendChild(element('text',{x,y,fill:'#263e50','font-size':13},text));
     }
@@ -56,6 +56,12 @@ export function renderNavigation(nav) {
     set('nav-pose',`${nav.map_pose[0].toFixed(3)} m / ${nav.map_pose[1].toFixed(3)} m / ${heading.toFixed(1)}°（模拟；展开角${(nav.map_pose[2]*180/Math.PI).toFixed(1)}°）`);
     set('nav-time',`${nav.estimate_s.toFixed(1)} s（停车方案参考估计${nav.before_s.toFixed(1)} s） / ${(nav.elapsed_ms/1000).toFixed(2)} s（模型时间，演示目标5倍速）`);
     set('nav-budget',`${nav.scope}。完整两批目标60 s；当前巡航上限${nav.cruise_m_s.toFixed(2)} m/s，忽略障碍和停车的距离下界${nav.minimum_distance_m.toFixed(2)} m / 时间下界${nav.ideal_minimum_s.toFixed(2)} s`);
+    const returnYaw=Number.isFinite(nav.return_heading_rad)?
+        (Math.atan2(Math.sin(nav.return_heading_rad),Math.cos(nav.return_heading_rad))*180/Math.PI).toFixed(0)+'°':'待选择';
+    set('nav-return',nav.return_heading_free===true?`${nav.return_region?'停入所选启停区即可，不要求原中心点或朝向':'保持原中心点，朝向不限'}；本次选择${returnYaw}，仍检查名义车体投影与稳定停车`:
+        nav.return_heading_free===false?`固定朝向对照：${returnYaw}`:'等待新版模拟核心');
+    const rpm=value=>Number.isFinite(value)?value.toFixed(1):'待接入';
+    set('nav-speed',`${nav.cruise_m_s.toFixed(2)} m/s，仅模拟档；轮目标峰值${rpm(nav.peak_rpm)} RPM / 模型反馈峰值${rpm(nav.peak_actual_rpm)} RPM；目标上限${rpm(nav.max_rpm)} RPM`);
     set('nav-turns',`独立停车转向${nav.inplace_actions}次；模型低速近原地转姿${(nav.inplace_turn_ms/1000).toFixed(2)} s，移动转姿${(nav.moving_turn_ms/1000).toFixed(2)} s；累计行程${nav.travel_m.toFixed(2)} m`);
     set('nav-origin',`${nav.origin_ms??'待建立'} ms / ${nav.origin_consistent?'全程未清零':'发生改变'}`);
     set('nav-conditions',`实车执行关闭；道路开放为合成场景；待验：${nav.assumptions.join('、')}`);

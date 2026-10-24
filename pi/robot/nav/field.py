@@ -30,6 +30,31 @@ class Field:
     def terminals(allowed_start):
         return (allowed_start,) if isinstance(allowed_start, str) else tuple(allowed_start or ())
 
+    def parking(self, key, approach, clearance_m=.004):
+        """名义主体完整投影停入蓝区；4mm含3mm到位容差，不代表完整突出物验收。"""
+        from .frames import Pose
+        zone = next((box for name,box,_ in self.zones if name == key and name.startswith('start_')),None)
+        if zone is None:
+            return {}
+        result = {}
+        for heading in range(4):
+            shape = bounds(footprint(Pose(0,0,heading*math.pi/2),self.body))
+            low_x,low_y = zone[0]+clearance_m-shape[0],zone[1]+clearance_m-shape[1]
+            high_x,high_y = zone[2]-clearance_m-shape[2],zone[3]-clearance_m-shape[3]
+            if low_x > high_x or low_y > high_y:
+                continue
+            result[heading] = Pose(min(high_x,max(low_x,approach[0])),
+                                   min(high_y,max(low_y,approach[1])),heading*math.pi/2)
+        return result
+
+    def parked(self, pose, key):
+        zone = next((box for name,box,_ in self.zones if name == key and name.startswith('start_')),None)
+        if zone is None:
+            return False
+        shape = bounds(footprint(pose,self.body))
+        return (shape[0] >= zone[0]-1e-9 and shape[1] >= zone[1]-1e-9 and
+                shape[2] <= zone[2]+1e-9 and shape[3] <= zone[3]+1e-9)
+
     def compact(self, pose, allowed_start):
         return any(key in self.terminals(allowed_start) and b[0] <= pose.x_m <= b[2] and b[1] <= pose.y_m <= b[3]
                    for key, b, _ in self.zones)

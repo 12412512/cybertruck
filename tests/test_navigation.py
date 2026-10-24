@@ -23,6 +23,7 @@ from robot.nav.geometry import rectangle, simplify
 from robot.nav.reference import specification, flow_specification, NativeReference
 from robot.nav.planner import Planner, view
 from robot.odom_sim import fixture
+from robot.device.odometry import Odometry
 from robot.route_sim import RouteSimulation
 from robot.main import run
 from robot.runtime import save_snapshot
@@ -254,7 +255,75 @@ class NavigationTests(unittest.TestCase):
             for mode in ('offline','observer','serial'):
                 with self.assertRaises(ValueError):run(mode=mode,route_library=self.library)
             with self.assertRaises(ValueError):run(mode='sim',route_library=self.library,track_library=self.library)
+            for mode in ('offline','observer','serial','sim'):
+                with self.assertRaises(ValueError):run(mode=mode,route_speed=.3)
             opened.assert_not_called()
+
+    def test_free_return_heading_keeps_position_and_selects_safe_orientation(self):
+        fixed = self.planner.plan('staging','start_1',start_heading=2,roads=self.open_roads)
+        free = self.planner.plan('staging','start_1',start_heading=2,roads=self.open_roads,free_heading=True)
+        self.assertEqual(free['status'],'OK')
+        self.assertTrue(free['free_heading'])
+        self.assertLessEqual(free['estimate_s'],fixed['estimate_s'])
+        self.assertEqual(free['goal_heading'],2)
+        end = free['segments'][-1].reference.end
+        self.assertLess(math.dist(end.values()[:2],self.planner.nodes['start_1']),1e-6)
+        self.assertFalse(self.planner.field.errors(end,'start_1'))
+
+    def test_region_parking_poses_are_inside_selected_zone_and_allow_position_change(self):
+        for key,approach in (('start_1',(.34,2.12)),('start_2',(2.07,2.12))):
+            poses = self.planner.field.parking(key,approach)
+            self.assertEqual(set(poses),set(range(4)))
+            for pose in poses.values():
+                self.assertTrue(self.planner.field.parked(pose,key))
+                self.assertFalse(self.planner.field.parked(pose,'start_2' if key=='start_1' else 'start_1'))
+            self.assertGreater(math.dist(poses[2].values()[:2],self.planner.nodes[key]),.005)
+
+    def test_interval_wheel_bound_covers_dense_formal_inverse(self):
+        native = Odometry(self.library,fixture(),0)
+        planner = Planner(self.lib,self.geometry,cruise_m_s=.3)
+        start = Pose(0,0,.2)
+        for kind,end,corner in (
+                ('FLOW',Pose(1.2,1.0,.2+math.pi/2),Pose(1.2,0,.2)),
+                ('WINDOW',Pose(2,0,.2+math.pi),Pose(1,0,.2)),
+                ('POSE',Pose(1.2,1.0,.2+math.pi/2),None)):
+            spec = flow_specification(self.lib,kind,start,end,corner,radius=.16,velocity=.3)
+            ref = NativeReference(self.lib,start,spec)
+            bound = planner.wheel_bound(ref)
+            for i in range(4001):
+                p = ref.point(ref.duration_s*i/4000)
+                co,si = math.cos(p.yaw_rad),math.sin(p.yaw_rad)
+                rpm = native.inverse(co*p.vx_m_s+si*p.vy_m_s,
+                                     -si*p.vx_m_s+co*p.vy_m_s,p.wz_rad_s)
+                self.assertLessEqual(max(map(abs,rpm)),bound+.002)
+            if kind in ('FLOW','WINDOW'):
+                naive = (math.sqrt(2)*ref.velocity_bound+.22*ref.yaw_bound)*60/(2*math.pi*.05)
+                self.assertLess(bound,100)
+                self.assertGreater(naive,100)
+
+    def test_speed_is_per_planner_and_invalid_speeds_rejected(self):
+        for speed in (0,-.1,float('nan'),float('inf'),3):
+            with self.assertRaises(ValueError):Planner(self.lib,self.geometry,cruise_m_s=speed)
+        fast = Planner(self.lib,self.geometry,cruise_m_s=.3)
+        start,end = Pose(1.2,.4,0),Pose(1.2,1.2,0)
+        slow,_ = self.planner.make('DIAGONAL',start,end,'slow',None)
+        quick,_ = fast.make('DIAGONAL',start,end,'fast',None)
+        self.assertAlmostEqual(slow.reference.spec.linear.velocity,.14,places=6)
+        self.assertAlmostEqual(quick.reference.spec.linear.velocity,.3,places=6)
+        self.assertLess(quick.reference.duration_s,slow.reference.duration_s)
+        cached,_ = fast.make('DIAGONAL',start,end,'another-road',None)
+        self.assertEqual(cached.road,'another-road')
+        self.assertEqual(quick.road,'fast')
+
+    def test_higher_cruise_cap_retains_wheel_limited_pose_candidate(self):
+        planner = Planner(self.lib,self.geometry,cruise_m_s=.36)
+        start,end = Pose(1.2,.4,0),Pose(1.2,1.2,math.pi/2)
+        # 独立开放几何用于核对降档本身；不把场地转姿碰撞混作轮速拒绝。
+        planner.field.zones = []
+        segment,errors = planner.make('POSE',start,end,'test',None)
+        self.assertIsNotNone(segment,errors)
+        self.assertLess(segment.reference.spec.linear.velocity,.36)
+        self.assertLessEqual(planner.wheel_bound(segment.reference),planner.max_rpm)
 
     def test_complete_closed_loop_keeps_origin_and_truth_clear(self):
         model=RouteSimulation(self.library)
@@ -272,7 +341,8 @@ class NavigationTests(unittest.TestCase):
         self.assertEqual(len(report['legs']),8)
         self.assertFalse(report['budget_complete'])
         self.assertGreater(report['ideal_minimum_s'],60)
-        self.assertLess(math.dist(report['truth_pose'][:2],report['initial_pose'][:2]),.006)
+        self.assertLess(math.dist(report['truth_pose'][:2],report['return_target'][:2]),.006)
+        self.assertTrue(model.field.parked(Pose(*report['truth_pose']),model.start))
         self.assertGreater(max(p[0] for p in report['trace'])-min(p[0] for p in report['trace']),1.5)
         self.assertGreater(max(p[1] for p in report['trace'])-min(p[1] for p in report['trace']),1.5)
 

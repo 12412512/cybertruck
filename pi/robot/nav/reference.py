@@ -8,7 +8,6 @@ from .frames import Pose, relative, angle
 
 CRUISE_M_S = .14
 DOCK_M_S = .025
-SHORT_MOVE_M = .3
 SETTLE_ESTIMATE_S = 1.0
 
 
@@ -32,10 +31,11 @@ def specification(kind, start, end, radius=.1, reverse=False, velocity=CRUISE_M_
     return spec
 
 
-def flow_specification(library, kind, start, end, corner=None, radius=.1, terminal=False, window_m=.08):
+def flow_specification(library, kind, start, end, corner=None, radius=.1, terminal=False,
+                       window_m=.08, velocity=CRUISE_M_S):
     """位置曲线与车身朝向解耦；内部低速区不创建第二个动作或停车状态。"""
     local = relative(start, end)
-    spec = specification('LINE', start, end)
+    spec = specification('LINE', start, end, velocity=velocity)
     spec.yaw_rad = angle(end.yaw_rad-start.yaw_rad)
     spec.kind = 5
     spec.angular = Limit(.7, 2.0, 12.0)
@@ -57,9 +57,9 @@ def flow_specification(library, kind, start, end, corner=None, radius=.1, termin
         spec.kind, spec.x_m, spec.y_m = 4, 0, 0
         spec.path = PathSpec(lead,tail,radius,radius*.35,1 if turn>0 else -1,0)
         spec.path_heading_rad = angle(incoming-start.yaw_rad)
-        # 预留向心加速度及曲率变化jerk预算，巡航上限保持原0.14m/s。
-        spec.curve_velocity_m_s = min(CRUISE_M_S,math.sqrt(.125*radius),(.4*radius*radius/4.5)**(1/3))
-        spec.tail_velocity_m_s = DOCK_M_S if terminal else CRUISE_M_S
+        # 巡航档由规划实例冻结，弯道仍受向心加速度与曲率jerk限制。
+        spec.curve_velocity_m_s = min(velocity,math.sqrt(.125*radius),(.4*radius*radius/4.5)**(1/3))
+        spec.tail_velocity_m_s = min(DOCK_M_S,velocity) if terminal else velocity
     elif kind == 'WINDOW':
         if corner is None:
             raise ValueError('转姿段缺少安全窗口')
@@ -69,17 +69,17 @@ def flow_specification(library, kind, start, end, corner=None, radius=.1, termin
             raise ValueError('转姿窗口不在直线内部')
         spec.kind = 6
         spec.yaw_begin_m, spec.yaw_end_m = along-window_m, along+window_m
-        spec.curve_velocity_m_s = CRUISE_M_S
-        spec.tail_velocity_m_s = DOCK_M_S if terminal else CRUISE_M_S
+        spec.curve_velocity_m_s = velocity
+        spec.tail_velocity_m_s = min(DOCK_M_S,velocity) if terminal else velocity
     elif terminal:
         distance = math.hypot(local.x_m,local.y_m)
         if distance <= .07:
-            spec.linear.velocity = DOCK_M_S
+            spec.linear.velocity = min(DOCK_M_S,velocity)
         else:
             spec.kind = 6
             spec.yaw_begin_m, spec.yaw_end_m = distance-.05, distance-.03
-            spec.curve_velocity_m_s = DOCK_M_S
-            spec.tail_velocity_m_s = DOCK_M_S
+            spec.curve_velocity_m_s = min(DOCK_M_S,velocity)
+            spec.tail_velocity_m_s = min(DOCK_M_S,velocity)
     return spec
 
 
@@ -92,6 +92,10 @@ class NativeReference:
         library.Ref_Make.argtypes = [c.c_void_p, c.POINTER(Spec), c.c_double, c.c_double, c.c_double]
         library.Ref_At.argtypes = [c.c_void_p, c.c_double, c.POINTER(Reference)]
         library.Ref_Bounds.argtypes = [c.c_void_p, c.POINTER(c.c_double), c.POINTER(c.c_double)]
+        try:
+            library.Ref_TurnSpeed.argtypes = [c.c_void_p,c.POINTER(c.c_double)]
+        except AttributeError as exc:
+            raise ValueError('导航模型库版本不匹配，请重新构建主机库') from exc
         self.storage = (c.c_double * ((library.Ref_Bytes() + 7) // 8))()
         self.start, self._spec = start, bytes(spec)
         if not library.Ref_Make(self.storage, c.byref(spec), *start.values()):
@@ -102,6 +106,10 @@ class NativeReference:
             raise ValueError('不能证明参考变化率上界')
         self.velocity_bound = velocity.value
         self.yaw_bound = yaw.value
+        turning = c.c_double()
+        if not library.Ref_TurnSpeed(self.storage,c.byref(turning)):
+            raise ValueError('不能证明航向变化区间的平移上界')
+        self.turning_velocity_bound = turning.value
         self.end = self.at(self.duration_s)
 
     @property

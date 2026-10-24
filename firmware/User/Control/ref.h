@@ -71,5 +71,7 @@ REF_API int Ref_Make(RefPlan *plan, const RefSpec *spec, double x_m, double y_m,
 REF_API int Ref_At(const RefPlan *plan, double seconds, RefPoint *point);
 /* 全区间位置/航向变化率保守界，供上位机扫掠包络膨胀，不含反馈修正。 */
 REF_API int Ref_Bounds(const RefPlan *plan, double *velocity_m_s, double *yaw_rad_s);
+/* 航向变化期间的平移速率界，避免叠加不同时间的线速/角速峰值。 */
+REF_API int Ref_TurnSpeed(const RefPlan *plan, double *velocity_m_s);
 
 #endif
