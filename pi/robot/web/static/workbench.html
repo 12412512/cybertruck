@@ -7,6 +7,7 @@
             工创小车 · 控制工作台
         </title>
         <link rel="stylesheet" href="/static/workbench.css?v=1">
+        <link rel="stylesheet" href="/static/workbench-mechanism.css?v=1">
     </head>
     <body>
         <aside class="sidebar">
@@ -37,7 +38,7 @@
                     </span>
                     机械调试
                     <span class="soon">
-                        预留
+                        离线
                     </span>
                 </button>
                 <button class="nav-item" data-page="logs">
@@ -560,80 +561,7 @@
                     </div>
                 </div>
             </section>
-            <section id="page-mechanism" class="page" hidden>
-                <div class="section-intro">
-                    <span class="eyebrow">
-                        MECHANISM WORKSPACE
-                    </span>
-                    <h2>
-                        机械调试接口
-                    </h2>
-                    <p>
-                        后续在同一工作台接入单轴、姿态示教与抓放调试，共用控制权和停止入口。
-                    </p>
-                </div>
-                <div class="mechanism-grid">
-                    <article class="card">
-                        <span class="badge muted">
-                            未连接
-                        </span>
-                        <h2>
-                            升降 / 伸缩
-                        </h2>
-                        <dl>
-                            <div>
-                                <dt>
-                                    实际位置
-                                </dt>
-                                <dd>
-                                    —
-                                </dd>
-                            </div>
-                            <div>
-                                <dt>
-                                    软件零点
-                                </dt>
-                                <dd>
-                                    未建立
-                                </dd>
-                            </div>
-                            <div>
-                                <dt>
-                                    软限位与互锁
-                                </dt>
-                                <dd>
-                                    待实测配置
-                                </dd>
-                            </div>
-                        </dl>
-                        <button disabled>
-                            单轴控制待接入
-                        </button>
-                    </article>
-                    <article class="card">
-                        <span class="badge muted">
-                            未连接
-                        </span>
-                        <h2>
-                            转臂 / 料盘 / 夹爪
-                        </h2>
-                        <p>
-                            分别显示命令目标与确认状态；不把舵机等待时间作为真实到位。
-                        </p>
-                        <button disabled>
-                            姿态示教待接入
-                        </button>
-                    </article>
-                </div>
-                <div class="card interface-note">
-                    <h2>
-                        已预留的接口约定
-                    </h2>
-                    <p>
-                        单轴点动、绝对目标、姿态示教、人工建零、停止。状态包含轴位置、零点版本、限位、互锁原因及动作结果；未接入时返回未知值，禁止动作。
-                    </p>
-                </div>
-            </section>
+            <section id="page-mechanism" class="page" hidden><div id="mechanism-root"></div></section>
             <section id="page-logs" class="page" hidden>
                 <div class="section-intro">
                     <span class="eyebrow">
@@ -666,7 +594,7 @@
                 </span>
             </footer>
         </main>
-        <script type="module" src="/static/workbench.js?v=2">
+        <script type="module" src="/static/workbench.js?v=3">
         </script>
     </body>
 </html>

@@ -28,6 +28,7 @@ def create_core(library, runtime, *, background=True):
             except Exception as exc:
                 with core.lock:
                     core.sim.fail(f'离线核心异常：{exc}')
+                    core.mech.fail(f'离线核心异常：{exc}')
                     core.record('控制异常', str(exc))
                 stop.set()
             previous = now

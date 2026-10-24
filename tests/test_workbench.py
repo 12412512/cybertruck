@@ -240,7 +240,7 @@ class WorkbenchTests(unittest.TestCase):
         self.assertFalse(state['capabilities']['real_motion'])
         self.assertIsNone(state['mechanism']['axes'][0]['position_m'])
         self.assertFalse(state['mechanism']['zero_valid'])
-        with self.assertRaisesRegex(Rejected, '尚未接入'):
+        with self.assertRaisesRegex(Rejected, '零点未建立'):
             self.send('mechanism', dict(action='move', axis='lift', target_m=.01, zero_version=1))
         with self.assertRaises(ValidationError):
             self.send('mechanism', dict(action='move', axis='lift', target_rad=.1))

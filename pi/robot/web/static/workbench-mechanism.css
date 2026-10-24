@@ -1,0 +1,23 @@
+/* PC机械工作区；共用主界面卡片和颜色，动作区按职责排列。 */
+.mech-banner { display:flex; align-items:center; gap:16px; margin:20px 0; padding:20px; border:1px solid #c9e7e5; background:#eef8f7; border-radius:12px; }
+.mech-banner > div { flex:1; }
+.mech-banner p { margin:8px 0 0; color:var(--muted); }
+.mech-columns { grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; }
+.mech-wide { grid-column:1/-1; }
+.mech-confirm { display:flex; align-items:center; gap:8px; margin:18px 0; font-size:13px; }
+.mech-confirm input { width:auto; }
+.mech-targets { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:14px; margin:18px 0; }
+.mech-targets label { display:grid; gap:8px; font-size:13px; }
+.mech-table { width:100%; border-collapse:collapse; font-size:13px; }
+.mech-table th,.mech-table td { text-align:left; padding:12px 8px; border-bottom:1px solid #edf1f4; }
+.mech-table th { color:#657c86; font-weight:500; }
+.mech-bars { display:flex; gap:24px; margin:20px 0; }
+.mech-bars label { flex:1; display:grid; gap:8px; font-size:12px; color:#657c86; }
+.mech-bars progress { width:100%; accent-color:#008482; }
+.mech-preview { padding:14px 20px; line-height:2; background:#f2f7fa; border-radius:8px; list-style:none; font-size:13px; }
+.mech-preview:empty { display:none; }
+.mech-results p { border-bottom:1px solid #edf1f4; padding:10px 0; margin:0; font-size:13px; }
+.mech-jog.pressed { background:#008482; color:white; }
+.mech-columns button { margin-top:0; }
+.mech-columns .button-row { margin:16px 0; }
+.mech-columns .hint { color:#7a8997; font-size:12px; line-height:1.8; }

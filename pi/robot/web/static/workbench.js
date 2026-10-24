@@ -2,6 +2,7 @@
 import {drawMap, drawSpeed} from './workbench-map.js';
 import {initScene, sceneValues, applyScene, overlayDraft} from './workbench-scene.js';
 import {isEditing, motionDirection, matchesRelease} from './workbench-input.js';
+import {initMechanism, renderMechanism, cancelMechHeld, stopMechHeld} from './workbench-mechanism.js';
 
 const $ = id => document.getElementById(id);
 const text = (id, value) => { $(id).textContent = value; };
@@ -95,6 +96,7 @@ function clearHeld() {
 async function stop(reason = '已请求停止模拟') {
     generation++;
     clearHeld();
+    cancelMechHeld();
     token = '';
     updateButtons();
     try { await post('stop', {}, ''); notify(reason + '；控制权已释放。'); }
@@ -181,19 +183,20 @@ $('release').onclick = async () => {
 function updateButtons() {
     const enabled = !!token && online();
     const mode = current?.simulation?.mode;
-    const idle = current?.simulation?.stopped && mode !== 'FAILED';
+    const mechReady = !current?.mechanism?.busy && (!current?.mechanism?.zero_version || current?.mechanism?.transport_ready);
+    const idle = current?.simulation?.stopped && mode !== 'FAILED' && mechReady;
     for (const button of document.querySelectorAll('.controlled')) button.disabled = !enabled;
     for (const button of document.querySelectorAll('.jog')) button.disabled = !enabled || (!idle && mode !== 'MANUAL');
     $('move').disabled = !enabled || !idle;
-    $('reset').disabled = !enabled || !current?.simulation?.stopped;
+    $('reset').disabled = !enabled || !current?.simulation?.stopped || !!current?.mechanism?.busy;
     $('plan').disabled = !enabled || moving();
     $('run').disabled = !enabled || !idle || dirty || !planId;
     $('save').disabled = !enabled || dirty || !planId;
     $('claim').disabled = !online() || (!!current?.owner?.client && current.owner.client !== client);
     $('claim').hidden = !!token;
     $('release').hidden = !token;
-    $('defaults').disabled = !enabled || !current?.simulation?.stopped;
-    $('load-version').disabled = !enabled || !current?.simulation?.stopped || !$('saved-version').value;
+    $('defaults').disabled = !enabled || !current?.simulation?.stopped || !!current?.mechanism?.busy;
+    $('load-version').disabled = !enabled || !current?.simulation?.stopped || !!current?.mechanism?.busy || !$('saved-version').value;
     for (const item of document.querySelectorAll('.scene-input, #start, #source, #route-speed, #speed-range, #add-target')) item.disabled = moving();
 }
 function draftChanged() {
@@ -290,9 +293,11 @@ $('reset').onclick = async () => {
 };
 for (const button of document.querySelectorAll('[data-page]')) button.onclick = () => {
     if (held) stopHeld('切换页面');
+    stopMechHeld();
     document.querySelectorAll('.page').forEach(page => { page.hidden = page.id !== `page-${button.dataset.page}`; });
     document.querySelectorAll('[data-page]').forEach(item => item.classList.toggle('active', item === button));
     document.querySelector('h1').textContent = {drive:'底盘与导航', mechanism:'机械调试', logs:'运行记录'}[button.dataset.page];
+    history.replaceState(null, '', `#${button.dataset.page}`);
 };
 function renderPlan(job) {
     const key = `${job.id}:${job.status}:${job.progress?.completed}`;
@@ -385,6 +390,7 @@ function render(state) {
         } else if (state.saved_versions.some(item => item.id === old && item.schema === 2)) $('saved-version').value = old;
     }
     renderPlan(state.planning); drawMap(state); overlayDraft(); updateButtons();
+    renderMechanism(state, !!token && online());
     const visiblePlan = sim.mode === 'RUNNING' && state.active_plan ? state.active_plan : state.planning.plan;
     if (visiblePlan) {
         const executed = visiblePlan.id === sim.active_plan_id;
@@ -409,6 +415,7 @@ function invalidate() {
     token = ''; current = null;
     for (const [id, value] of Object.entries({mode:'状态已过期', pose:'— / —', yaw:'航向未知', rpm:'—', 'stop-state':'无法确认模型停车', 'error-xy':'—', 'error-yaw':'—', fault:'未知', odom:'—'})) text(id, value);
     drawMap({available:false}); updateButtons();
+    renderMechanism(null, false);
 }
 function connect() {
     const socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/workbench/stream`);
@@ -422,4 +429,7 @@ setInterval(() => {
     if (token && online() && !held && !document.hidden) command('renew').catch(error => { token = ''; updateButtons(); notify(error.message, true); });
 }, 500);
 initScene({changed:draftChanged, notify, isRunning:moving});
+initMechanism({command, notify});
+const initialPage = location.hash.slice(1);
+if (['drive','mechanism','logs'].includes(initialPage)) document.querySelector(`[data-page="${initialPage}"]`).click();
 sequenceView(); updateButtons(); connect();

@@ -76,15 +76,20 @@ class Empty(Input):
 
 
 class MechGoal(Input):
-    """预留机械SI接口；启用前还必须接入实测限位、零点和互锁。"""
-    action: Literal['jog', 'move', 'teach', 'zero', 'stop']
-    axis: Literal['lift', 'reach', 'arm', 'tray', 'gripper']
+    """机构离线接口；草稿、明确执行与实物验收分别表示。"""
+    action: Literal['jog', 'move', 'teach', 'preview', 'pose', 'zero', 'anchor', 'invalidate', 'reset_model', 'stop']
+    axis: Literal['lift', 'reach', 'arm', 'tray', 'gripper'] = 'lift'
     target_m: float | None = None
     target_rad: float | None = None
     velocity_m_s: float | None = None
     velocity_rad_s: float | None = None
     zero_version: int | None = Field(default=None, ge=1)
-    pose_id: str | None = Field(default=None, max_length=64)
+    pose_id: str | None = Field(default=None, min_length=1, max_length=48, pattern=r'^[a-zA-Z0-9_-]+$')
+    name: str = Field(default='', max_length=64)
+    revision: int = Field(default=0, ge=0)
+    confirmed: bool = False
+    release_confirmed: bool = False
+    targets: dict[str, float] = Field(default_factory=dict, max_length=5)
 
     @model_validator(mode='after')
     def check_units(self):
@@ -98,11 +103,3 @@ class MechGoal(Input):
 ARGUMENTS = dict(claim=Empty, renew=Empty, release=Empty, stop=Empty, manual_stop=Empty,
                  manual=Manual, move=Move, reset=Reset, plan=PlanInput, run=Run, save=Run,
                  load=Run, defaults=Empty, mechanism=MechGoal)
-
-# 后续真实机构适配器必须提供这些字段；未接入时禁止编造轴位置和零点。
-MECHANISM = dict(available=False, backend='not_connected', zero_valid=False,
-                 axes=[dict(id=name, position_m=None, command_m=None, limits_m=None)
-                       for name in ('lift', 'reach')],
-                 actuators=['arm', 'tray', 'gripper'],
-                 actions=['jog', 'move', 'teach', 'zero', 'stop'],
-                 reason='机械控制尚未接入；后续共用控制权、动作结果和互锁接口')

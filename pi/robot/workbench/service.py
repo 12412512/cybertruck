@@ -10,11 +10,12 @@ import threading
 import time
 import uuid
 
-from .contracts import ARGUMENTS, Command, MECHANISM, PlanInput
+from .contracts import ARGUMENTS, Command, PlanInput
 from .planning import make_plan, restore_plan
 from .scene import make_field, normalize
 from .storage import write_json, payload, versions
 from .simulation import Simulation
+from .mechanism import Mechanism
 
 
 class Rejected(ValueError):
@@ -27,6 +28,7 @@ class Workbench:
         self.runtime.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
         self.sim = Simulation(self.library)
+        self.mech = Mechanism(self.runtime, self.clock)
         self.owner, self.token, self.lease_until, self.sequence = '', '', 0., -1
         self.manual_until = 0.
         self.cache = OrderedDict()
@@ -101,9 +103,15 @@ class Workbench:
             self.sim.halt('点动续约超时，已请求模型停车')
             self.record('自动停车', '点动帧超过350ms或控制权过期')
         if self.token and now >= self.lease_until:
+            if self.mech.busy:
+                self.mech.stop('控制权过期，机构调试已停止')
             self.owner, self.token = '', ''
 
     def _idle(self):
+        if self.mech.busy:
+            raise Rejected('机构运行中，禁止底盘运动')
+        if self.mech.zero_version and not self.mech.transport_ready():
+            raise Rejected('机构未满足模拟运输互锁：零点有效、升降/伸缩收回、转臂180°')
         if not self.sim.stopped():
             raise Rejected('请先停车并等待模型轮速稳定')
         if self.sim.mode == 'FAILED':
@@ -116,6 +124,7 @@ class Workbench:
             self._expire()
             if command.op == 'stop':
                 self.sim.halt('工作台停止')
+                self.mech.stop('工作台停止，保持夹爪估计')
                 self.owner, self.token = '', ''
                 self.record('停止', '撤销控制权；迟到点动不能重新启动')
                 return dict(ok=True, domain='simulation')
@@ -148,8 +157,21 @@ class Workbench:
 
     def _apply(self, op, arguments):
         if op == 'mechanism':
-            raise Rejected('机械适配器尚未接入；未发送目标、未建立零点')
+            if arguments.action not in ('stop', 'invalidate'):
+                if not self.sim.stopped() or self.sim.mode == 'FAILED':
+                    raise Rejected('底盘模型未停稳或故障未处理，机构互锁拒绝')
+            try:
+                renewed = self.mech.renew_jog(arguments)
+                result = renewed or self.mech.command(arguments)
+            except ValueError as exc:
+                self.record('机构请求拒绝', str(exc))
+                raise Rejected(str(exc)) from exc
+            if not renewed:
+                self.record('机构离线请求', f'{arguments.action} / {result.get("action_id", "配置")}')
+            return result
         if op == 'release':
+            if self.mech.busy:
+                self.mech.stop('释放控制权，机构调试已停止')
             if self.sim.mode == 'MANUAL':
                 self.sim.halt('已释放控制权')
             self.owner, self.token = '', ''
@@ -169,6 +191,8 @@ class Workbench:
             self.sim.move(arguments)
             self.record('定量动作开始', str(arguments.model_dump()))
         elif op == 'reset':
+            if self.mech.busy:
+                raise Rejected('机构运行中不能重置底盘模型')
             if not self.sim.stopped():
                 raise Rejected('请先停车并等待模型轮速稳定')
             self.sim.reset(arguments.start)
@@ -186,6 +210,8 @@ class Workbench:
             self.record('规划提交', f'{arguments.source} / {arguments.speed_m_s:.2f}m/s')
             return dict(ok=True, job_id=job_id)
         elif op == 'defaults':
+            if self.mech.busy:
+                raise Rejected('机构运行中不能恢复初始场景')
             if not self.sim.stopped():
                 raise Rejected('请先停止模型，再恢复初始设置')
             self.planning_cancel.set()
@@ -197,6 +223,8 @@ class Workbench:
             self._persist()
             self.record('恢复初始设置', '起点1、0.30m/s、100RPM、工位间隙50mm、清空障碍；保留历史版本')
         elif op == 'load':
+            if self.mech.busy:
+                raise Rejected('机构运行中不能读取导航场景')
             if not self.sim.stopped():
                 raise Rejected('请先停车再读取场景版本')
             path = self.runtime / 'plans' / f'{arguments.plan_id}.json'
@@ -266,7 +294,13 @@ class Workbench:
     def tick(self, gap_s=.01):
         with self.lock:
             before = self.sim.mode
+            mech_before = self.mech.mode
             self._expire()
+            if self.mech.busy and (not self.sim.stopped() or self.sim.mode == 'FAILED'):
+                self.mech.fail('执行中底盘未停稳或发生故障')
+            self.mech.tick(gap_s)
+            if mech_before != self.mech.mode and self.mech.mode in ('COMPLETE', 'FAILED', 'STOPPED'):
+                self.record('机构模型结果', f'{self.mech.mode} / {self.mech.reason}')
             if gap_s > .1 and self.sim.mode in ('MANUAL', 'RUNNING'):
                 self.sim.fail('离线控制循环超时')
                 self.record('控制周期超时', f'{gap_s:.3f}s')
@@ -286,13 +320,14 @@ class Workbench:
                         saved_versions=list(self.saved),
                         active_plan=copy.deepcopy(self.sim.plan.view) if self.sim.plan else None,
                         events=list(self.events), log_error=self.log_error,
-                        mechanism=copy.deepcopy(MECHANISM),
+                        mechanism=self.mech.view(),
                         capabilities=dict(manual=True, move=True, planning=True,
-                                          real_motion=False, mechanism=False))
+                                          real_motion=False, mechanism=True))
 
     def close(self):
         with self.lock:
             self.closed = True
             self.planning_cancel.set()
             self.sim.halt('离线核心退出')
+            self.mech.stop('离线核心退出')
         self.executor.shutdown(wait=False, cancel_futures=True)
