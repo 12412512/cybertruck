@@ -33,3 +33,8 @@
 .physical-channel pre { white-space: pre-wrap; line-height: 1.7; }
 #mechanism-root .physical-channel { border-top: 3px solid #d18b20; }
 #mechanism-root .physical-channel input[type='checkbox'] { width: 18px; height: 18px; min-height: 18px; margin: 0 6px 0 0; vertical-align: middle; }
+
+.mech-test-guide { margin-top: 24px; padding-top: 16px; border-top: 1px solid #d9e4e7; }
+.mech-test-guide ol, .mech-test-guide ul { line-height: 1.9; padding-left: 22px; }
+.mech-test-guide .button-row { display: flex; gap: 8px; flex-wrap: wrap; }
+#guide-records { max-height: 220px; overflow: auto; font-size: 13px; }
