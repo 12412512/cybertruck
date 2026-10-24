@@ -32,6 +32,12 @@ class Diagnostic(MotionLink):
         selected = super().extra_request(now)
         if selected is not None:
             return selected
+        # 静止验收也明确读取“无首次错误”页头，不能把未读取当成空记录。
+        if (self.firmware == 'GC-BASE-0.3.12' and self.execution
+                and self.execution['mode'] in (0, 1, 6) and not self.execution['can_errors']
+                and now - self.last_can_capture >= 1):
+            self.last_can_capture = now
+            return 38, b'\0'
         if now - self.last_uart >= 1:
             self.last_uart = now
             return 36, b''
@@ -81,17 +87,24 @@ def summarize(link, states, requests, expected_firmware='GC-BASE-0.3.6'):
                                      and w['rpm_range'] == [0, 0]
                                      and all(not value & 12 for value in w['status_values']) for w in wheels),
                   imu_feedback=channels[(4, 0)] >= 5 and channels[(5, 0)] >= 5,
-                  readonly_commands=all(k in (p.HELLO, p.OPEN, p.HEART, p.STATE, p.DIAG, STATUS, FEEDBACK, 36, 37)
+                  readonly_commands=all(k in (p.HELLO, p.OPEN, p.HEART, p.STATE, p.DIAG, STATUS, FEEDBACK, 36, 37, 38)
                                         for k in requests),
                   uart_clean=bool(link.uart_diag) and all(not (v['overflows'] or v['errors'] or v['restart_errors']) for v in link.uart_diag),
                   crc_clean=link.decoder.bad == 0,
-                  fault_record_clean=(latest.get('firmware') not in ('GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11') or
+                  can_capture_clean=(latest.get('firmware') != 'GC-BASE-0.3.12' or
+                                     (latest.get('can_capture_status') is not None and
+                                      not latest['can_capture_status']['valid'] and
+                                      not latest.get('can_capture_error'))),
+                  fault_record_clean=(latest.get('firmware') not in ('GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11', 'GC-BASE-0.3.12') or
                                       (latest.get('odom_fault_record') is not None and
                                        not latest['odom_fault_record']['valid'])))
     return dict(passed=all(checks.values()), checks=checks, wheels=wheels,
                 can_rx_delta=(execution[-1]['can_rx_sequence'] - execution[0]['can_rx_sequence']) if len(execution) > 1 else None,
                 firmware=latest.get('firmware'), boot_id=latest.get('boot_id'),
                 odom_fault_record=latest.get('odom_fault_record'),
+                can_fault_record=latest.get('can_fault_record'),
+                can_capture_error=latest.get('can_capture_error'),
+                can_capture_status=latest.get('can_capture_status'),
                 uart_diag=link.uart_diag,
                 requests=dict(Counter(requests)), states=len(states), feedback_samples=len(link.records),
                 first_execution=execution[0] if execution else None,
@@ -107,7 +120,7 @@ def main():
     parser.add_argument('--seconds', type=float, default=30)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--expect-firmware', default='GC-BASE-0.3.6',
-                        choices=('GC-BASE-0.3.6', 'GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11'))
+                        choices=('GC-BASE-0.3.6', 'GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11', 'GC-BASE-0.3.12'))
     args = parser.parse_args()
     if not 5 <= args.seconds <= 60 or args.output.exists():
         parser.error('窗口5～60秒，输出不得覆盖旧证据')
@@ -127,7 +140,7 @@ def main():
             if wire:
                 packets = p.Decoder().feed(wire)
                 kind = packets[0].kind
-                if kind not in (p.HELLO, p.OPEN, p.HEART, p.STATE, p.DIAG, STATUS, FEEDBACK, 36, 37):
+                if kind not in (p.HELLO, p.OPEN, p.HEART, p.STATE, p.DIAG, STATUS, FEEDBACK, 36, 37, 38):
                     raise RuntimeError('只读命令白名单违反')
                 requests.append(kind)
                 if transport.write(wire) != len(wire):

@@ -6,6 +6,7 @@ import struct
 from . import protocol as p
 from .link import Link
 from .feedback import Feedback, FEEDBACK
+from .can_capture import CAN_CAPTURE, CaptureReader
 
 CONFIG, ARM, GOAL, STATUS = range(32, 36)
 CONFIG_DATA = struct.Struct('<I3fIfifff4B4b4b')
@@ -89,6 +90,9 @@ class MotionLink(Link):
         self.last_fault_query = -1.
         self.first_fault = None
         self.sample_kind = 4
+        self.can_capture = CaptureReader()
+        self.last_can_capture = -1.
+        self.can_capture_error = None
 
     def reset(self, reason):
         # 重连只恢复观察。未决命令作未知，不排队重放，不自动使能。
@@ -96,6 +100,9 @@ class MotionLink(Link):
                 or (self.pending and self.pending[0].kind in (CONFIG, ARM, GOAL))):
             self.failed = True
         self.first_fault = None
+        self.can_capture = CaptureReader()
+        self.last_can_capture = -1.
+        self.can_capture_error = None
         self.command = None
         self.execution = self.execution_at = None
         self.samples.clear()
@@ -131,16 +138,31 @@ class MotionLink(Link):
         if now - self.last_execution >= .05:
             self.last_execution = now
             return STATUS, b''
-        if self.firmware in ('GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11') and now - self.last_fault_query >= .2:
+        if self.firmware in ('GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11', 'GC-BASE-0.3.12') and now - self.last_fault_query >= .2:
             self.last_fault_query = now
             return 37, b''
         if now - self.last_sample >= .05:
             self.last_sample = now
             self.sample_kind = 5 if self.sample_kind == 4 else 4
             return FEEDBACK, bytes([self.sample_kind, 0])
+        # 仅新版本且执行器静止模式才读冻结页，不挤占运动期反馈；不扩大实车运动版本白名单。
+        if (self.firmware == 'GC-BASE-0.3.12' and self.execution
+                and self.execution['mode'] in (0, 1, 6) and self.execution['can_errors']
+                and not self.can_capture.result and not self.can_capture_error
+                and now - self.last_can_capture >= .05):
+            self.last_can_capture = now
+            return CAN_CAPTURE, bytes([self.can_capture.next_page])
         return None
 
     def custom_reply(self, packet, request, now, sent=None):
+        if request.kind == CAN_CAPTURE:
+            try:
+                if packet.boot != self.boot or packet.session != self.session or packet.payload[:1] != bytes([p.OK]):
+                    raise ValueError('CAN分页身份或返回状态无效')
+                self.can_capture.feed(packet.payload[1:], packet.boot, packet.session)
+            except ValueError as exc:
+                self.can_capture_error = str(exc)
+            return True
         if request.kind == 37:
             if packet.boot != self.boot or len(packet.payload) != 113 or packet.payload[0] != p.OK:
                 self.failed = True
@@ -194,6 +216,8 @@ class MotionLink(Link):
         age = None if self.execution_at is None else (now - self.execution_at) * 1000
         state.update(execution=self.execution if age is not None and age < 250 else None,
                      odom_fault_record=self.first_fault,
+                     can_fault_record=self.can_capture.result, can_capture_error=self.can_capture_error,
+                     can_capture_status=self.can_capture.header,
                      execution_age_ms=age, control_capable=True,
                      raw_imu={str(kind): dict(values=list(sample.values), age_ms=sample.age_ms(now),
                                              first_ms=sample.first_ms, last_ms=sample.last_ms,

@@ -15,12 +15,22 @@ DEFAULT_RUNTIME = Path(__file__).resolve().parents[3] / 'output/runtime'
 STATIC = Path(__file__).with_name('static')
 
 
-def create_app(runtime=DEFAULT_RUNTIME, core_client=None):
+def create_app(runtime=DEFAULT_RUNTIME, core_client=None, acceptance_path=None):
     from .workbench import CoreClient, router
     app = FastAPI(title='智能搬运小车工作台', docs_url=None, redoc_url=None)
     app.include_router(router(core_client or CoreClient()))
     snapshot = Path(runtime) / 'state.json'
     app.mount('/static', StaticFiles(directory=STATIC), name='static')
+
+    @app.get('/api/workbench/acceptance')
+    def acceptance():
+        from ..device.acceptance import read_report
+        return read_report(acceptance_path or DEFAULT_RUNTIME.parent / 'workbench/readonly_acceptance.json')
+
+    @app.get('/api/workbench/preparation')
+    def preparation():
+        from ..device.integration import preparation as read_preparation
+        return read_preparation()
 
     @app.get('/')
     def index():

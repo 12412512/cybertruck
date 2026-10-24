@@ -1,7 +1,7 @@
 #ifndef MECH_HW_H
 #define MECH_HW_H
 
-/* 核对旧mech_cfg.h及本工程IOC。当前只供被动校验，不注册机构收发或PWM。 */
+/* 核对旧mech_cfg.h及本工程IOC。供校验和离线意图执行，不注册机构收发或PWM。 */
 #define MECH_LIFT_ID                 5U
 #define MECH_REACH_ID                6U
 #define MECH_LIFT_SIGN               1
@@ -30,5 +30,16 @@
 #define MECH_CLEARANCE_UM         1000L
 #define MECH_EXTEND_MIN_LIFT_UM  45000L
 #define MECH_ARM_CLEAR_MDEG      180000L
+
+/* 复用旧axis.c的受限单轴参数；仅供未绑定IO的执行状态机。 */
+#define MECH_AXIS_MAX_RPM            30U
+#define MECH_AXIS_SPEED_LIMIT        33U
+#define MECH_AXIS_TARGET_RAW          4L
+#define MECH_AXIS_OTHER_RAW          32L
+#define MECH_AXIS_ARRIVE_RAW         64L
+#define MECH_AXIS_REVERSE_RAW        64L
+#define MECH_AXIS_TX_MS              50U
+#define MECH_AXIS_ACK_MS            250U
+#define MECH_AXIS_ARRIVE_SAMPLES       3U
 
 #endif

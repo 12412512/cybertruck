@@ -127,11 +127,13 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                 if box[0] <= 0 or box[1] <= 0 or box[2] >= 2.4 or box[3] >= 2.4:
                     raise ValueError('估计车体包络接近场界，停止；不将里程计当成独立定位证明')
             if stage == 'connect' and link.bound and state and (state['mode'] != 0 or state['stop_confirmed']):
-                if (link.firmware not in ('GC-BASE-0.3.6', 'GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11')
+                # 新候选仅在显式离线模式回归既有轨迹；实车版本入口仍待烧录/只读验收。
+                offline_candidate = simulation and link.firmware == 'GC-BASE-0.3.12'
+                if ((not offline_candidate and (link.firmware not in ('GC-BASE-0.3.6', 'GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11')
                         or (raw_route and link.firmware not in ('GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11'))
                         or (case == 'north' and link.firmware not in ('GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11'))
                         or (tour_route and link.firmware not in ('GC-BASE-0.3.10','GC-BASE-0.3.11'))
-                        or (batch_route and link.firmware != 'GC-BASE-0.3.11')
+                        or (batch_route and link.firmware != 'GC-BASE-0.3.11')))
                         or state['mode'] not in (0, 1)):
                     raise ValueError('固件或使能状态不符合冷启动短段入口')
                 if north_site and link.boot != north_site['placement_boot_id']:

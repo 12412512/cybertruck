@@ -295,7 +295,7 @@ class ExecutionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             result = run_trial(transport, value, 'turn90', directory,
                                lambda kind, **fields: records.append(dict(kind=kind, **fields)),
-                               clock=lambda: transport.now, sleep=transport.sleep)
+                               clock=lambda: transport.now, sleep=transport.sleep, simulation=True)
         self.assertTrue(result['controller_complete'])
         self.assertTrue(transport.crossed_yaw_wrap)
         self.assertAlmostEqual(transport.plant.yaw, math.pi / 2, delta=math.radians(2))
@@ -611,7 +611,7 @@ class ExecutionTests(unittest.TestCase):
         value['yaw_sign'] = -1
         with tempfile.TemporaryDirectory() as directory:
             result = run_trial(transport, value, 'turn', directory, lambda *a, **k: None,
-                               clock=lambda: transport.now, sleep=transport.sleep)
+                               clock=lambda: transport.now, sleep=transport.sleep, simulation=True)
         self.assertTrue(result['controller_complete'])
         self.assertGreater(transport.plant.yaw, .15)
         self.assertLess(transport.plant.yaw, .20)
@@ -717,7 +717,7 @@ class ExecutionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(ValueError):
                 run_trial(transport, profile(), 'straight', directory, lambda *a, **k: None,
-                          clock=lambda: transport.now, sleep=transport.sleep)
+                          clock=lambda: transport.now, sleep=transport.sleep, simulation=True)
         self.assertNotEqual(self.lib.Device_Value(5), 4)
         self.assertEqual(sum(v.kind == GOAL for v in transport.requests), 1)
 
@@ -730,7 +730,7 @@ class ExecutionTests(unittest.TestCase):
                 try:
                     result = run_trial(transport, profile(), case, directory,
                                        lambda kind, **values: records.append(dict(kind=kind, **values)),
-                                       clock=lambda: transport.now, sleep=transport.sleep)
+                                       clock=lambda: transport.now, sleep=transport.sleep, simulation=True)
                 except Exception:
                     (ROOT / 'output/drive/failed-trial.json').write_text(
                         json.dumps(dict(case=case, records=records), ensure_ascii=False), encoding='utf-8')
@@ -758,7 +758,7 @@ class ExecutionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(ValueError):
                 run_trial(transport, profile(), 'straight', directory, lambda *a, **k: None,
-                          clock=lambda: transport.now, sleep=transport.sleep)
+                          clock=lambda: transport.now, sleep=transport.sleep, simulation=True)
         self.assertEqual(sum(v.kind == GOAL for v in transport.requests), 1)
         self.assertEqual(sum(v.kind == p.STOP for v in transport.requests), 1)
 

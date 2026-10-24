@@ -30,6 +30,28 @@ typedef struct
     uint32_t arbitration_lost;
 } CanDiag;
 extern volatile CanDiag can_diag;
+/* 首次真实CAN错误冻结此前64个事件；启动后只写一次，不随清故障丢弃。
+ * 时间为本机回调时刻，不是总线SOF或设备采样时间。 */
+#define CAN_HISTORY_SIZE 64U
+enum
+{
+    CAN_EVENT_TX = 1, CAN_EVENT_RX, CAN_EVENT_DONE, CAN_EVENT_ARBITRATION,
+    CAN_EVENT_ERROR, CAN_EVENT_CANCEL, CAN_EVENT_TIMEOUT
+};
+typedef struct
+{
+    uint32_t sequence, tick, kind, id, length, data0, data1, tx_sequence, tsr, esr;
+} CanEvent;
+typedef struct
+{
+    uint32_t valid, head, count, sequence;
+    uint32_t first[16];
+    CanEvent history[CAN_HISTORY_SIZE];
+} CanCapture;
+extern volatile CanCapture can_capture;
+/* 只读分页：0=首次错误，1..count=由早到晚事件；无记录返回版本头。
+ * 输出最多96字节；不推进CAN、不清锁存；非法页返回0。 */
+uint16_t Can_Capture(uint8_t page, uint8_t *output);
 void Can_Irq(void);
 
 #endif

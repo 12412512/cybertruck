@@ -6,6 +6,8 @@
 #define CAN_TX_TIMEOUT_MS 50U
 #define CAN_TX_TURNAROUND_MS 2U
 #define BUS_QUERY_INTERVAL_MS 5U
+/* 等待匹配回包包含原50ms发送期限；不延长250ms反馈有效期。 */
+#define BUS_REPLY_TIMEOUT_MS 100U
 #define BUS_QUERIES_PER_BATCH 2U
 #define BUS_STOP_RETRY_MS 10U
 #define MOTOR_CHECK_BYTE 0x6BU

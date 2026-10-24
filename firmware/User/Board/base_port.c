@@ -166,6 +166,11 @@ static uint8_t Command(uint8_t type, const uint8_t *data, uint16_t size, uint8_t
         *reply_size = Port_Diag(reply);
         return COMM_OK;
     }
+    if (type == 38 && size == 1)
+    {
+        *reply_size = Can_Capture(data[0], reply);
+        return *reply_size ? COMM_OK : COMM_FORMAT;
+    }
     if (startup_pending && type != EXEC_STATE && type != 16)
     {
         return COMM_BUSY;

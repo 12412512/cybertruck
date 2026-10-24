@@ -23,13 +23,16 @@ typedef struct
     uint32_t pending_stop_count, wait_ms;
     /* 新Stop地址保留序号；全部地址TXOK后才更新sent，两者均非物理停车。 */
     uint32_t stop_sequence, stop_sent_sequence;
+    uint32_t query_waiting, query_address, query_code, query_tx_sequence;
+    uint32_t query_replies, query_timeouts, query_reply_tick;
 } BusDiag;
 enum
 {
     BUS_ERROR_STOP = 1U,
     BUS_ERROR_CAN = 2U,
     BUS_ERROR_RX = 4U,
-    BUS_ERROR_DRIVER = 8U
+    BUS_ERROR_DRIVER = 8U,
+    BUS_ERROR_REPLY = 16U
 };
 extern volatile BusDiag bus_diag;
 /* 主循环唯一CAN接收消费者；业务层不得调用私有Bus/Can运动原语。 */

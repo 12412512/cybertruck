@@ -2,7 +2,7 @@
 #define CAN_HAL_TEST_STUB_H
 #define CAR_CHASSIS_BOARD_ADAPTER_H
 #include <stdint.h>
-typedef struct { uint32_t ESR,TSR,BTR; } TestCanRegisters;
+typedef struct { uint32_t ESR,TSR,BTR,IER,MSR,RF0R,RF1R; } TestCanRegisters;
 typedef struct { TestCanRegisters *Instance; uint32_t ErrorCode; } CAN_HandleTypeDef;
 typedef struct { uint32_t IDE,RTR,ExtId,DLC; } CAN_TxHeaderTypeDef;
 typedef CAN_TxHeaderTypeDef CAN_RxHeaderTypeDef;

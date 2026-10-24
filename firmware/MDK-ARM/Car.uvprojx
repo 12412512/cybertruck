@@ -764,11 +764,6 @@
           <GroupName>User/Config</GroupName>
           <Files>
             <File>
-              <FileName>mech_hw.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>../User/Config/mech_hw.h</FilePath>
-            </File>
-            <File>
               <FileName>addresses.h</FileName>
               <FileType>5</FileType>
               <FilePath>../User/Config/addresses.h</FilePath>
@@ -779,9 +774,14 @@
               <FilePath>../User/Config/batch_route.h</FilePath>
             </File>
             <File>
-              <FileName>tour_route.h</FileName>
+              <FileName>bus_config.h</FileName>
               <FileType>5</FileType>
-              <FilePath>../User/Config/tour_route.h</FilePath>
+              <FilePath>../User/Config/bus_config.h</FilePath>
+            </File>
+            <File>
+              <FileName>mech_hw.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Config/mech_hw.h</FilePath>
             </File>
             <File>
               <FileName>raw_route.h</FileName>
@@ -789,25 +789,15 @@
               <FilePath>../User/Config/raw_route.h</FilePath>
             </File>
             <File>
-              <FileName>bus_config.h</FileName>
+              <FileName>tour_route.h</FileName>
               <FileType>5</FileType>
-              <FilePath>../User/Config/bus_config.h</FilePath>
+              <FilePath>../User/Config/tour_route.h</FilePath>
             </File>
           </Files>
         </Group>
         <Group>
           <GroupName>User/Control</GroupName>
           <Files>
-            <File>
-              <FileName>mech_guard.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>../User/Control/mech_guard.c</FilePath>
-            </File>
-            <File>
-              <FileName>mech_guard.h</FileName>
-              <FileType>5</FileType>
-              <FilePath>../User/Control/mech_guard.h</FilePath>
-            </File>
             <File>
               <FileName>curve.c</FileName>
               <FileType>1</FileType>
@@ -847,6 +837,26 @@
               <FileName>line.h</FileName>
               <FileType>5</FileType>
               <FilePath>../User/Control/line.h</FilePath>
+            </File>
+            <File>
+              <FileName>mech_axis.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Control/mech_axis.c</FilePath>
+            </File>
+            <File>
+              <FileName>mech_axis.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Control/mech_axis.h</FilePath>
+            </File>
+            <File>
+              <FileName>mech_guard.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Control/mech_guard.c</FilePath>
+            </File>
+            <File>
+              <FileName>mech_guard.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Control/mech_guard.h</FilePath>
             </File>
             <File>
               <FileName>odom.c</FileName>

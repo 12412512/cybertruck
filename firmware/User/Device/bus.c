@@ -29,6 +29,8 @@ static uint32_t seen_errors, seen_overflow;
 static uint8_t waiting, wait_reported;
 static uint32_t wait_tick;
 static uint32_t cancel_tick;
+static uint32_t reply_barrier, reply_start, reply_tick;
+static uint8_t reply_wait, reply_matched, reply_address, reply_code;
 /* finite_owned直到人工确认后的BusRearm才清除；不能中途换地址或续发运动。 */
 static uint8_t finite_owned, finite_pending, finite_wheel;
 static uint8_t finite_address[4], finite_dir[4];
@@ -190,6 +192,8 @@ int Bus_Speed(const int16_t rpm[4])
 }
 void Bus_Cancel(void)
 {
+    reply_wait = reply_matched = 0;
+    bus_diag.query_waiting = 0;
     ClearMotion();
     if (bus_diag.active || finite_owned)
     {
@@ -381,6 +385,20 @@ static void Receive(void)
     uint8_t i, n, finite_target;
     for (n = 0; n < CAN_RING_SIZE && Can_Read(&frame); n++)
     {
+        /* 复用旧axis的发送/匹配回复两阶段；本机RX序号不是设备事务号。
+         * TXOK之前、旧队列、错地址/命令、格式错误和期限外回包均不解锁。 */
+        if (reply_wait && !reply_matched && frame.rx_sequence != reply_barrier &&
+            (uint32_t)(frame.rx_sequence - reply_barrier) < 0x80000000UL &&
+            can_diag.tx_done_sequence == bus_diag.query_tx_sequence &&
+            (uint32_t)(frame.tick - can_diag.tx_done_tick) < 0x80000000UL &&
+            (uint32_t)(frame.tick - reply_start) < BUS_REPLY_TIMEOUT_MS &&
+            Drive_Parse(&frame, reply_address, &reply) && reply.code == reply_code)
+        {
+            reply_matched = 1;
+            reply_tick = frame.tick;
+            bus_diag.query_reply_tick = frame.tick;
+            bus_diag.query_replies++;
+        }
         finite_target = 0;
         if (finite_owned)
             for (i = 0; i < 4; i++)
@@ -489,6 +507,21 @@ static int Submit(uint8_t type, uint8_t wheel, const BusFrame *frames, uint8_t c
         batch_tick = HAL_GetTick();
     job = type;
     job_wheel = wheel;
+    reply_code = frames[0].data[0];
+    reply_wait = (uint8_t)((type == JOB_QUERY || type == JOB_DIAG) && count == 1 &&
+                          (reply_code == 0x33 || reply_code == 0x35 || reply_code == 0x36 ||
+                           reply_code == 0x3A));
+    reply_matched = 0;
+    if (reply_wait)
+    {
+        reply_address = (uint8_t)(frames[0].id >> 8);
+        reply_barrier = can_diag.rx_sequence;
+        reply_start = now;
+        bus_diag.query_waiting = 1;
+        bus_diag.query_address = reply_address;
+        bus_diag.query_code = reply_code;
+        bus_diag.query_tx_sequence = can_diag.tx_sequence;
+    }
     return 1;
 }
 static void Complete(uint32_t now)
@@ -497,6 +530,27 @@ static void Complete(uint32_t now)
     uint8_t previous = job, i;
     if (!job || state == CAN_BUSY || state == CAN_CANCELLING)
         return;
+    if (state == CAN_SENT && reply_wait)
+    {
+        if (!reply_matched)
+        {
+            if ((uint32_t)(now - reply_start) < BUS_REPLY_TIMEOUT_MS)
+                return;
+            bus_diag.query_timeouts++;
+            reply_wait = 0;
+            bus_diag.query_waiting = 0;
+            job = JOB_NONE;
+            if (previous == JOB_DIAG)
+                diagnostic_state = CAN_FAILED;
+            /* 缺回复不自动重查或重放运动；保留四轮停止优先级。 */
+            Fault(BUS_ERROR_REPLY);
+            return;
+        }
+        if ((uint32_t)(now - reply_tick) < CAN_TX_TURNAROUND_MS)
+            return;
+    }
+    reply_wait = 0;
+    bus_diag.query_waiting = 0;
     job = JOB_NONE;
     if (state != CAN_SENT)
     {
@@ -559,7 +613,7 @@ void Bus_Poll(void)
     uint8_t i, count, op;
     uint16_t scan, address;
     Can_Poll();
-    if ((bus_diag.active || finite_owned) &&
+    if ((bus_diag.active || finite_owned || job) &&
         (can_diag.errors != seen_errors || can_diag.rx_overflow != seen_overflow))
     {
         Fault(can_diag.errors != seen_errors ? BUS_ERROR_CAN : BUS_ERROR_RX);
@@ -568,6 +622,7 @@ void Bus_Poll(void)
     seen_errors = can_diag.errors;
     seen_overflow = can_diag.rx_overflow;
     Receive();
+    now = HAL_GetTick();
     if (cancelling)
     {
         if (Can_Status() == CAN_CANCELLING)

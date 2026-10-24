@@ -13,6 +13,7 @@ static uint32_t now=100;
 static uint32_t read_advance;
 static CanState state;
 static uint8_t available=1;
+static uint8_t auto_reply=1;
 volatile CanDiag can_diag;
 #define DRIVE_MAX_SKEW_MS 80U /* 保留旧夹具的边界用例，不改变正式阈值。 */
 static const uint8_t address[4]={1,2,3,4};
@@ -26,7 +27,9 @@ uint8_t Can_Send(const BusFrame *frames,uint8_t count)
     assert(count && count<=2 && sends<256);
     memcpy(sent[sends].frames,frames,count*sizeof(*frames));
     sent[sends].count=count; sent[sends].tick=now; sends++;
-    state=CAN_BUSY; can_diag.tx_pending=1; can_diag.free_mailboxes=2; return 1;
+    state=CAN_BUSY; can_diag.tx_pending=1; can_diag.free_mailboxes=2;
+    can_diag.tx_sequence++;
+    return 1;
 }
 void Can_Cancel(void) { cancels++; state=CAN_CANCELLING; can_diag.tx_isolated=1; }
 void Can_Drop(void) { output=input; }
@@ -37,7 +40,30 @@ uint8_t Can_Read(BusFrame *frame)
 }
 static void Finish(void)
 {
+    BusFrame *f;
+    uint8_t op=sent[sends-1].frames[0].data[0], addr=(uint8_t)(sent[sends-1].frames[0].id>>8);
     state=CAN_SENT; can_diag.tx_pending=0; can_diag.tx_isolated=0; can_diag.free_mailboxes=3;
+    can_diag.tx_done_sequence=can_diag.tx_sequence;
+    can_diag.tx_done_tick=now;
+    if(auto_reply && (op==0x33 || op==0x35 || op==0x36 || op==0x3A)) {
+        unsigned n; int queued=0; int64_t value=0; uint64_t magnitude;
+        for(n=output;n<input;n++)
+            if(receive[n].id==((uint32_t)addr<<8) && receive[n].data[0]==op) queued=1;
+        if(!queued) {
+            if(addr>=1 && addr<=4) {
+                const BusWheel *w=Bus_Wheels()+addr-1;
+                value=op==0x35?w->speed.value:op==0x36?w->position.value:op==0x3A?w->status.value:0;
+            }
+            assert(input<256); f=&receive[input++]; memset(f,0,sizeof(*f));
+            f->id=(uint32_t)addr<<8; f->tick=now; f->rx_sequence=++can_diag.rx_sequence;
+            f->data[0]=op; f->data[1]=(uint8_t)(value<0); magnitude=(uint64_t)(value<0?-value:value);
+            if(op==0x35) { f->len=5; f->data[2]=(uint8_t)(magnitude>>8); f->data[3]=(uint8_t)magnitude; }
+            else if(op==0x3A) { f->len=3; f->data[1]=(uint8_t)value; }
+            else { f->len=7; for(n=0;n<4;n++) f->data[2+n]=(uint8_t)(magnitude>>(24U-n*8U)); }
+            f->data[f->len-1]=MOTOR_CHECK_BYTE;
+        }
+        now+=CAN_TX_TURNAROUND_MS;
+    }
 }
 static void FreeHardware(void)
 {
@@ -82,6 +108,7 @@ static void Reply(uint8_t addr,uint8_t code,uint8_t result)
     BusFrame *f=&receive[input++];
     assert(input<=256); memset(f,0,sizeof(*f));
     f->id=(uint32_t)addr<<8; f->tick=now; f->len=3;
+    f->rx_sequence=++can_diag.rx_sequence;
     f->data[0]=code; f->data[1]=result; f->data[2]=MOTOR_CHECK_BYTE;
 }
 static uint8_t Build(uint8_t addr,uint8_t op,BusFrame f[2])
@@ -128,7 +155,7 @@ static void TestLatest(void)
         assert(sends==base+5U+i && Op(base+4U+i)==((query&1U)?0x36:0x35) && Addr(base+4U+i)==query/2U+1U);
         if(i+1U<BUS_QUERIES_PER_BATCH) {
             Finish(); Bus_Poll(); assert(sends==base+5U+i);
-            now+=BUS_QUERY_INTERVAL_MS-1U; Bus_Poll(); assert(sends==base+5U+i);
+            now+=BUS_QUERY_INTERVAL_MS-CAN_TX_TURNAROUND_MS-1U; Bus_Poll(); assert(sends==base+5U+i);
             now++; Bus_Poll();
         } else Pump();
     }
@@ -180,7 +207,7 @@ static void TestQueries(void)
     assert(Bus_Start());
     Bus_Poll(); assert(sends==1 && Op(0)==0x35);
     Finish(); Bus_Poll(); assert(sends==1);
-    now+=BUS_QUERY_INTERVAL_MS-1U; Bus_Poll(); assert(sends==1);
+    now+=BUS_QUERY_INTERVAL_MS-CAN_TX_TURNAROUND_MS-1U; Bus_Poll(); assert(sends==1);
     now++; Bus_Poll(); assert(Op(1)==0x36 && Addr(1)==1);
     Finish(); Bus_Poll(); Bus_End(); assert(Bus_Rearm() && Bus_Start());
     for(i=0;i<80;i++) { assert(Bus_Speed(rpm)); Pump(); }

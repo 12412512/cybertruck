@@ -27,6 +27,9 @@ def preparation():
             or install['tray_reference_deg'] in slots):
         raise ValueError('机构安装记录的料位/基准定义无效')
     return dict(domain='preparation', real_connected=False, real_motion=False,
+                axis_executor=dict(stage='offline_validated', app_bound=False, device_enabled=False,
+                                   states=['ACCEPTED','SENDING','RUNNING','SETTLING','STOPPING','COMPLETE','FAILED','CANCELLED'],
+                                   completion='TXOK、ACK及新反馈共同确认；停止TXOK不代表物理停车'),
                 wiring_confirmed=install['wiring_confirmed_by_user'], physical_revalidated=False,
                 baseline=install['zero_baseline'], tray_reference_deg=install['tray_reference_deg'], tray_slot_deg=slots,
                 axes=[dict(name='升降', address=values['MECH_LIFT_ID'], direction='向下为正', feedback_sign=values['MECH_LIFT_SIGN'],
@@ -34,9 +37,9 @@ def preparation():
                       dict(name='伸缩', address=values['MECH_REACH_ID'], direction='向外为正', feedback_sign=values['MECH_REACH_SIGN'],
                            max_mm=values['MECH_REACH_MAX_UM'] / 1000)],
                 servos=servos,
-                pending=['板端当前版本、故障与停止证据尚未本次读取',
+                pending=['每次接入均需核对板端版本、故障与停车证据；历史验收记录不替代当前状态',
                          'ID5/6完整配置与35/36/3A/33反馈尚未接入唯一CAN调度器',
-                         '被动建零/互锁模块已备好；未绑定App或通信命令',
+                         '单轴意图执行器、人工建零及互锁已离线准备；未绑定App或真实通信命令',
                          '舵机首次PWM输出与实际姿态须单独验收；启动保持不输出',
                          'Web实车命令尚未启用；模拟零点/示教不得提升为实物有效状态'],
                 next_step='通知用户后连接树莓派与开发板，只读核对当前状态；不使能、不清故障、不动作')

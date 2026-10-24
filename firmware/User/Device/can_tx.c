@@ -5,6 +5,7 @@
 #include "bus_config.h"
 #include <string.h>
 volatile CanDiag can_diag;
+volatile CanCapture can_capture;
 void Can_Irq(void)
 {
     can_diag.irq_tsr = board_can.Instance->TSR;
@@ -28,6 +29,97 @@ static volatile uint8_t turnaround_valid;
 static uint32_t Packed(const uint8_t *bytes)
 {
     return (uint32_t)bytes[0] | (uint32_t)bytes[1] << 8 | (uint32_t)bytes[2] << 16 | (uint32_t)bytes[3] << 24;
+}
+static void History(uint32_t kind, const BusFrame *frame)
+{
+    uint32_t mask = __get_PRIMASK();
+    volatile CanEvent *event;
+    __disable_irq();
+    if (!can_capture.valid)
+    {
+        event = &can_capture.history[can_capture.head];
+        event->sequence = ++can_capture.sequence;
+        event->tick = HAL_GetTick();
+        event->kind = kind;
+        event->id = frame ? frame->id : can_diag.last_tx_id;
+        event->length = frame ? frame->len : can_diag.last_tx_length;
+        event->data0 = frame ? Packed(frame->data) : can_diag.last_tx_data0;
+        event->data1 = frame ? Packed(frame->data + 4) : can_diag.last_tx_data1;
+        event->tx_sequence = tx_sequence;
+        event->tsr = kind == CAN_EVENT_ERROR ? can_diag.irq_tsr : board_can.Instance->TSR;
+        event->esr = kind == CAN_EVENT_ERROR ? can_diag.irq_esr : board_can.Instance->ESR;
+        can_capture.head = (can_capture.head + 1U) % CAN_HISTORY_SIZE;
+        if (can_capture.count < CAN_HISTORY_SIZE)
+            can_capture.count++;
+    }
+    __set_PRIMASK(mask);
+}
+static void FirstError(uint32_t error)
+{
+    uint32_t mask = __get_PRIMASK();
+    __disable_irq();
+    History(CAN_EVENT_ERROR, 0);
+    if (!can_capture.valid)
+    {
+        can_capture.first[0] = HAL_GetTick();
+        can_capture.first[1] = error;
+        can_capture.first[2] = can_diag.irq_tsr;
+        can_capture.first[3] = can_diag.irq_esr;
+        can_capture.first[4] = tx_sequence;
+        can_capture.first[5] = rx_sequence;
+        can_capture.first[6] = can_diag.last_tx_id;
+        can_capture.first[7] = can_diag.last_tx_length;
+        can_capture.first[8] = can_diag.last_tx_data0;
+        can_capture.first[9] = can_diag.last_tx_data1;
+        can_capture.first[10] = (uint32_t)tx_state;
+        can_capture.first[11] = tx_mailbox;
+        can_capture.first[12] = tx_pending;
+        can_capture.first[13] = tx_index;
+        can_capture.first[14] = tx_count;
+        can_capture.first[15] = can_diag.errors;
+        __DMB();
+        can_capture.valid = 1;
+    }
+    __set_PRIMASK(mask);
+}
+uint16_t Can_Capture(uint8_t page, uint8_t *output)
+{
+    uint32_t words[24] = {1U}, count, index, mask;
+    unsigned size = 8, byte;
+    if (!output || page > CAN_HISTORY_SIZE)
+        return 0;
+    mask = __get_PRIMASK();
+    __disable_irq();
+    count = can_capture.valid ? can_capture.count : 0;
+    words[1] = can_capture.valid;
+    words[2] = can_capture.sequence;
+    words[3] = count;
+    words[4] = CAN_HISTORY_SIZE;
+    words[5] = page;
+    words[6] = sizeof(CanEvent);
+    if (page && page > count)
+    {
+        __set_PRIMASK(mask);
+        return 0;
+    }
+    if (!page && can_capture.valid)
+    {
+        for (index = 0; index < 16; index++)
+            words[8 + index] = can_capture.first[index];
+        size = 24;
+    }
+    else if (page)
+    {
+        CanEvent event;
+        index = (can_capture.head + CAN_HISTORY_SIZE - count + page - 1U) % CAN_HISTORY_SIZE;
+        event = can_capture.history[index];
+        memcpy(words + 8, &event, sizeof(event));
+        size += sizeof(event) / sizeof(uint32_t);
+    }
+    __set_PRIMASK(mask);
+    for (byte = 0; byte < size * 4U; byte++)
+        output[byte] = (uint8_t)(words[byte / 4U] >> (8U * (byte % 4U)));
+    return (uint16_t)(size * 4U);
 }
 static void CanDiagUpdate(void)
 {
@@ -133,6 +225,7 @@ static void CanStep(void)
     if ((uint32_t)(now - tx_tick) >= CAN_TX_TIMEOUT_MS)
     {
         can_diag.tx_timeouts++;
+        History(CAN_EVENT_TIMEOUT, 0);
         CanFail();
         __set_PRIMASK(mask);
         return;
@@ -198,6 +291,7 @@ static void CanStep(void)
     {
         tx_mailbox = mailbox;
         tx_pending = 1;
+        History(CAN_EVENT_TX, &tx[tx_index]);
     }
     else
         CanFail();
@@ -218,6 +312,7 @@ CanState Can_Status(void)
 }
 void Can_Cancel(void)
 {
+    History(CAN_EVENT_CANCEL, 0);
     /* 先丢软件分包并隔离回调；重复取消不重置中止计时。 */
     tx_count = 0;
     tx_state = CAN_CANCELLING;
@@ -255,13 +350,14 @@ uint8_t Can_Read(BusFrame *frame)
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *h)
 {
     CAN_RxHeaderTypeDef header;
-    BusFrame f;
+    BusFrame f = {0};
     uint32_t next;
     if (h != &board_can)
         return;
     if (HAL_CAN_GetRxMessage(h, CAN_RX_FIFO0, &header, f.data) != HAL_OK)
     {
         can_diag.errors++;
+        FirstError(HAL_CAN_GetError(h));
         return;
     }
     if (header.IDE != CAN_ID_EXT || header.RTR != CAN_RTR_DATA || header.DLC < 2 || header.DLC > 8 ||
@@ -281,6 +377,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *h)
     /* 环满也推进序号，诊断缺号不能冒充设备丢帧；原溢出处理不变。 */
     f.rx_sequence = ++rx_sequence;
     can_diag.rx_sequence = rx_sequence;
+    History(CAN_EVENT_RX, &f);
     next = (rx_head + 1) % CAN_RING_SIZE;
     if (next == rx_tail)
     {
@@ -301,6 +398,7 @@ void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *h)
         if (error && !(error & ~arbitration_mask))
         {
             can_diag.arbitration_lost++;
+            History(CAN_EVENT_ARBITRATION, 0);
             if (tx_state == CAN_BUSY && tx_pending &&
                 ((tx_mailbox == CAN_TX_MAILBOX0 && error == HAL_CAN_ERROR_TX_ALST0) ||
                  (tx_mailbox == CAN_TX_MAILBOX1 && error == HAL_CAN_ERROR_TX_ALST1) ||
@@ -313,6 +411,7 @@ void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *h)
         else
         {
             can_diag.errors++;
+            FirstError(error);
             can_diag.last_error = error;
             can_diag.error_sequence = can_diag.errors;
             can_diag.error_tick = HAL_GetTick();
@@ -351,6 +450,7 @@ static void CanTxDone(CAN_HandleTypeDef *h, uint32_t mailbox, uint8_t bad)
             can_diag.tx_done_sequence = tx_sequence;
         }
         tx_ok = 1;
+        History(CAN_EVENT_DONE, 0);
     }
 }
 void HAL_CAN_TxMailbox0CompleteCallback(CAN_HandleTypeDef *h)
