@@ -40,7 +40,7 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
     sequence = 0
     written_at = -1e9
 
-    def pump():
+    def pump(force=False):
         nonlocal sequence, written_at
         now = clock()
         link.feed(transport.read(4096), now)
@@ -51,7 +51,7 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
         sequence += 1
         state.update(mode='serial', core_id=identity, core_sequence=sequence,
                      snapshot_at_s=now, snapshot_wall_s=time.time())
-        if now - written_at >= .1:
+        if force or now - written_at >= .1:
             save_snapshot(Path(runtime) / 'state.json', state)
             record('state', execution=state.get('execution'), stage=stage,
                    connected=state['connected'], state_age_ms=state['state_age_ms'])
@@ -97,7 +97,7 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
             elif (stage == 'running' and state and state['action_id'] == action_id
                   and state['action_state'] == 4 and state['mode'] == 3):
                 completed = True
-                record('controller_complete', action_id=action_id,
+                record('controller_complete', action_id=action_id, execution=state,
                        external_measurement='待独立尺量/角度确认，不增加任务成功计数')
                 break
         else:
@@ -111,13 +111,13 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
             end = clock() + 4
             while clock() < end:
                 try:
-                    state = pump()
+                    state = pump(force=True)
                 except (OSError, ValueError):
                     break
                 if state and state['stop_confirmed']:
                     stopped = True
                     break
-            record('stop_result', requested=stop_requested, confirmed=stopped)
+            record('stop_result', requested=stop_requested, confirmed=stopped, execution=state)
             if not stopped:
                 raise RuntimeError('停止尚未确认，请现场核对并立即停机；禁止自动续跑')
     return dict(controller_complete=completed, case=case, action_id=action_id,

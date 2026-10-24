@@ -341,6 +341,10 @@ class ExecutionTests(unittest.TestCase):
                     (ROOT / 'output/drive/failed-trial.json').write_text(
                         json.dumps(dict(case=case, records=records), ensure_ascii=False), encoding='utf-8')
                     raise
+                final = json.loads((Path(directory) / 'state.json').read_text(encoding='utf-8'))
+                stop = next(v for v in reversed(records) if v['kind'] == 'stop_result')
+                self.assertTrue(final['execution']['stop_confirmed'])
+                self.assertEqual(final['execution'], stop['execution'])
             self.assertTrue(result['controller_complete'], (case, records[-5:]))
             self.assertEqual(sum(v.kind == GOAL for v in transport.requests), 1)
             self.assertEqual(sum(v.kind == p.STOP for v in transport.requests), 1)
