@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>搬运小车 · 只读工作台</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <div>
+            <p class="eyebrow">智能搬运小车 / 阶段 1</p>
+            <h1>通信与设备总览</h1>
+        </div>
+        <span class="badge">只读工作台</span>
+    </header>
+    <main>
+        <section class="notice" id="source" role="status">正在读取控制核心状态…</section>
+        <section class="grid" aria-label="通信状态">
+            <article>
+                <h2>通信链路</h2>
+                <strong id="connection">未知</strong>
+                <p id="message">等待状态</p>
+            </article>
+            <article>
+                <h2>控制核心</h2>
+                <strong id="core">未知</strong>
+                <p id="age">状态时效：—</p>
+            </article>
+            <article>
+                <h2>下位机固件</h2>
+                <strong id="firmware">—</strong>
+                <p id="uptime">运行时间：—</p>
+            </article>
+            <article>
+                <h2>设备故障</h2>
+                <strong id="fault">未知</strong>
+                <p>故障值来自当前有效设备状态</p>
+            </article>
+        </section>
+        <section class="panel">
+            <h2>协议诊断</h2>
+            <dl>
+                <dt>启动身份</dt><dd id="boot">—</dd>
+                <dt>会话身份</dt><dd id="session">—</dd>
+                <dt>主控接收</dt><dd id="frames">—</dd>
+                <dt>有效保活</dt><dd id="heart">—</dd>
+                <dt>实体 PC0 输入</dt><dd id="key">未知</dd>
+            </dl>
+        </section>
+        <section class="panel">
+            <h2>任务与物理状态</h2>
+            <div class="facts">
+                <p>位姿 <b>未接入</b></p>
+                <p>机构零点 <b>未建立</b></p>
+                <p>抓取 / 放置计数 <b>未接入</b></p>
+                <p>实物停稳证据 <b>未接入</b></p>
+            </div>
+            <p class="muted">本阶段验证通信。设备在线不表示已具备运动或搬运条件。</p>
+        </section>
+        <section class="panel">
+            <h2>最近通信事件</h2>
+            <ul id="events"><li>暂无事件</li></ul>
+        </section>
+    </main>
+    <footer>浏览器仅观察状态 · 参数与动作接口尚未开放</footer>
+    <script type="module" src="/static/app.js"></script>
+</body></html>

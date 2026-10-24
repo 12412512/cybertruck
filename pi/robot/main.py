@@ -1,0 +1,114 @@
+"""树莓派唯一通信核心。默认离线；真实串口必须显式指定。"""
+
+import argparse
+import json
+import logging
+from logging.handlers import RotatingFileHandler
+import os
+from pathlib import Path
+import signal
+import time
+import uuid
+
+from .device.link import Link
+from .runtime import ProcessLock, save_snapshot
+
+DEFAULT_RUNTIME = Path(__file__).resolve().parents[2] / 'output/runtime'
+
+
+def open_transport(mode, port):
+    if mode == 'sim':
+        from .device.sim import SimTransport
+        return SimTransport(time.monotonic)
+    import serial
+    options = dict(port=None, baudrate=115200, timeout=0, write_timeout=.05)
+    if os.name != 'nt':
+        options['exclusive'] = True
+    device = serial.Serial(**options)
+    # 禁止主动切换DTR/RTS复位外设；USB驱动自身枚举行为仍需实机验证。
+    device.dtr = device.rts = False
+    device.port = port
+    device.open()
+    return device
+
+
+def run(mode='offline', port=None, runtime=DEFAULT_RUNTIME, stop=None):
+    runtime = Path(runtime)
+    runtime.mkdir(parents=True, exist_ok=True)
+    lock = ProcessLock(runtime / 'core.lock')
+    logger = logging.getLogger('robot.core')
+    logger.setLevel(logging.INFO)
+    handler = RotatingFileHandler(runtime / 'events.jsonl', maxBytes=1024 * 1024,
+                                 backupCount=3, encoding='utf-8')
+    logger.addHandler(handler)
+    link = Link()
+    transport = None
+    retry_at = written_at = 0.0
+    sequence = 0
+    identity = uuid.uuid4().hex
+    previous = None
+    try:
+        while stop is None or not stop():
+            now = time.monotonic()
+            sequence += 1
+            if mode != 'offline':
+                try:
+                    if transport is None and now >= retry_at:
+                        transport = open_transport(mode, port)
+                        link.reset('传输已连接，核对新协议')
+                    if transport is not None:
+                        link.feed(transport.read(4096), now)
+                        wire = link.step(now)
+                        if wire and transport.write(wire) != len(wire):
+                            raise OSError('串口写入不完整')
+                except (OSError, RuntimeError) as exc:
+                    if transport is not None:
+                        transport.close()
+                    transport = None
+                    link.reset(f'连接中断：{exc}')
+                    retry_at = now + 1
+            state = link.snapshot(now)
+            if mode == 'offline':
+                state['message'] = '离线模式，未打开设备'
+            health = (state['message'], state['boot_id'],
+                      None if state['board'] is None else state['board']['fault_bits'])
+            if health != previous:
+                previous = health
+                logger.info(json.dumps(dict(time_s=time.time(), message=state['message'],
+                                            boot_id=state['boot_id'], board=state['board'],
+                                            diagnostics=state['diagnostics']), ensure_ascii=False))
+            if now - written_at >= .1:
+                state.update(mode=mode, core_id=identity, core_sequence=sequence,
+                             snapshot_at_s=now, snapshot_wall_s=time.time())
+                save_snapshot(runtime / 'state.json', state)
+                written_at = now
+            time.sleep(.005)
+    finally:
+        if transport is not None:
+            transport.close()
+        logger.removeHandler(handler)
+        handler.close()
+        lock.close()
+
+
+def main():
+    parser = argparse.ArgumentParser(description='只读通信核心；无运动接口')
+    parser.add_argument('--mode', choices=('offline', 'sim', 'serial'), default='offline')
+    parser.add_argument('--port', help='显式指定真实串口；不自动猜测或扫描')
+    parser.add_argument('--runtime', type=Path, default=DEFAULT_RUNTIME)
+    args = parser.parse_args()
+    if args.mode == 'serial' and not args.port:
+        parser.error('serial模式必须提供--port')
+    stopped = False
+
+    def finish(*_):
+        nonlocal stopped
+        stopped = True
+
+    signal.signal(signal.SIGINT, finish)
+    signal.signal(signal.SIGTERM, finish)
+    run(args.mode, args.port, args.runtime, lambda: stopped)
+
+
+if __name__ == '__main__':
+    main()

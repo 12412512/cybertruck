@@ -1,0 +1,157 @@
+:root {
+    font-family:"Microsoft YaHei",system-ui,sans-serif;
+    color:#1b3044;
+    background:#f2f5f8;
+    font-size:15px;
+}
+
+* {
+    box-sizing:border-box;
+}
+
+body {
+    margin:0;
+}
+
+header,main,footer {
+    max-width:1100px;
+    margin:auto;
+    padding:24px;
+}
+
+header {
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:20px;
+}
+
+h1 {
+    font-size:28px;
+    margin:8px 0;
+}
+
+h2 {
+    font-size:15px;
+    margin:0 0 16px;
+    color:#526579;
+}
+
+.eyebrow {
+    font-size:12px;
+    color:#667b8d;
+    letter-spacing:2px;
+}
+
+.badge {
+    background:#dceaf4;
+    color:#244e70;
+    padding:9px 14px;
+    border-radius:8px;
+    white-space:nowrap;
+}
+
+.notice {
+    padding:17px 20px;
+    background:#e4edf6;
+    border-left:4px solid #3e729f;
+    border-radius:5px;
+    margin-bottom:20px;
+}
+
+.notice.sim {
+    background:#fff1d5;
+    border-color:#ca8b20;
+}
+
+.notice.stale {
+    background:#fbe7e7;
+    border-color:#b04444;
+}
+
+.grid {
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr));
+    gap:16px;
+}
+
+article,.panel {
+    background:white;
+    border:1px solid #e0e7ed;
+    border-radius:10px;
+    padding:22px;
+}
+
+.panel {
+    margin-top:18px;
+}
+
+article strong {
+    font-size:22px;
+}
+
+article p,.muted,footer {
+    font-size:13px;
+    color:#687b8e;
+    line-height:1.8;
+}
+
+dl {
+    display:grid;
+    grid-template-columns:130px 1fr;
+    gap:14px;
+    margin:0;
+}
+
+dt {
+    color:#687b8e;
+}
+
+dd {
+    margin:0;
+    overflow-wrap:anywhere;
+    font-variant-numeric:tabular-nums;
+}
+
+.facts {
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px 32px;
+}
+
+.facts b {
+    font-weight:500;
+    color:#7a8792;
+    margin-left:8px;
+}
+
+ul {
+    padding-left:20px;
+    color:#526579;
+    line-height:1.9;
+}
+
+footer {
+    text-align:center;
+}
+
+@media(max-width:850px) {
+    .grid {
+        grid-template-columns:repeat(2,minmax(0,1fr));
+    }
+}
+
+@media(max-width:480px) {
+    header,main {
+        padding:16px;
+    }
+    .grid {
+        grid-template-columns:1fr;
+    }
+    h1 {
+        font-size:23px;
+    }
+    .badge {
+        font-size:12px;
+    }
+}

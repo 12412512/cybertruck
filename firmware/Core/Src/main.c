@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "can.h"
+#include "rng.h"
 #include "tim.h"
 #include "usart.h"
 #include "gpio.h"
@@ -95,6 +96,7 @@ int main(void)
   MX_USART1_UART_Init();
   MX_USART2_UART_Init();
   MX_USART6_UART_Init();
+  MX_RNG_Init();
   /* USER CODE BEGIN 2 */
   App_Init();
 

@@ -11,6 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 FW = ROOT / "firmware"
 ERRORS = []
 CHECKS = 0
+USER_FILES = {FW / 'User' / name for name in (
+    'App/app.c', 'App/app.h', 'Board/port.c', 'Board/port.h',
+    'Comm/frame.c', 'Comm/frame.h', 'Comm/comm.c', 'Comm/comm.h')}
 
 
 def check(ok, message):
@@ -121,7 +124,7 @@ def verify_ioc(data):
     check(data.get("RCC.PLLP", "RCC_PLLP_DIV2") in ("2", "RCC_PLLP_DIV2"),
           "IOC PLLP 应为 2；未显式保存时采用芯片默认值并核对生成代码")
     active_ips = {v for k, v in data.items() if re.fullmatch(r"Mcu\.IP\d+", k)}
-    check(active_ips == {"CAN1", "NVIC", "RCC", "SYS", "TIM1", "USART1", "USART2", "USART6"},
+    check(active_ips == {"CAN1", "NVIC", "RCC", "RNG", "SYS", "TIM1", "USART1", "USART2", "USART6"},
           f"IOC 启用外设不符：{sorted(active_ips)}")
     check(not any(k.startswith("PC1.") for k in data), "IOC 不得分配 PC1")
     check(not any("CH4" in k or (k.endswith(".Signal") and "CH4" in v)
@@ -248,18 +251,16 @@ def verify_sources(data):
               f"main 中 {name} 必须且仅调用一次")
 
 
-def verify_minimal_app():
-    expected = {FW / "User/App/app.c", FW / "User/App/app.h"}
+def verify_readonly_app(data):
     actual = {path for path in (FW / "User").rglob("*") if path.suffix.lower() in (".c", ".h")}
-    check(actual == expected, "User 仅允许最小 App/app.c 和 app.h，发现缺失或额外业务源码")
+    check(actual == USER_FILES, "当前只读阶段User文件与已审核清单不一致")
     app = clean_c(read(FW / "User/App/app.c"))
-    for name in ("App_Init", "App_Run"):
-        check(not body(app, name).strip(), f"{name} 在基础工程必须为空，不执行业务")
+    check(compact(body(app, 'App_Init')) == 'Port_Init();', '只读App_Init仅允许Port_Init')
+    check(compact(body(app, 'App_Run')) == 'Port_Run();', '只读App_Run仅允许Port_Run')
     definitions = re.findall(r"\b(\w+)\s*\([^;{}]*\)\s*\{", app)
-    check(sorted(definitions) == ["App_Init", "App_Run"], "最小 App 不得定义额外函数")
+    check(sorted(definitions) == ["App_Init", "App_Run"], "App不得定义额外业务函数")
     forbidden = (r"\bHAL_CAN_(?:Start|AddTxMessage|ActivateNotification)\s*\(",
                  r"\bHAL_TIM(?:Ex)?_\w*Start\w*\s*\(",
-                 r"\bHAL_UART(?:Ex)?_(?:Receive\w*|Transmit\w*)\s*\(",
                  r"\bLL_(?:CAN|TIM|USART)_\w+\s*\(")
     for folder in (FW / "Core", FW / "User"):
         for path in folder.rglob("*"):
@@ -268,7 +269,18 @@ def verify_minimal_app():
             source = clean_c(read(path))
             for pattern in forbidden:
                 match = re.search(pattern, source)
-                check(match is None, f"基础工程禁止启动通信或输出：{path.relative_to(ROOT)} {match[0] if match else ''}")
+                check(match is None, f"只读阶段禁止执行器通信或输出：{path.relative_to(ROOT)} {match[0] if match else ''}")
+            uart_calls = re.findall(r'\bHAL_UART(?:Ex)?_(?:Receive\w*|Transmit\w*)\s*\(', source)
+            check(not uart_calls or path == FW / 'User/Board/port.c',
+                  f'只读串口只能由Board/port.c管理：{path.relative_to(ROOT)}')
+    port = clean_c(read(FW / 'User/Board/port.c'))
+    check(not re.search(r'\bhuart[26]\b', port), '只读入口只允许USART1')
+    check('HAL_UART_Receive_IT' in port and 'HAL_UART_Transmit_IT' in port, '串口必须使用中断非阻塞收发')
+    rng = clean_c(read(FW / 'Core/Src/rng.c'))
+    call(rng, 'HAL_RNG_Init', '&hrng', '随机启动身份')
+    call(clean_c(read(FW / 'Core/Src/main.c')), 'MX_RNG_Init', '', '随机模块初始化')
+    check('RNG_VS_RNG' == data.get('VP_RNG_VS_RNG.Signal'), 'IOC应启用内部RNG虚拟信号')
+    check(data.get('RCC.48MHZClocksFreq_Value') == '48000000', 'RNG应有48MHz时钟')
 
 
 def verify_keil():
@@ -302,7 +314,7 @@ def verify_keil():
         check(target.findtext(f".//{tag}") == "0", f"Keil {tag} 必须关闭")
     refs = []
     allowed_core = {"main.c", "gpio.c", "can.c", "tim.c", "usart.c", "stm32f4xx_it.c",
-                    "stm32f4xx_hal_msp.c", "system_stm32f4xx.c"}
+                    "stm32f4xx_hal_msp.c", "system_stm32f4xx.c", "rng.c"}
     for node in target.findall(".//FilePath"):
         value = (node.text or "").strip().replace("\\", "/")
         path = (project.parent / value).resolve()
@@ -312,10 +324,11 @@ def verify_keil():
         if path.is_relative_to((FW / "Core").resolve()):
             check(path.name in allowed_core, f"Keil 出现额外 Core 业务文件：{value}")
         if path.is_relative_to((FW / "User").resolve()):
-            check(path in {(FW / "User/App/app.c").resolve(), (FW / "User/App/app.h").resolve()},
+            check(path in {p.resolve() for p in USER_FILES},
                   f"Keil 出现额外 User 业务文件：{value}")
     check(len(refs) == len(set(refs)), "Keil 存在重复文件引用")
     check(refs.count((FW / "User/App/app.c").resolve()) == 1, "Keil 必须且仅引用一次 app.c")
+    check(all(refs.count(p.resolve()) == 1 for p in USER_FILES), 'Keil必须引用所有已审核User文件且仅一次')
     include_dirs = []
     for node in target.findall(".//IncludePath"):
         for value in (node.text or "").split(";"):
@@ -333,7 +346,7 @@ def main():
     data = load_ioc()
     verify_ioc(data)
     verify_sources(data)
-    verify_minimal_app()
+    verify_readonly_app(data)
     verify_keil()
     print(json.dumps({"result": "FAIL" if ERRORS else "PASS", "checks": CHECKS,
                       "errors": ERRORS, "mode": "只读静态检查；未编译、未连接硬件"},

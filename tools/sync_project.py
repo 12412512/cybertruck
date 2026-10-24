@@ -62,19 +62,23 @@ def sync():
     include.text = ";".join(paths)
     groups = target.find("Groups")
     for group in list(groups):
-        if group.findtext("GroupName") == "User/App":
+        if group.findtext("GroupName", "").startswith("User/"):
             groups.remove(group)
-    group = ET.SubElement(groups, "Group")
-    put(group, "GroupName", "User/App")
-    files = ET.SubElement(group, "Files")
-    for filename, filetype in (("app.c", 1), ("app.h", 5)):
-        entry = ET.SubElement(files, "File")
-        put(entry, "FileName", filename)
-        put(entry, "FileType", filetype)
-        put(entry, "FilePath", "../User/App/" + filename)
+    for folder in sorted((ROOT / 'firmware/User').iterdir()):
+        sources = sorted(p for p in folder.glob('*') if p.suffix in ('.c', '.h'))
+        if not sources:
+            continue
+        group = ET.SubElement(groups, "Group")
+        put(group, "GroupName", "User/" + folder.name)
+        files = ET.SubElement(group, "Files")
+        for source in sources:
+            entry = ET.SubElement(files, "File")
+            put(entry, "FileName", source.name)
+            put(entry, "FileType", 1 if source.suffix == '.c' else 5)
+            put(entry, "FilePath", "../User/" + folder.name + '/' + source.name)
     ET.indent(tree, space="  ")
     tree.write(PROJECT, encoding="utf-8", xml_declaration=True)
-    print("PASS: Keil ARM Compiler 6.7、单 Target 和空应用入口已同步")
+    print("PASS: Keil ARM Compiler 6.7、单 Target 和按职责分组的手写文件已同步")
 
 
 if __name__ == "__main__":
