@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
-<Project noNamespaceSchemaLocation="project_proj.xsd">
-  <SchemaVersion>1.1</SchemaVersion>
+<Project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="project_projx.xsd">
+  <SchemaVersion>2.1</SchemaVersion>
   <Header>### uVision Project, (C) Keil Software</Header>
   <Targets>
     <Target>
@@ -13,6 +13,8 @@
         <TargetCommonOption>
           <Device>STM32F407ZG</Device>
           <Vendor>STMicroelectronics</Vendor>
+          <PackID>Keil.STM32F4xx_DFP.1.0.8</PackID>
+          <PackURL>http://www.keil.com/pack</PackURL>
           <Cpu>IRAM(0x20000000,0x20000) IROM(0x08000000,0x100000) CPUTYPE("Cortex-M4") FPU2 CLOCK(120000000) ELITTLE</Cpu>
           <FlashUtilSpec />
           <StartupFile />
@@ -28,7 +30,7 @@
           <SLE66CMisc />
           <SLE66AMisc />
           <SLE66LinkerMisc />
-          <SFDFile />
+          <SFDFile>$$Device:STM32F407ZG$SVD\STM32F40x.svd</SFDFile>
           <bCustSvd>0</bCustSvd>
           <UseEnv>0</UseEnv>
           <BinPath />
@@ -61,6 +63,8 @@
             <UserProg2Name />
             <UserProg1Dos16Mode>0</UserProg1Dos16Mode>
             <UserProg2Dos16Mode>0</UserProg2Dos16Mode>
+            <nStopU1X>0</nStopU1X>
+            <nStopU2X>0</nStopU2X>
           </BeforeCompile>
           <BeforeMake>
             <RunUserProg1>0</RunUserProg1>
@@ -79,6 +83,8 @@
             <UserProg2Name />
             <UserProg1Dos16Mode>0</UserProg1Dos16Mode>
             <UserProg2Dos16Mode>0</UserProg2Dos16Mode>
+            <nStopA1X>0</nStopA1X>
+            <nStopA2X>0</nStopA2X>
           </AfterMake>
           <SelectedForBatchBuild>0</SelectedForBatchBuild>
           <SVCSIdString />
@@ -97,7 +103,7 @@
           <StopOnExitCode>3</StopOnExitCode>
           <CustomArgument />
           <IncludeLibraryModules />
-          <ComprImg />
+          <ComprImg>0</ComprImg>
         </CommonProperty>
         <DllOption>
           <SimDllName>SARMCM3.DLL</SimDllName>
@@ -127,7 +133,6 @@
             <RestoreFunctions>1</RestoreFunctions>
             <RestoreToolbox>1</RestoreToolbox>
             <LimitSpeedToRealTime>0</LimitSpeedToRealTime>
-            <RestoreSysVw>1</RestoreSysVw>
           </Simulator>
           <Target>
             <UseTarget>1</UseTarget>
@@ -136,25 +141,23 @@
             <RestoreBreakpoints>1</RestoreBreakpoints>
             <RestoreWatchpoints>1</RestoreWatchpoints>
             <RestoreMemoryDisplay>1</RestoreMemoryDisplay>
-            <RestoreFunctions>0</RestoreFunctions>
+            <RestoreFunctions>1</RestoreFunctions>
             <RestoreToolbox>1</RestoreToolbox>
-            <RestoreTracepoints>1</RestoreTracepoints>
-            <RestoreSysVw>1</RestoreSysVw>
           </Target>
           <RunDebugAfterBuild>0</RunDebugAfterBuild>
-          <TargetSelection>13</TargetSelection>
+          <TargetSelection>5</TargetSelection>
           <SimDlls>
-            <CpuDll />
-            <CpuDllArguments />
-            <PeripheralDll />
-            <PeripheralDllArguments />
+            <CpuDll>SARMCM3.DLL</CpuDll>
+            <CpuDllArguments>-REMAP -MPU</CpuDllArguments>
+            <PeripheralDll>DCM.DLL</PeripheralDll>
+            <PeripheralDllArguments>-pCM4</PeripheralDllArguments>
             <InitializationFile />
           </SimDlls>
           <TargetDlls>
-            <CpuDll />
-            <CpuDllArguments />
-            <PeripheralDll />
-            <PeripheralDllArguments />
+            <CpuDll>SARMCM3.DLL</CpuDll>
+            <CpuDllArguments>-MPU</CpuDllArguments>
+            <PeripheralDll>TCM.DLL</PeripheralDll>
+            <PeripheralDllArguments>-pCM4</PeripheralDllArguments>
             <InitializationFile />
             <Driver>STLink\ST-LINKIII-KEIL_SWO.dll</Driver>
           </TargetDlls>
@@ -222,6 +225,7 @@
             <useUlib>0</useUlib>
             <EndSel>0</EndSel>
             <uLtcg>0</uLtcg>
+            <nSecure>0</nSecure>
             <RoSelD>3</RoSelD>
             <RwSelD>3</RwSelD>
             <CodeSel>0</CodeSel>
@@ -355,14 +359,7 @@
             <uThumb>0</uThumb>
             <uSurpInc>0</uSurpInc>
             <uC99>1</uC99>
-            <uGnu>0</uGnu>
             <useXO>0</useXO>
-            <VariousControls>
-              <MiscControls />
-              <Define>USE_HAL_DRIVER,STM32F407xx</Define>
-              <Undefine />
-              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../User/App;../User/Board;../User/Comm;../User/Device;../User/Control;../User/Config</IncludePath>
-            </VariousControls>
             <v6Lang>3</v6Lang>
             <v6LangP>3</v6LangP>
             <vShortEn>1</vShortEn>
@@ -370,6 +367,12 @@
             <v6Lto>0</v6Lto>
             <v6WtE>0</v6WtE>
             <v6Rtti>0</v6Rtti>
+            <VariousControls>
+              <MiscControls />
+              <Define>USE_HAL_DRIVER,STM32F407xx</Define>
+              <Undefine />
+              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include;../User/App;../User/Board;../User/Comm;../User/Device;../User/Control;../User/Config</IncludePath>
+            </VariousControls>
           </Cads>
           <Aads>
             <interw>1</interw>
@@ -379,13 +382,15 @@
             <SplitLS>0</SplitLS>
             <SwStkChk>0</SwStkChk>
             <NoWarn>0</NoWarn>
+            <uSurpInc>0</uSurpInc>
+            <useXO>0</useXO>
+            <uClangAs>0</uClangAs>
             <VariousControls>
               <MiscControls />
               <Define />
               <Undefine />
               <IncludePath />
             </VariousControls>
-            <uClangAs>0</uClangAs>
           </Aads>
           <LDads>
             <umfTarg>1</umfTarg>
@@ -455,6 +460,9 @@
                   <AssembleAssemblyFile>2</AssembleAssemblyFile>
                   <PublicsOnly>2</PublicsOnly>
                   <StopOnExitCode>11</StopOnExitCode>
+                  <CustomArgument />
+                  <IncludeLibraryModules />
+                  <ComprImg>1</ComprImg>
                 </CommonProperty>
                 <FileArmAds>
                   <Cads>
@@ -473,6 +481,19 @@
                     <uSurpInc>2</uSurpInc>
                     <uC99>2</uC99>
                     <useXO>2</useXO>
+                    <v6Lang>0</v6Lang>
+                    <v6LangP>0</v6LangP>
+                    <vShortEn>2</vShortEn>
+                    <vShortWch>2</vShortWch>
+                    <v6Lto>2</v6Lto>
+                    <v6WtE>2</v6WtE>
+                    <v6Rtti>2</v6Rtti>
+                    <VariousControls>
+                      <MiscControls />
+                      <Define />
+                      <Undefine />
+                      <IncludePath />
+                    </VariousControls>
                   </Cads>
                 </FileArmAds>
               </FileOption>
@@ -589,6 +610,9 @@
                   <AssembleAssemblyFile>2</AssembleAssemblyFile>
                   <PublicsOnly>2</PublicsOnly>
                   <StopOnExitCode>11</StopOnExitCode>
+                  <CustomArgument />
+                  <IncludeLibraryModules />
+                  <ComprImg>1</ComprImg>
                 </CommonProperty>
                 <FileArmAds>
                   <Cads>
@@ -607,6 +631,19 @@
                     <uSurpInc>2</uSurpInc>
                     <uC99>2</uC99>
                     <useXO>2</useXO>
+                    <v6Lang>0</v6Lang>
+                    <v6LangP>0</v6LangP>
+                    <vShortEn>2</vShortEn>
+                    <vShortWch>2</vShortWch>
+                    <v6Lto>2</v6Lto>
+                    <v6WtE>2</v6WtE>
+                    <v6Rtti>2</v6Rtti>
+                    <VariousControls>
+                      <MiscControls />
+                      <Define />
+                      <Undefine />
+                      <IncludePath />
+                    </VariousControls>
                   </Cads>
                 </FileArmAds>
               </FileOption>
@@ -690,6 +727,31 @@
               <FileName>frame.h</FileName>
               <FileType>5</FileType>
               <FilePath>../User/Comm/frame.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>User/Control</GroupName>
+          <Files>
+            <File>
+              <FileName>kin.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Control/kin.c</FilePath>
+            </File>
+            <File>
+              <FileName>kin.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Control/kin.h</FilePath>
+            </File>
+            <File>
+              <FileName>yaw.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Control/yaw.c</FilePath>
+            </File>
+            <File>
+              <FileName>yaw.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Control/yaw.h</FilePath>
             </File>
           </Files>
         </Group>

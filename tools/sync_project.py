@@ -2,6 +2,7 @@
 from pathlib import Path
 import sys
 import xml.etree.ElementTree as ET
+from keil_policy import enforce, save, OPTIONS
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT / "firmware/MDK-ARM/Car.uvprojx"
@@ -76,8 +77,11 @@ def sync():
             put(entry, "FileName", source.name)
             put(entry, "FileType", 1 if source.suffix == '.c' else 5)
             put(entry, "FilePath", "../User/" + folder.name + '/' + source.name)
-    ET.indent(tree, space="  ")
-    tree.write(PROJECT, encoding="utf-8", xml_declaration=True)
+    options = ET.parse(OPTIONS) if OPTIONS.is_file() else None
+    enforce(tree.getroot(), None if options is None else options.getroot())
+    save(tree, PROJECT)
+    if options is not None:
+        save(options, OPTIONS)
     print("PASS: Keil ARM Compiler 6.7、单 Target 和按职责分组的手写文件已同步")
 
 

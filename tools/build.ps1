@@ -22,6 +22,9 @@ Write-Output $taskText
 if ($taskProcess.ExitCode -ne 0 -or $taskText -notmatch '0 Error\(s\), 0 Warning\(s\)') {
     throw "Keil 编译未通过，退出码：$($taskProcess.ExitCode)"
 }
+# 编译后再次核对，防止IDE保存把保护项改回默认值。
+& $Python (Join-Path $PSScriptRoot 'check_project.py')
+if ($LASTEXITCODE -ne 0) { throw '编译后工程保护项发生变化，结果不作为有效基线' }
 $taskHex = Join-Path $taskRoot 'firmware\MDK-ARM\Objects\Car.hex'
 foreach ($taskName in @('Car.axf', 'Car.hex')) {
     $taskArtifact = Get-Item -LiteralPath (Join-Path $taskRoot "firmware\MDK-ARM\Objects\$taskName")

@@ -96,3 +96,5 @@ $env:PYTHONPATH = Join-Path (Get-Location) 'pi'
 示例136+321+631+312的确认映射：红1→3号、蓝3→2号、浅蓝6→1号；第二层为对应同色物料。结果计数12/12，账本版本365，确认步骤34/34。`elapsed_sim_s`是模型时间，不用于推算真实机构节拍。
 
 完整`tools/test.ps1`另运行固件静态检查。本轮检查640项中3项失败：工作期间`firmware/MDK-ARM/Car.uvprojx`出现本轮未写入的本地变化，`ListingPath`为空，`RunDebugAfterBuild`和`UpdateFlashBeforeDebugging`不符合原要求。本轮保留该文件，不改检查规则掩盖结果，也未运行Keil、下载或调试。历史`v0.2.0-readonly`的640项与编译记录仅代表当时节点。
+
+后续用户已明确授权修复，上述历史问题现已处理；当前状态见[Keil修复与底盘计算库验收](keil_base.md)，本页保留当时检查结果。

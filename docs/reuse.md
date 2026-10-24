@@ -34,3 +34,9 @@
 - `pi/robot/vision/task_code.py`迁入`智能搬运小车/Pi/qr_camera/task_codec.py`的四组解析及颜色到暂存环映射，原文件SHA256：`3bf5e91414ade5c5e1413b816a3cd7c34d740fbaf2e2d5019efb6454eb3fb766`。保留规则与输出结构，注释/异常改为中文；锁存新增帧号、采集时间、流身份、帧龄和稳定跨度约束，避免按调用次数重复计帧。
 - `task_check.py`迁用旧`User/Mech/grab_check.c`的EMPTY/SOURCE/HELD/STORED、同槽视图、动作/会话/姿态代次、250毫秒帧龄及三帧/100毫秒门槛；原文件SHA256：`1d7534a83ada7f1baab5d8ad4e6b821db7e0ac20eebe0d8e1a7c0fcbeed3eca8`。在Python中实现任务级校验，并扩展放置的目标/持料/释放/稳定确认。没有移植或运行其机构动作入口。
 - SQLite账本和可重放状态投影为新实现，替代两端各自计数的风险；当前只接模拟证据。原STM32/TJC计数逻辑未接入，实车帧、实时反馈和成功事件适配仍待后续验证。
+
+## 底盘计算基础复用
+
+- `firmware/User/Control/kin.c`改编旧`User/Chassis/kinematics.c`的正逆运动学、有限值检查和四轮同比限幅。原SHA256：`c3ca8e46cf249239909bf43acdc2c1519da06bc19ce6cd7abf6dfb2bf2b8dbaa`。接口改为米/秒/弧度、X前/Y左/逆时针正，移除旧车辆候选默认值，轮序仍为FL/FR/RL/RR；实际驱动极性不混入理论轮速。
+- `Control/yaw.c`沿用旧`User/Chassis/yaw_history.c`的64槽环形时间历史、uint32回绕和包围区间插值方法。原SHA256：`bb43b83675091d331ec991de61277a280dc66c67bd9fc5f278eba8812b7dea37`。输入改为CCW正弧度，新增±pi展开、时效/角速度检查与异常锁存，不外推、不向IMU写零。
+- 两模块只做数值运算与离线验证，没有移植旧路测标志、速度、轮几何或自动执行入口；后续里程计及设备适配另行验证。

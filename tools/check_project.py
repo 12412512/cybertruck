@@ -13,7 +13,8 @@ ERRORS = []
 CHECKS = 0
 USER_FILES = {FW / 'User' / name for name in (
     'App/app.c', 'App/app.h', 'Board/port.c', 'Board/port.h',
-    'Comm/frame.c', 'Comm/frame.h', 'Comm/comm.c', 'Comm/comm.h')}
+    'Comm/frame.c', 'Comm/frame.h', 'Comm/comm.c', 'Comm/comm.h',
+    'Control/kin.c', 'Control/kin.h', 'Control/yaw.c', 'Control/yaw.h')}
 
 
 def check(ok, message):
@@ -312,6 +313,22 @@ def verify_keil():
                 check(node.findtext(f"RunUserProg{index}") == "0", f"Keil {tag}.RunUserProg{index} 必须关闭")
     for tag in ("RunDebugAfterBuild", "UpdateFlashBeforeDebugging"):
         check(target.findtext(f".//{tag}") == "0", f"Keil {tag} 必须关闭")
+    for branch in ('Simulator', 'Target'):
+        for field in ('LoadApplicationAtStartup', 'RunToMain'):
+            check(target.findtext(f'TargetOption/DebugOption/{branch}/{field}') == '0',
+                  f'Keil {branch}.{field}必须关闭')
+    options = project.with_suffix('.uvoptx')
+    if options.is_file():
+        try:
+            local = ET.fromstring(read(options))
+            matches = [node for node in local.findall('./Target') if node.findtext('TargetName') == 'Car']
+            check(len(matches) == 1, '本机Keil选项必须有唯一Car目标')
+            if len(matches) == 1:
+                for flag in ('sLdApp', 'sGomain', 'tLdApp', 'tGomain', 'sRunDeb'):
+                    check(matches[0].findtext('TargetOption/DebugOpt/' + flag) == '0',
+                          f'本机Keil {flag}必须关闭')
+        except ET.ParseError:
+            check(False, '本机Keil选项XML损坏')
     refs = []
     allowed_core = {"main.c", "gpio.c", "can.c", "tim.c", "usart.c", "stm32f4xx_it.c",
                     "stm32f4xx_hal_msp.c", "system_stm32f4xx.c", "rng.c"}

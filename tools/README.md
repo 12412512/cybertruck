@@ -12,8 +12,11 @@
 | `build.ps1` | 先检查，再以 Keil `-r`、`-t Car`、`-o` 完整重编译 | 更新 `Objects/` 与编译日志，成功时打印 HEX 的 SHA256 |
 | `test.ps1` | 使用`.venv`执行主机回归，再做固件静态检查 | 原生C测试库写入`output/tests/`；无物理设备访问 |
 | `stop_preview.ps1` | 核对本项目预览目录和进程身份后停止后台预览 | 仅停止记录中的本机核心/Web进程，不访问物理设备 |
+| `keil_policy.py` | 恢复列表目录、完整DebugOption保护及现有本机选项 | 保留设备包、编译/驱动选择；不下载、不启动调试，`.uvoptx`仍不进Git |
 
 同步工具还会关闭构建前后用户程序、自动进入调试与调试前自动下载。它不调用硬件接口。
+
+同步工具共享`keil_policy.py`，会补齐IDE保存后缺失的调试子块，并处理当前机器已有的`Car.uvoptx`加载/运行选项。IDE另存后如检查失败，可显式执行`.venv/Scripts/python.exe -B tools/keil_policy.py`恢复保护，再编译；构建脚本在编译前后都检查，不把保护项缺失当作关闭。
 
 ## 使用方法
 
