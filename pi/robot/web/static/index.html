@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>搬运小车 · 只读工作台</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=16">
 </head>
 <body>
     <header>
@@ -18,16 +18,29 @@
         <section class="notice" id="source" role="status">正在读取控制核心状态…</section>
         <section class="panel" aria-label="实车短段准备">
             <h2>实车短段准备</h2>
-            <p id="base-ready">执行入口已准备，尚未烧录或使能。本页路线仍为离线模拟。</p>
-            <p class="muted">先验证前进100毫米、左移80毫米、逆时针10度；跳过重复单轮测试。每次独立启动，停车后再核对尺量结果。</p>
+            <p id="base-ready">单段执行已初测；短组合路线正在离线联调，本页不发送运动。</p>
+            <p class="muted">已验证基础单段方向与停车；组合路线共用同一会话和连续里程计，网页只读，实车仍需本次现场确认。</p>
             <dl>
                 <dt>执行状态</dt><dd id="base-state">未连接新执行固件</dd>
                 <dt>当前动作</dt><dd id="base-action">未下发</dd>
                 <dt>停止确认</dt><dd id="base-stop">待实车反馈</dd>
                 <dt>CAN错误 / 接收序号</dt><dd id="base-can">未接入</dd>
                 <dt>IMU原始航向 / 陀螺Z</dt><dd id="base-imu">未接入，方向待核对</dd>
-                <dt>后续顺序</dt><dd>短段 → 斜线 → 弧线 → 整图</dd>
+                <dt>后续顺序</dt><dd>同会话短组合 → 实物场地单路 → 整图</dd>
             </dl>
+        </section>
+        <section class="panel" id="route-panel">
+            <h2>短组合路线 · 同会话执行准备</h2>
+            <p class="muted">直线 → 斜线 → 固定车头弧线 → 边走边转姿。局部odom坐标，尚未与场地地图配准。段间停车稳定后交接，保持串口、使能和里程计连续。</p>
+            <dl>
+                <dt>路线状态</dt><dd id="route-status">读取冻结路线…</dd>
+                <dt>当前段 / 完成数</dt><dd id="route-progress">等待</dd>
+                <dt>起点与轨迹</dt><dd>起点(0,0,0)，X前/Y左/逆时针正；蓝线为名义参考，橙线为模型或实车反馈</dd>
+                <dt>当前位置</dt><dd id="route-pose">尚无反馈</dd>
+                <dt>执行边界</dt><dd id="route-boundary">网页不下发运动；实际每段锚定新鲜实测起点，显示累计偏差。</dd>
+            </dl>
+            <button type="button" id="route-replay">播放离线闭环（2倍速，不连接实车）</button>
+            <svg id="route-map" viewBox="0 0 640 300" role="img" aria-label="短组合路线名义参考与反馈轨迹"></svg>
         </section>
         <section class="panel" id="nav-panel" hidden>
             <h2>场地路径 · 两批离线导航</h2>
@@ -38,6 +51,7 @@
                 <dt>模型位姿 X / Y / 航向</dt><dd id="nav-pose">未接入</dd>
                 <dt>参考估计 / 模拟耗时</dt><dd id="nav-time">未接入</dd>
                 <dt>60秒预算 / 建模范围</dt><dd id="nav-budget">未接入</dd>
+                <dt>统一轨迹接入</dt><dd id="nav-export">等待规划包</dd>
                 <dt>返航朝向</dt><dd id="nav-return">未接入</dd>
                 <dt>模拟巡航 / 轮速峰值</dt><dd id="nav-speed">未接入</dd>
                 <dt>转姿与行程</dt><dd id="nav-turns">未接入</dd>
@@ -154,5 +168,5 @@
         </section>
     </main>
     <footer>浏览器仅观察状态 · 参数与动作接口尚未开放</footer>
-    <script type="module" src="/static/app.js"></script>
+    <script type="module" src="/static/app.js?v=16"></script>
 </body></html>

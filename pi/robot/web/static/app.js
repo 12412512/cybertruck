@@ -1,6 +1,7 @@
 // 网页仅接收状态；掉线或失去核心快照时立即撤销在线显示。
 import {renderTracking} from './tracking.js';
 import {renderNavigation} from './navigation.js';
+import {renderRoute} from './route.js?v=16';
 const set = (id, value) => { document.getElementById(id).textContent = value ?? '—'; };
 const ageText = value => Number.isFinite(value) ? Math.floor(value) : '—';
 let lastMessage = 0;
@@ -16,6 +17,7 @@ function stageName(stage) {
     return `${stage.startsWith('B1_') ? '第一批' : '第二批'} · ${steps[stage.slice(3)] ?? stage}`;
 }
 function render(state) {
+    renderRoute(state.core_fresh ? state.route_execution : null);
     const fresh = state.core_fresh === true;
     const execution = fresh && state.connected && state.execution_age_ms < 250 ? state.execution : null;
     set('base-ready', state.mode === 'sim'

@@ -42,16 +42,20 @@ def trial(name, action_id=1):
     """目标相对动作开始的车体，X前/Y左/逆时针正；不表示实测通过。"""
     options = {'straight': (1, .10, 0., 0.), 'side': (1, 0., .08, 0.),
                'turn': (2, 0., 0., math.radians(10)),
-               'diagonal': (1, .06, .06, 0.), 'arc': (4, 0., 0., 0.)}
+               'diagonal': (1, .06, .06, 0.), 'arc': (4, 0., 0., 0.),
+               'turn90': (2, 0., 0., math.pi / 2), 'pose': (5, .06, 0., math.radians(10))}
     if name not in options or type(action_id) is not int or not 0 < action_id < 2 ** 32:
         raise ValueError('目标必须是已定义短段且动作ID非零')
     kind, x, y, yaw = options[name]
     # 45度斜移的两轮线速为车速sqrt(2)倍，保留6RPM上限及闭环修正余量。
     velocity = .018 if name in ('diagonal', 'arc') else .03
+    # 同步转姿先保留轮速叠加余量；不修改独立平移/转向用例的参数。
+    linear = (.012, .05, .2) if name == 'pose' else (velocity, .08, .3)
+    angular = (.06, .2, .6) if name == 'pose' else (.10, .3, 1.0)
     path = (.01, .01, .06, .02, 1, 0) if name == 'arc' else (0, 0, 0, 0, 0, 0)
     # 所有未使用字段清零；二进制96字节布局由M4及主机断言共同检查。
     spec = SPEC_DATA.pack(kind, x, y, yaw, *path,
-                          velocity, .08, .3, .10, .3, 1.0, 0, 0,
+                          *linear, *angular, 0, 0,
                           .012 if name == 'arc' else 0, 0, 0, 0)
     return struct.pack('<II', action_id, 20000) + spec
 
@@ -61,12 +65,13 @@ def trials():
                 frame='本次动作起点车体：X前、Y左、逆时针正',
                 cases=[dict(name=n, target_m_rad=v) for n, v in (
                     ('straight', [.10, 0, 0]), ('side', [0, .08, 0]),
-                    ('turn', [0, 0, math.radians(10)]), ('diagonal', [.06, .06, 0]))]
+                    ('turn', [0, 0, math.radians(10)]), ('turn90', [0, 0, math.pi / 2]),
+                    ('diagonal', [.06, .06, 0]), ('pose', [.06, 0, math.radians(10)]))]
                       + [dict(name='arc', kind='fixed_heading_arc', radius_m=.06, blend_m=.02,
                               lead_m=.01, tail_m=.01, curve_velocity_m_s=.012)],
                 next_cases=['tangent_arc', 'whole_route'],
-                blockers=['需核对板端GC-BASE-0.3.4与现场条件',
-                          '仅开放固定朝向小弧线；随弧转姿及整图仍禁止，网页不下发运动'])
+                blockers=['需核对板端GC-BASE-0.3.6与现场条件',
+                          '仅开放指定小弧线和同步转姿；随弧转姿及整图仍禁止，网页不下发运动'])
 
 
 class MotionLink(Link):

@@ -98,6 +98,9 @@ class SimTransport(Device):
         self.requests = []
         self.signs = [1, -1, 1, -1]
         self.sensor_sign = 1
+        self.sensor_offset_rad = 0.
+        self.previous_raw_yaw = None
+        self.crossed_yaw_wrap = False
 
     def write(self, wire):
         self.requests += p.Decoder().feed(wire)
@@ -114,7 +117,11 @@ class SimTransport(Device):
             if tick % 10 == 0:
                 counts = (c.c_int64 * 4)(*[round(v * 65536) * s for v, s in zip(self.plant.turns, self.signs)])
                 rpm = (c.c_int16 * 4)(*[round(v) * s for v, s in zip(self.plant.rpm, self.signs)])
-                yaw = round(self.sensor_sign * self.plant.yaw / profile()['angle_scale_rad'])
+                yaw = round((self.sensor_sign * self.plant.yaw + self.sensor_offset_rad) / profile()['angle_scale_rad'])
+                yaw = ((yaw + 32768) & 0xffff) - 32768
+                if self.previous_raw_yaw is not None and abs(yaw - self.previous_raw_yaw) > 32768:
+                    self.crossed_yaw_wrap = True
+                self.previous_raw_yaw = yaw
                 gyro = round(self.sensor_sign * self.plant.wz / profile()['gyro_scale_rad_s'])
                 self.lib.Device_Tick(tick, counts, rpm, yaw, gyro)
             self.now = tick / 1000
@@ -219,6 +226,80 @@ class ExecutionTests(unittest.TestCase):
             struct.pack_into('<' + code, goal, offset, value)
             self.assertNotEqual(self.device.call(GOAL, bytes(goal)).payload[0], p.OK)
         self.assertEqual(self.device.call(GOAL, trial('arc')).payload[0], p.OK)
+
+    def test_only_low_speed_counterclockwise_quarter_turn_is_accepted(self):
+        import struct
+        self.device.arm()
+        for offset, value in ((20, -math.pi / 2), (20, math.pi), (20, math.pi / 2 + .01),
+                              (12, .01), (60, .11), (64, .35), (68, 1.1)):
+            goal = bytearray(trial('turn90'))
+            struct.pack_into('<f', goal, offset, value)
+            self.assertNotEqual(self.device.call(GOAL, bytes(goal)).payload[0], p.OK)
+        self.assertEqual(self.device.call(GOAL, trial('turn90')).payload[0], p.OK)
+
+    def test_only_bounded_synchronous_pose_is_accepted(self):
+        import struct
+        self.device.arm()
+        for offset, code, value in ((12, 'f', .08), (16, 'f', .01), (20, 'f', -.1745329),
+                                    (24, 'f', .01), (48, 'f', .018), (52, 'f', .08),
+                                    (56, 'f', .3), (60, 'f', .1), (64, 'f', .3),
+                                    (68, 'f', 1.), (72, 'I', 1), (80, 'f', .01)):
+            goal = bytearray(trial('pose'))
+            struct.pack_into('<' + code, goal, offset, value)
+            self.assertNotEqual(self.device.call(GOAL, bytes(goal)).payload[0], p.OK)
+        self.assertEqual(self.device.call(GOAL, trial('pose')).payload[0], p.OK)
+
+    def test_pose_reference_is_concurrent_and_respects_wheel_limit(self):
+        self.device.arm()
+        self.assertEqual(self.device.call(GOAL, trial('pose')).payload[0], p.OK)
+        point = Reference()
+        peaks = dict(velocity=0., acceleration=0., jerk=0., angular_velocity=0.,
+                     angular_acceleration=0., angular_jerk=0., wheel_rpm=0.)
+        concurrent = 0
+        for index in range(3001):
+            self.assertEqual(self.lib.Device_Ref(index / 3000, c.byref(point)), 1)
+            cosine, sine = math.cos(point.yaw_rad), math.sin(point.yaw_rad)
+            vx = cosine * point.vx_m_s + sine * point.vy_m_s
+            vy = -sine * point.vx_m_s + cosine * point.vy_m_s
+            values = dict(velocity=math.hypot(point.vx_m_s, point.vy_m_s),
+                          acceleration=math.hypot(point.ax_m_s2, point.ay_m_s2),
+                          jerk=math.hypot(point.jx_m_s3, point.jy_m_s3),
+                          angular_velocity=abs(point.wz_rad_s),
+                          angular_acceleration=abs(point.angular_accel_rad_s2),
+                          angular_jerk=abs(point.angular_jerk_rad_s3),
+                          wheel_rpm=(abs(vx) + abs(vy) + .22 * abs(point.wz_rad_s)) * 60 / (2 * math.pi * .05))
+            peaks = {key: max(peaks[key], value) for key, value in values.items()}
+            concurrent += point.vx_m_s > .001 and point.wz_rad_s > .001
+            self.assertAlmostEqual(point.y_m, 0., places=6)
+            self.assertGreaterEqual(point.x_m, -1e-6)
+            self.assertLessEqual(point.x_m, .060001)
+            self.assertGreaterEqual(point.yaw_rad, -1e-6)
+            self.assertLessEqual(point.yaw_rad, math.radians(10) + 1e-6)
+        self.assertGreater(concurrent, 1500)
+        limits = dict(velocity=.012, acceleration=.05, jerk=.2, angular_velocity=.06,
+                      angular_acceleration=.2, angular_jerk=.6, wheel_rpm=6)
+        for key, limit in limits.items():
+            self.assertLessEqual(peaks[key], limit * 1.0003, (key, peaks[key]))
+        self.assertAlmostEqual(point.x_m, .06, places=6)
+        self.assertAlmostEqual(point.yaw_rad, math.radians(10), places=6)
+        (ROOT / 'output/tests/pose-reference.json').write_text(json.dumps(peaks, indent=2), encoding='utf-8')
+
+    def test_quarter_turn_crosses_sensor_wrap_without_replay(self):
+        transport = SimTransport(self.lib)
+        transport.sensor_sign = -1
+        transport.sensor_offset_rad = math.radians(-179)
+        value = profile()
+        value['yaw_sign'] = -1
+        records = []
+        with tempfile.TemporaryDirectory() as directory:
+            result = run_trial(transport, value, 'turn90', directory,
+                               lambda kind, **fields: records.append(dict(kind=kind, **fields)),
+                               clock=lambda: transport.now, sleep=transport.sleep)
+        self.assertTrue(result['controller_complete'])
+        self.assertTrue(transport.crossed_yaw_wrap)
+        self.assertAlmostEqual(transport.plant.yaw, math.pi / 2, delta=math.radians(2))
+        self.assertEqual(sum(v.kind == GOAL for v in transport.requests), 1)
+        self.assertTrue(next(v for v in records if v['kind'] == 'stop_result')['confirmed'])
 
     def test_arc_reference_stays_within_geometry_and_motion_limits(self):
         self.device.arm()
@@ -366,7 +447,7 @@ class ExecutionTests(unittest.TestCase):
 
     def test_real_core_protocol_runs_short_cases_offline(self):
         summary = []
-        for case in ('straight', 'side', 'turn', 'diagonal', 'arc'):
+        for case in ('straight', 'side', 'turn', 'turn90', 'diagonal', 'arc', 'pose'):
             transport = SimTransport(self.lib)
             records = []
             with tempfile.TemporaryDirectory() as directory:

@@ -130,19 +130,30 @@ int Exec_Arm(Exec *exec, uint32_t now_ms)
     return 1;
 }
 
+static int QuarterTurn(const RefSpec *ref)
+{
+    return ref->kind == 2 && ref->x_m == 0 && ref->y_m == 0 &&
+        fabs(ref->yaw_rad - EXEC_PI / 2) <= 1e-6;
+}
+
 static int GoalValid(const TrackGoal *goal)
 {
     const RefSpec *ref = &goal->reference;
     if (!goal->id || goal->timeout_ms < 1000 || goal->timeout_ms > 20000 || !isfinite(ref->x_m) ||
         !isfinite(ref->y_m) || !isfinite(ref->yaw_rad) || hypot(ref->x_m, ref->y_m) > 0.15001 ||
-        fabs(ref->yaw_rad) > EXEC_PI / 18.0 + 1e-6 || ref->linear.velocity > 0.05f ||
+        (fabs(ref->yaw_rad) > EXEC_PI / 18.0 + 1e-6 && !QuarterTurn(ref)) || ref->linear.velocity > 0.05f ||
         ref->linear.acceleration > 0.10f || ref->linear.jerk > 0.4f || ref->angular.velocity > 0.20f ||
         ref->angular.acceleration > 0.4f || ref->angular.jerk > 2.0f)
     {
         return 0;
     }
-    /* 短斜线复用平移；首个弧线仅开放固定朝向的已验证小轮廓。
-     * 不开放切线转头、任意弯道或整图，独立位移/航向保护不变。 */
+    /* 只增加独立的逆时针90度低速原地目标，不扩大平移或弧线的转姿权限。 */
+    if (QuarterTurn(ref))
+    {
+        return ref->angular.velocity <= 0.10f && ref->angular.acceleration <= 0.3f &&
+            ref->angular.jerk <= 1.0f;
+    }
+    /* 平移、小弧线和同步转姿分别限定参数；不开放切线转头或整图。 */
     if (ref->kind == 1)
     {
         return ref->yaw_rad == 0 && hypot(ref->x_m, ref->y_m) >= 0.005;
@@ -156,6 +167,18 @@ static int GoalValid(const TrackGoal *goal)
             ref->curve_velocity_m_s > 0 && ref->curve_velocity_m_s <= 0.012f &&
             ref->linear.velocity <= 0.018f && ref->yaw_begin_m == 0 && ref->yaw_end_m == 0 &&
             ref->tail_velocity_m_s == 0;
+    }
+    if (ref->kind == 5)
+    {
+        /* 沿起点前方60mm，同时逆时针10度；复用Ref的双S曲线同步采样。 */
+        return ref->x_m == 0.06f && ref->y_m == 0 && fabs(ref->yaw_rad - EXEC_PI / 18) <= 1e-6 &&
+            ref->linear.velocity <= 0.012f && ref->linear.acceleration <= 0.05f &&
+            ref->linear.jerk <= 0.2f && ref->angular.velocity <= 0.06f &&
+            ref->angular.acceleration <= 0.2f && ref->angular.jerk <= 0.6f && ref->tangent == 0 &&
+            ref->path.lead_m == 0 && ref->path.tail_m == 0 && ref->path.radius_m == 0 &&
+            ref->path.blend_m == 0 && ref->path.turn == 0 && ref->path.reverse == 0 &&
+            ref->path_heading_rad == 0 && ref->curve_velocity_m_s == 0 &&
+            ref->yaw_begin_m == 0 && ref->yaw_end_m == 0 && ref->tail_velocity_m_s == 0;
     }
     return ref->kind == 2 && ref->x_m == 0 && ref->y_m == 0 && fabs(ref->yaw_rad) >= 0.01;
 }
@@ -336,9 +359,10 @@ void Exec_Run(Exec *exec, uint32_t now_ms)
     exec->control_ms = now_ms;
     if (exec->mode == EXEC_ACTIVE)
     {
+        double yaw_limit = QuarterTurn(&exec->last_goal.reference) ? EXEC_PI / 2 + 0.10 : 0.22;
         if (hypot(exec->observation.pose.x_m - exec->track.plan.origin[0],
                   exec->observation.pose.y_m - exec->track.plan.origin[1]) > 0.20 ||
-            fabs(exec->observation.yaw_rad - exec->track.plan.origin[2]) > 0.22)
+            fabs(exec->observation.yaw_rad - exec->track.plan.origin[2]) > yaw_limit)
         {
             Exec_Stop(exec, 6, now_ms);
             return;

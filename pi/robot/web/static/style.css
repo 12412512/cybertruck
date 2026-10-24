@@ -150,6 +150,8 @@ table {width:100%;border-collapse:collapse;font-size:13px;line-height:1.7;}
 th,td {padding:10px;text-align:left;border-bottom:1px solid #e0e7ed;}
 th {color:#526579;white-space:nowrap;}
 .active-leg {background:#edf4fa;}
+#route-replay {padding:9px 14px;border:1px solid #aac0d2;border-radius:7px;background:#edf4fa;color:#244e70;cursor:pointer;}
+#route-replay:disabled {opacity:.55;cursor:default;}
 
 @media(max-width:850px) {
     .grid {

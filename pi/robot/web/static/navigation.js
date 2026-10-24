@@ -49,6 +49,8 @@ export function renderNavigation(nav) {
     const valid=nav?.domain==='simulation' && nav.frame_id==='map';
     document.getElementById('nav-panel').hidden=!valid;
     if (!valid) {document.getElementById('nav-map').replaceChildren(); return;}
+    const pack=nav.execution_package;
+    set('nav-export',pack?`已共用RefSpec · ${pack.goals.length}段 · ${pack.sha256.slice(0,10)} · 仅预览，尚未部署实车`:'旧核心尚未导出统一轨迹包');
     const initial=nav.initial_pose[2]*180/Math.PI;
     set('nav-frame',`${names[nav.start]}名义中心，初始${initial.toFixed(0)}°（${nav.start==='start_1'?'+X':'−X'}）；map：X右/Y上，车体：X前/Y左；扫码0°、原料90°、粗加工−90°、暂存180°`);
     set('nav-state',`${states[nav.status]??nav.status} / 已确认 ${nav.completed}/${nav.actions} / 第${nav.leg+1}段`);

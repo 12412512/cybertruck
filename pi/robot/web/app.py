@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import json
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -31,6 +32,34 @@ def create_app(runtime=DEFAULT_RUNTIME):
     def base_trials():
         from ..device.execution import trials
         return trials()
+
+    @app.get('/api/routes/short')
+    def short_route():
+        from ..nav.route import validate
+        route = json.loads((DEFAULT_RUNTIME.parent.parent / 'config/short_route.json').read_text(encoding='utf-8'))
+        validate(route)
+        return route
+
+    @app.get('/api/routes/short/replay')
+    def route_replay():
+        # 只提供显式标记的模型记录；缺文件或版本不符不拿真实日志冒充模拟。
+        try:
+            report = json.loads((DEFAULT_RUNTIME.parent / 'route-link/closed-loop.json').read_text(encoding='utf-8'))
+            view = report['snapshot']['route_execution']
+            if (report['snapshot']['mode'] != 'sim' or view['domain'] != 'simulation'
+                    or view['plan_sha256'] != short_route()['sha256']):
+                raise ValueError('模型记录与当前路线不匹配')
+            frames = [v for v in report['records'] if v['kind'] == 'state' and v.get('execution')]
+            return dict(available=True, domain='simulation_replay', plan_sha256=view['plan_sha256'],
+                        frames=frames, result=report['result'])
+        except (OSError, ValueError, KeyError, TypeError):
+            return dict(available=False, domain='simulation_replay')
+
+    @app.get('/api/routes/field')
+    def field_route():
+        state = load_snapshot(snapshot)
+        return (state.get('navigation') or {}).get('execution_package') or dict(
+            available=False, domain='simulation', executable=False)
 
     @app.websocket('/ws')
     async def stream(socket: WebSocket):

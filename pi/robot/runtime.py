@@ -88,6 +88,10 @@ def load_snapshot(path, now=None):
                              message='设备状态已过期，等待新反馈')
                 if isinstance(state.get('diagnostics'), dict):
                     state['diagnostics'].update(can_report=None, source_stopped=None)
+        route = state.get('route_execution')
+        if isinstance(route, dict) and (not state.get('connected') or state.get('execution') is None):
+            state['route_execution'] = dict(route, status='stale', pose=None, session_continuous=False,
+                                           reason='当前设备/执行反馈过期；轨迹仅作历史显示')
         return state
     except (OSError, ValueError, TypeError, KeyError):
         return dict(core_fresh=False, connected=False, readonly=True, ready=False,

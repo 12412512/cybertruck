@@ -90,6 +90,8 @@ class RouteSimulation:
         self.reference_trace = []
         for _, segment in self.actions:
             self.reference_trace.extend(p.values() for _, p in segment.reference.samples(.12))
+        from .nav.route import export_navigation
+        self.execution_package = export_navigation(self)
         self.view_legs = [view(p) for p in self.legs]
         points=[self.planner.data['nodes'][name] for name in (start,*targets)]
         self.minimum_distance_m=sum(math.dist(a,b) for a,b in zip(points,points[1:]))
@@ -215,6 +217,7 @@ class RouteSimulation:
             self.trace = simplify(self.raw_trace)
             self.trace_count = len(self.raw_trace)
         return dict(domain='simulation', frame_id='map', start=self.start, status=self.status, executable=False,
+                    execution_package=self.execution_package,
                     budget_scope=self.scope,flow=self.flow,budget_s=60,
                     lookahead=self.planner.lookahead,
                     turn_rate_rad_s=self.planner.turn_rate_rad_s if self.planner.lookahead else .7,
