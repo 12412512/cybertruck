@@ -2,7 +2,7 @@
 
 后续保存地图、设备绑定、机构预设姿态与视觉标定。当前不复制旧配置，不填入未测量数据。
 
-实车接入新增`base_trials.json`，显式标为commissioning候选，保存旧工程声明几何/极性与原始单位，不标为已标定；yaw_sign按用户回答保持null。其addresses是当前四轮地址唯一来源，sync_project生成固件addresses.h并由阶段检查核对。试验目标与速度上限在正式接口和板端再次校验；候选参数不覆盖模拟场地图。
+实车接入新增`base_trials.json`，显式标为commissioning候选，保存旧工程声明几何/极性与原始单位，不标为整机已标定。用户最新确认旧Web顺时针增加，配置v2设yaw_sign=-1。其addresses是当前四轮地址唯一来源，sync_project生成固件addresses.h并由阶段检查核对。试验目标与速度上限在正式接口和板端再次校验；候选参数不覆盖模拟场地图。
 
 每类参数应明确唯一来源、单位、版本和适用设备；执行限位与保护参数归 `firmware/User/Config/`，硬件生成参数归 `firmware/Car.ioc`。
 

@@ -96,6 +96,7 @@ class SimTransport(Device):
         self.now = 0.
         self.requests = []
         self.signs = [1, -1, 1, -1]
+        self.sensor_sign = 1
 
     def write(self, wire):
         self.requests += p.Decoder().feed(wire)
@@ -112,8 +113,8 @@ class SimTransport(Device):
             if tick % 10 == 0:
                 counts = (c.c_int64 * 4)(*[round(v * 65536) * s for v, s in zip(self.plant.turns, self.signs)])
                 rpm = (c.c_int16 * 4)(*[round(v) * s for v, s in zip(self.plant.rpm, self.signs)])
-                yaw = round(self.plant.yaw / profile()['angle_scale_rad'])
-                gyro = round(self.plant.wz / profile()['gyro_scale_rad_s'])
+                yaw = round(self.sensor_sign * self.plant.yaw / profile()['angle_scale_rad'])
+                gyro = round(self.sensor_sign * self.plant.wz / profile()['gyro_scale_rad_s'])
                 self.lib.Device_Tick(tick, counts, rpm, yaw, gyro)
             self.now = tick / 1000
 
@@ -208,6 +209,18 @@ class ExecutionTests(unittest.TestCase):
         value['yaw_sign'] = None
         with self.assertRaises(ValueError):
             config_payload(value)
+
+    def test_clockwise_positive_sensor_becomes_counterclockwise_positive(self):
+        transport = SimTransport(self.lib)
+        transport.sensor_sign = -1
+        value = profile()
+        value['yaw_sign'] = -1
+        with tempfile.TemporaryDirectory() as directory:
+            result = run_trial(transport, value, 'turn', directory, lambda *a, **k: None,
+                               clock=lambda: transport.now, sleep=transport.sleep)
+        self.assertTrue(result['controller_complete'])
+        self.assertGreater(transport.plant.yaw, .15)
+        self.assertLess(transport.plant.yaw, .20)
 
     def test_owner_running_with_disconnected_board_still_blocks(self):
         with patch('robot.drive_core.build_opener'):
