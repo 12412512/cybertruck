@@ -16,9 +16,10 @@ STATIC = Path(__file__).with_name('static')
 
 
 def create_app(runtime=DEFAULT_RUNTIME, core_client=None, acceptance_path=None):
-    from .workbench import CoreClient, router
+    from .workbench import CoreClient, router, device_router
     app = FastAPI(title='智能搬运小车工作台', docs_url=None, redoc_url=None)
     app.include_router(router(core_client or CoreClient()))
+    app.include_router(device_router())
     snapshot = Path(runtime) / 'state.json'
     app.mount('/static', StaticFiles(directory=STATIC), name='static')
 

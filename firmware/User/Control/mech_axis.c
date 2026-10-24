@@ -312,3 +312,9 @@ void Axis_StopSent(Axis *axis, uint8_t mask, uint32_t now)
     axis->settled_ms = now;
     Barrier(axis);
 }
+
+void Axis_Stop(Axis *axis, uint32_t reason, uint32_t now)
+{
+    if (axis && axis->guard)
+        Fail(axis, reason ? reason : AXIS_CANCEL, now);
+}

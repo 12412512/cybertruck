@@ -22,6 +22,8 @@ USER_FILES = {FW / 'User' / name for name in (
     'Control/ref.c', 'Control/ref.h', 'Control/track.c', 'Control/track.h')}
 USER_FILES.update(FW / 'User' / name for name in (
     'Control/mech_guard.c', 'Control/mech_guard.h', 'Control/mech_axis.c', 'Control/mech_axis.h', 'Config/mech_hw.h',
+    'Control/mech_servo.c', 'Control/mech_servo.h', 'Control/mech_pose.c', 'Control/mech_pose.h',
+    'Board/mech_port.c', 'Board/mech_port.h',
     'Control/exec.c', 'Control/exec.h', 'Comm/execute.c', 'Comm/execute.h', 'Board/base_port.c', 'Board/base_port.h',
     'Device/can_tx.c', 'Device/can_tx.h', 'Device/can_internal.h',
     'Device/bus.c', 'Device/bus.h', 'Device/bus_internal.h', 'Device/bus_board.h',
@@ -290,7 +292,8 @@ def verify_readonly_app(data):
                 matches = list(re.finditer(pattern, source))
                 can_owner = path == FW / 'User/Device/can_tx.c'
                 can_init = path == FW / 'User/Board/base_port.c'
-                allowed = all((((can_owner and 'AddTxMessage' in match[0]) or
+                pwm_owner = path == FW / 'User/Board/mech_port.c'
+                allowed = all((pwm_owner and match[0].startswith('HAL_TIM_PWM_Start')) or (((can_owner and 'AddTxMessage' in match[0]) or
                                 (can_init and 'AddTxMessage' not in match[0]))
                                and 'HAL_CAN_' in match[0]) for match in matches)
                 check(allowed, f"执行器只能经唯一CAN所有者，PWM仍禁止：{path.relative_to(ROOT)}")
@@ -301,6 +304,12 @@ def verify_readonly_app(data):
     check(not re.search(r'\bhuart6\b', port), '本阶段不启用屏幕串口')
     check('HAL_UART_Receive_IT' in port and 'HAL_UART_Transmit_IT' in port, '串口必须使用中断非阻塞收发')
     base = clean_c(read(FW / 'User/Board/base_port.c'))
+    mechanism_port = clean_c(read(FW / 'User/Board/mech_port.c'))
+    check(not re.search(r'\b(?:HAL_\w+|Bus_Send|Servo_Begin|Pose_Begin|Axis_Begin)\s*\(',
+                        body(mechanism_port, 'MechPort_Init')), '机构初始化禁止发送/使能/PWM')
+    check('Servo_Take' in body(mechanism_port, 'MechPort_Run') and
+          'Servo_Applied' in body(mechanism_port, 'MechPort_Run'), 'PWM必须经过显式舵机意图及应用确认')
+    check('Bus_MechWatch();' in body(base, 'Base_Init'), '启动STOP必须包含机构地址')
     check(not re.search(r'\b(?:Bus_(?:Start|Speed|Send)|Exec_(?:Arm|Goal))\s*\(', body(base, 'Base_Init')),
           'Base_Init禁止使能、下发动作或自动开始查询')
     execute = clean_c(read(FW / 'User/Control/exec.c'))

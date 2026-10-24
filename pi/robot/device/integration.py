@@ -27,9 +27,13 @@ def preparation():
             or install['tray_reference_deg'] in slots):
         raise ValueError('机构安装记录的料位/基准定义无效')
     return dict(domain='preparation', real_connected=False, real_motion=False,
-                axis_executor=dict(stage='offline_validated', app_bound=False, device_enabled=False,
+                axis_executor=dict(stage='firmware_bound', app_bound=True, device_enabled=False,
                                    states=['ACCEPTED','SENDING','RUNNING','SETTLING','STOPPING','COMPLETE','FAILED','CANCELLED'],
                                    completion='TXOK、ACK及新反馈共同确认；停止TXOK不代表物理停车'),
+                servo_executor=dict(stage='firmware_bound', app_bound=True, device_enabled=False,
+                                    completion='命令缓动、输出确认、600ms等待；仍需独立姿态确认', actual_angle_known=False),
+                pose_executor=dict(stage='firmware_bound', app_bound=True, device_enabled=False,
+                                   single_step=True, frozen_revision=True, model_evidence_is_physical=False),
                 wiring_confirmed=install['wiring_confirmed_by_user'], physical_revalidated=False,
                 baseline=install['zero_baseline'], tray_reference_deg=install['tray_reference_deg'], tray_slot_deg=slots,
                 axes=[dict(name='升降', address=values['MECH_LIFT_ID'], direction='向下为正', feedback_sign=values['MECH_LIFT_SIGN'],
@@ -38,8 +42,8 @@ def preparation():
                            max_mm=values['MECH_REACH_MAX_UM'] / 1000)],
                 servos=servos,
                 pending=['每次接入均需核对板端版本、故障与停车证据；历史验收记录不替代当前状态',
-                         'ID5/6完整配置与35/36/3A/33反馈尚未接入唯一CAN调度器',
-                         '单轴意图执行器、人工建零及互锁已离线准备；未绑定App或真实通信命令',
+                         'ID5/6配置及35/36/3A/33已接入唯一调度器，仍须当次实车反馈验收',
+                         '单轴、舵机、姿态已绑定正式固件；动作仍需当次控制权、实车基准及互锁',
                          '舵机首次PWM输出与实际姿态须单独验收；启动保持不输出',
-                         'Web实车命令尚未启用；模拟零点/示教不得提升为实物有效状态'],
+                         '实车核心须显式启动并完成只读验收；模拟零点/示教不得提升为实物有效状态'],
                 next_step='通知用户后连接树莓派与开发板，只读核对当前状态；不使能、不清故障、不动作')

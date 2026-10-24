@@ -31,8 +31,17 @@ static uint32_t wait_tick;
 static uint32_t cancel_tick;
 static uint32_t reply_barrier, reply_start, reply_tick;
 static uint8_t reply_wait, reply_matched, reply_address, reply_code;
+static void (*observer)(const BusFrame *frame);
+static MotorConfigRx query_config_rx;
+static MotorConfig query_config;
+
+void Bus_Observe(void (*receive)(const BusFrame *frame))
+{
+    observer = receive;
+}
 /* finite_owned直到人工确认后的BusRearm才清除；不能中途换地址或续发运动。 */
 static uint8_t finite_owned, finite_pending, finite_wheel;
+static uint8_t mech_watch;
 static uint8_t finite_address[4], finite_dir[4];
 static uint16_t finite_rpm;
 static uint32_t finite_pulses[4];
@@ -83,10 +92,30 @@ static void KeepStops(void)
     uint8_t i;
     for (i = 0; i < 4; i++)
         Retain(finite_owned ? finite_address[i] : addresses[i]);
+    if (mech_watch)
+    {
+        Retain(5);
+        Retain(6);
+    }
+}
+void Bus_MechWatch(void)
+{
+    mech_watch = 1;
+}
+
+uint8_t Bus_MechDone(void)
+{
+    /* 调用方已确认轴到位/停止；不清故障、不丢反馈、不重新使能。 */
+    if (bus_diag.error || bus_diag.locked || bus_diag.active || diagnostic_owner || job ||
+        cancelling || bus_diag.pending_stop_count || finite_owned)
+        return 0;
+    bus_diag.motion_uncertain = 0;
+    return 1;
 }
 static void Fault(uint32_t error)
 {
-    uint8_t moving = (uint8_t)(bus_diag.active || batch || four_stop || finite_owned);
+    uint8_t moving = (uint8_t)(bus_diag.active || batch || four_stop || finite_owned ||
+                              (mech_watch && bus_diag.motion_uncertain));
     bus_diag.error |= error;
     bus_diag.locked = 1;
     bus_diag.active = 0;
@@ -385,6 +414,8 @@ static void Receive(void)
     uint8_t i, n, finite_target;
     for (n = 0; n < CAN_RING_SIZE && Can_Read(&frame); n++)
     {
+        if (observer)
+            observer(&frame);
         /* 复用旧axis的发送/匹配回复两阶段；本机RX序号不是设备事务号。
          * TXOK之前、旧队列、错地址/命令、格式错误和期限外回包均不解锁。 */
         if (reply_wait && !reply_matched && frame.rx_sequence != reply_barrier &&
@@ -392,7 +423,8 @@ static void Receive(void)
             can_diag.tx_done_sequence == bus_diag.query_tx_sequence &&
             (uint32_t)(frame.tick - can_diag.tx_done_tick) < 0x80000000UL &&
             (uint32_t)(frame.tick - reply_start) < BUS_REPLY_TIMEOUT_MS &&
-            Drive_Parse(&frame, reply_address, &reply) && reply.code == reply_code)
+            ((reply_code == 0x42 && Drive_Config(&query_config_rx, &frame, reply_address, &query_config) == 1) ||
+             (Drive_Parse(&frame, reply_address, &reply) && reply.code == reply_code)))
         {
             reply_matched = 1;
             reply_tick = frame.tick;
@@ -510,11 +542,12 @@ static int Submit(uint8_t type, uint8_t wheel, const BusFrame *frames, uint8_t c
     reply_code = frames[0].data[0];
     reply_wait = (uint8_t)((type == JOB_QUERY || type == JOB_DIAG) && count == 1 &&
                           (reply_code == 0x33 || reply_code == 0x35 || reply_code == 0x36 ||
-                           reply_code == 0x3A));
+                           reply_code == 0x3A || reply_code == 0x42));
     reply_matched = 0;
     if (reply_wait)
     {
         reply_address = (uint8_t)(frames[0].id >> 8);
+        Drive_Reset(&query_config_rx);
         reply_barrier = can_diag.rx_sequence;
         reply_start = now;
         bus_diag.query_waiting = 1;

@@ -27,5 +27,7 @@ void Comm_Tick(uint32_t now_ms, uint8_t key_pressed);
 void Comm_Feed(uint8_t byte, uint32_t received_ms, uint32_t now_ms);
 uint16_t Comm_Read(uint8_t *wire);
 void Comm_Fault(uint32_t reason);
+uint64_t Comm_Boot(void);
+uint64_t Comm_Session(void);
 
 #endif

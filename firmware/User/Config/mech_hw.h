@@ -41,5 +41,11 @@
 #define MECH_AXIS_TX_MS              50U
 #define MECH_AXIS_ACK_MS            250U
 #define MECH_AXIS_ARRIVE_SAMPLES       3U
+#define MECH_SERVO_STEP_MS            20U
+#define MECH_SERVO_STEP_MDEG         900L
+#define MECH_SERVO_WAIT_MS           600U
+#define MECH_SERVO_OUTPUT_MS          50U
+#define MECH_ARM_MIN_MDEG          83000L
+#define MECH_ARM_MAX_MDEG         180000L
 
 #endif

@@ -20,6 +20,16 @@ static uint32_t faults;
 static uint32_t uptime_ms;
 static CommHooks executor;
 
+uint64_t Comm_Boot(void)
+{
+    return boot_id;
+}
+
+uint64_t Comm_Session(void)
+{
+    return session_id;
+}
+
 void Comm_Bind(CommHooks hooks)
 {
     executor = hooks;
@@ -124,7 +134,7 @@ static void Dispatch(const Frame *frame, uint32_t now_ms)
         Frame_Put(data + 4, executor.command ? 5U : 1U, 4);
         if (executor.command)
         {
-            memcpy(data + 8, "GC-BASE-0.3.12", sizeof("GC-BASE-0.3.12"));
+            memcpy(data + 8, "GC-BASE-0.3.14", sizeof("GC-BASE-0.3.14"));
         }
         else
         {
@@ -179,7 +189,8 @@ static void Dispatch(const Frame *frame, uint32_t now_ms)
         Reply(frame, COMM_SESSION, 0, 0);
         return;
     }
-    if (executor.command && (frame->type == 16 || (frame->type >= 32 && frame->type <= 38)))
+    if (executor.command && (frame->type == 16 || (frame->type >= 32 && frame->type <= 38) ||
+                            (frame->type >= 48 && frame->type <= 58)))
     {
         result = executor.command(frame->type, frame->data, frame->size, data, &size, now_ms);
         Reply(frame, result, data, size);

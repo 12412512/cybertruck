@@ -6,6 +6,7 @@
 #include "execute.h"
 #include "addresses.h"
 #include "can.h"
+#include "mech_port.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -154,6 +155,7 @@ static int Stopped(uint32_t since)
 
 static void StopCommand(uint32_t reason, uint32_t now)
 {
+    MechPort_Stop(reason, now);
     Exec_Stop(&executor, reason, now);
 }
 
@@ -161,6 +163,18 @@ static uint8_t Command(uint8_t type, const uint8_t *data, uint16_t size, uint8_t
                        uint32_t now)
 {
     uint32_t configured = executor.config.version;
+    if (type >= 48 && type <= 58)
+    {
+        if (type != 58 && (startup_pending || executor.mode == EXEC_ACTIVE ||
+                           executor.mode == EXEC_ARMING || executor.mode == EXEC_READY))
+            return COMM_BUSY;
+        uint8_t mech_result = MechPort_Command(type, data, size, reply, reply_size, now);
+        if (Bus_Status() == CAN_BUSY)
+            diag_busy = 1;
+        return mech_result;
+    }
+    if (MechPort_Owned() && (type == EXEC_ARM || type == EXEC_GOAL || type == EXEC_CONFIG))
+        return COMM_BUSY;
     if (type == 36 && size == 0)
     {
         *reply_size = Port_Diag(reply);
@@ -190,6 +204,8 @@ void Base_Init(void)
     ExecIo io = {Ready, EnableWheel, Bus_Start, Send, Stop, Fault, Stopped, Rearm};
     CommHooks hooks = {StopCommand, Command};
     Exec_Init(&executor, io);
+    MechPort_Init();
+    Bus_Observe(MechPort_Feed);
     /* 启动接收不等于使能或动作；配置/使能/目标分别显式提交。 */
     filter.FilterMode = CAN_FILTERMODE_IDMASK;
     filter.FilterScale = CAN_FILTERSCALE_32BIT;
@@ -207,6 +223,7 @@ void Base_Init(void)
     }
     /* 复位不能让外部驱动继续保持旧RPM；只发送停止，不使能、不启动轨迹。 */
     Bus_Setup(addresses);
+    Bus_MechWatch();
     Bus_Stop();
     startup_pending = 1;
     startup_ms = HAL_GetTick();
@@ -218,10 +235,34 @@ static void Query(uint32_t now)
     BusFrame frames[2];
     uint8_t count;
     const uint8_t kinds[3] = {0x35, 0x36, 0x3A};
+    static uint8_t mech_turn;
     if (diag_busy || executor.mode == EXEC_READY ||
         executor.mode == EXEC_ACTIVE || (uint32_t)(now - query_ms) < 5)
     {
         return;
+    }
+    if (MechPort_Owned())
+    {
+        count = MechPort_Output(frames, now);
+        if (count)
+        {
+            if (Bus_Send(frames, count))
+                diag_busy = 1;
+            else
+                MechPort_Sent(0, now);
+            return;
+        }
+        mech_turn ^= 1;
+        if (mech_turn)
+        {
+            count = MechPort_Query(frames, now);
+            if (count && Bus_Send(frames, count))
+            {
+                diag_busy = 1;
+                query_ms = now;
+            }
+            return;
+        }
     }
     count = Drive_Build(addresses[query_index / 3], kinds[query_index % 3], 0, 0, 0, 0, 0, 0, frames);
     if (count && Bus_Send(frames, count))
@@ -245,6 +286,7 @@ void Base_Run(void)
     now = HAL_GetTick();
     if (diag_busy && Bus_Status() != CAN_BUSY && Bus_Status() != CAN_CANCELLING)
     {
+        MechPort_Sent((uint8_t)(Bus_Status() == CAN_SENT), now);
         if (Bus_Status() != CAN_SENT)
         {
             Exec_Stop(&executor, 0x800U, now);
@@ -298,5 +340,7 @@ void Base_Run(void)
         Exec_Sent(&executor, zero_action, zero_id, bus_diag.sent_tick);
     }
     Exec_Run(&executor, now);
+    MechPort_Run(HAL_GetTick(), (uint8_t)(executor.stop_confirmed && Ready(HAL_GetTick(), 0, 0)),
+                 Fault() | executor.fault);
     Query(now);
 }

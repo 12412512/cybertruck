@@ -42,6 +42,8 @@ void Axis_Sent(Axis *axis, uint32_t id, uint8_t tx_ok, uint32_t now_ms);
 void Axis_Ack(Axis *axis, const MotorReply *reply, uint32_t now_ms);
 void Axis_Poll(Axis *axis, uint32_t now_ms, uint8_t base_stopped);
 void Axis_Cancel(Axis *axis, uint32_t now_ms);
+/* 上层姿态故障时，即使单轴空闲也保留两轴停止请求；仍无IO。 */
+void Axis_Stop(Axis *axis, uint32_t reason, uint32_t now_ms);
 /* mask位0/1为ID5/6停止事务TXOK；仍需新反馈确认实物停稳。 */
 void Axis_StopSent(Axis *axis, uint8_t mask, uint32_t now_ms);
 

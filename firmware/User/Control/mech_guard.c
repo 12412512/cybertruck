@@ -78,6 +78,11 @@ void Mech_Init(MechGuard *guard, uint64_t boot, uint64_t session)
     guard->session = session;
 }
 
+uint8_t Mech_Ready(const MechGuard *guard, uint32_t now, uint32_t version)
+{
+    return guard ? Ready(guard, now, version) : MECH_NO_ZERO;
+}
+
 void Mech_Invalidate(MechGuard *guard, uint32_t reason)
 {
     if (!guard)

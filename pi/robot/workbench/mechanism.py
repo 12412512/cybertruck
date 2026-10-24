@@ -172,6 +172,15 @@ class Mechanism:
             self.stop('模拟基准已失效')
             self.zero_valid = False
             return dict(ok=True, domain='simulation')
+        if action == 'next':
+            self._ready()
+            if (not self.active or self.active['action'] != 'pose'
+                    or not self.active.get('single_step') or not self.active.get('waiting_step')
+                    or goal.action_id != self.active['id'] or goal.step_index != self.active['step']
+                    or goal.revision != self.active['pose_revision'] or goal.zero_version != self.zero_version):
+                raise ValueError('单步继续与当前动作、姿态版本、步骤或零点不匹配')
+            self.active.update(waiting_step=False, step_authorized=True, phase='READY', status='RUNNING')
+            return dict(ok=True, action_id=self.active['id'], status='RUNNING', domain='simulation')
         if self.busy:
             raise ValueError('机构动作运行中，请先停止或等待完成')
         if action == 'reset_model':
@@ -230,7 +239,14 @@ class Mechanism:
             selected = next((p for p in self.pose_versions if p['id'] == goal.pose_id and p['revision'] == goal.revision), None)
             if not selected:
                 raise ValueError('姿态版本不存在；候选姿态需先预览并保存')
-            return self._start(self._pose_steps(selected['targets']), 'pose', goal.release_confirmed)
+            if selected['sha256'] != self._hash(selected['targets']) or selected['config_hash'] != self.config_hash:
+                raise ValueError('姿态版本或标定校验已变化，拒绝执行')
+            result = self._start(self._pose_steps(selected['targets']), 'pose', goal.release_confirmed)
+            self.active.update(pose_id=selected['id'], pose_revision=selected['revision'],
+                               pose_hash=selected['sha256'], single_step=goal.single_step,
+                               step_authorized=not goal.single_step, waiting_step=False,
+                               phase='READY', confirmation_domain='simulation', physical_confirmed=False)
+            return result
         axis = goal.axis
         if action == 'jog':
             if axis not in AXES or not goal.velocity_m_s:
@@ -272,6 +288,10 @@ class Mechanism:
         if not self.queue:
             self._finish('COMPLETE', '各步骤已按模型位置/稳定窗口完成；无实物证据')
             return
+        if (self.active.get('single_step') and self.segment is None
+                and not self.active.get('step_authorized')):
+            self.active.update(waiting_step=True, status='WAIT_STEP', phase='WAIT_STEP')
+            return
         axis, target = self.queue[0]
         if self.active['action'] == 'jog':
             # 点动按受限加速推进；松开/续约失效即取消，模型不模拟轴刹车惯性。
@@ -305,11 +325,24 @@ class Mechanism:
         ratio = min(1., segment['elapsed'] / segment['duration'])
         blend = ratio ** 3 * (10 - 15 * ratio + 6 * ratio ** 2)
         self.positions[axis] = segment['start'] + (target - segment['start']) * blend
+        self.active['phase'] = ('AXIS_MODEL_MOVING' if axis in AXES else 'SERVO_MODEL_SLEWING') if ratio < 1 else (
+            'AXIS_MODEL_SETTLING' if axis in AXES else 'SERVO_COMMAND_SETTLING')
         settle = .1 if axis in AXES else self.cfg['settle_s']
         if segment['elapsed'] >= segment['duration'] + settle:
+            if axis in SERVOS and not segment.get('command_done'):
+                segment['command_done'] = True
+                self.active.update(phase='COMMAND_DONE', status='WAIT_MODEL_CONFIRM',
+                                   confirmation_domain='simulation', physical_confirmed=False)
+                return
+            if axis in SERVOS and not segment.get('model_confirmed'):
+                segment['model_confirmed'] = True
+                self.active.update(phase='MODEL_CONFIRMED', status='RUNNING',
+                                   confirmation_domain='simulation', physical_confirmed=False)
+                return
             self.positions[axis] = target
             self.queue.pop(0)
             self.active['step'] += 1
+            self.active['step_authorized'] = not self.active.get('single_step')
             self.segment = None
 
     def transport_ready(self):
@@ -322,6 +355,7 @@ class Mechanism:
 
     def view(self):
         return dict(available=True, backend='offline_model', domain='simulation', real_connected=False,
+                    execution_schema=2,
                     physical_validated=False, zero_valid=self.zero_valid, zero_version=self.zero_version,
                     mode=self.mode, busy=self.busy, fault=self.fault, reason=self.reason,
                     hold_possible=self.hold_possible,

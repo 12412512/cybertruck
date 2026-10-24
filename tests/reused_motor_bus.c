@@ -123,6 +123,7 @@ static void Config(uint8_t addr)
     for (packet=0;packet<5;packet++) {
         BusFrame *f=&receive[input++]; uint8_t n=packet==4?3:7;
         memset(f,0,sizeof(*f)); f->id=((uint32_t)addr<<8)|packet; f->tick=now;
+        f->rx_sequence=++can_diag.rx_sequence;
         f->len=(uint8_t)(n+1); f->data[0]=0x42;
         memcpy(&f->data[1],&raw[1+packet*7],n);
     }
@@ -235,6 +236,8 @@ static void TestExclusive(void)
 {
     BusFrame frames[2]; uint8_t count=Build(1,0x42,frames); unsigned before;
     assert(Bus_Send(frames,count)); assert(!Bus_Start()); Bus_Poll(); Finish(); Bus_Poll();
+    assert(Bus_Status()==CAN_BUSY && bus_diag.query_waiting);
+    Config(1); Bus_Poll(); now+=CAN_TX_TURNAROUND_MS; Bus_Poll(); Drain();
     assert(Bus_Status()==CAN_SENT && !Bus_Start()); Bus_Release(); assert(Bus_Start());
     count=Build(1,0x35,frames); assert(!Bus_Send(frames,count));
     count=Build(7,0xFE,frames); before=sends; assert(Bus_Send(frames,count));
@@ -248,8 +251,9 @@ static void TestReceive(void)
 {
     BusFrame frame,request[2]; unsigned n,base=reads;
     assert(Bus_Send(request,Build(1,0x42,request))); Bus_Poll(); Finish(); Bus_Poll();
-    assert(Bus_Status()==CAN_SENT && !Bus_Start());
+    assert(Bus_Status()==CAN_BUSY && !Bus_Start());
     Config(1); Bus_Poll(); assert(Bus_Wheels()[0].config.valid && Bus_Wheels()[0].config.microsteps==16);
+    now+=CAN_TX_TURNAROUND_MS; Bus_Poll(); assert(Bus_Status()==CAN_SENT);
     for(n=0;n<5;n++) { assert(Bus_Read(&frame)); assert((frame.id&255U)==n && frame.data[0]==0x42); }
     assert(!Bus_Read(&frame));
     Config(1); receive[input-1].data[3]=0; Bus_Poll(); assert(!Bus_Wheels()[0].config.valid); Drain();
@@ -575,6 +579,30 @@ static void TestReceiveMillisecond(void)
     assert(Bus_Wheels()[0].position.handled_ms>=Bus_Wheels()[0].position.tick);
     puts("PASS 35: dequeue crossing millisecond never predates receive timestamp");
 }
+static void TestMechConfigWait(unsigned mode)
+{
+    BusFrame frames[2];
+    assert(Bus_Send(frames,Build(5,0x42,frames))); Bus_Poll(); Finish(); Bus_Poll();
+    assert(Bus_Status()==CAN_BUSY && bus_diag.query_waiting);
+    Config(mode == 1 ? 6 : 5);
+    if (!mode) input--; /* 缺少最后一包不能当作完整驱动配置。 */
+    Bus_Poll();
+    assert(Bus_Status()==CAN_BUSY && bus_diag.query_waiting);
+    now+=BUS_REPLY_TIMEOUT_MS; Bus_Poll();
+    assert(Bus_Status()==CAN_FAILED && (bus_diag.error&BUS_ERROR_REPLY));
+    puts("PASS: missing/wrong-address config never releases query owner");
+}
+static void TestMechStops(void)
+{
+    unsigned before=sends;
+    Bus_MechWatch(); Bus_Stop();
+    assert(bus_diag.pending_stop_count==6);
+    Stops();
+    assert(sends-before==6 && !Bus_MechDone());
+    while(before<sends) { assert(Op(before)==0xFE && Addr(before)<=6); before++; }
+    assert(bus_diag.error==BUS_ERROR_STOP);
+    puts("PASS: six retained stops; mechanism completion cannot clear stop/fault latch");
+}
 int main(int argc,char **argv)
 {
     int test;
@@ -595,6 +623,8 @@ int main(int argc,char **argv)
     case 29: TestFiniteStopNegative(0xE2,29); break; case 30: TestFiniteStopNegative(0xEE,30); break;
     case 31: TestFiniteStopNegative(0x12,31); break; case 32: TestFiniteStopNegative(0x22,32); break;
     case 35: TestReceiveMillisecond(); break;
+    case 36: TestMechConfigWait(0); break; case 37: TestMechConfigWait(1); break;
+    case 38: TestMechStops(); break;
     case 33: TestFiniteStopInbox(); break; case 34: TestLegacyStopInbox(); break; default: assert(0);
     }
     if(test) assert(polls); return 0;

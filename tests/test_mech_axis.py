@@ -39,7 +39,7 @@ class MechAxisTests(unittest.TestCase):
             value = client.get('/api/workbench/preparation').json()
             self.assertEqual(value['domain'], 'preparation')
             self.assertFalse(value['real_motion'])
-            self.assertFalse(value['axis_executor']['app_bound'])
+            self.assertTrue(value['axis_executor']['app_bound'])
             self.assertFalse(value['axis_executor']['device_enabled'])
             self.assertEqual(client.post('/api/workbench/preparation', json={}).status_code, 405)
 

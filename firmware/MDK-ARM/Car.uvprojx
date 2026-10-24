@@ -704,6 +704,16 @@
               <FilePath>../User/Board/base_port.h</FilePath>
             </File>
             <File>
+              <FileName>mech_port.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Board/mech_port.c</FilePath>
+            </File>
+            <File>
+              <FileName>mech_port.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Board/mech_port.h</FilePath>
+            </File>
+            <File>
               <FileName>port.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/Board/port.c</FilePath>
@@ -857,6 +867,26 @@
               <FileName>mech_guard.h</FileName>
               <FileType>5</FileType>
               <FilePath>../User/Control/mech_guard.h</FilePath>
+            </File>
+            <File>
+              <FileName>mech_pose.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Control/mech_pose.c</FilePath>
+            </File>
+            <File>
+              <FileName>mech_pose.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Control/mech_pose.h</FilePath>
+            </File>
+            <File>
+              <FileName>mech_servo.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Control/mech_servo.c</FilePath>
+            </File>
+            <File>
+              <FileName>mech_servo.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Control/mech_servo.h</FilePath>
             </File>
             <File>
               <FileName>odom.c</FileName>

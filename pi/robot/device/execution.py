@@ -138,7 +138,7 @@ class MotionLink(Link):
         if now - self.last_execution >= .05:
             self.last_execution = now
             return STATUS, b''
-        if self.firmware in ('GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11', 'GC-BASE-0.3.12') and now - self.last_fault_query >= .2:
+        if self.firmware in ('GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11', 'GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14') and now - self.last_fault_query >= .2:
             self.last_fault_query = now
             return 37, b''
         if now - self.last_sample >= .05:
@@ -146,7 +146,7 @@ class MotionLink(Link):
             self.sample_kind = 5 if self.sample_kind == 4 else 4
             return FEEDBACK, bytes([self.sample_kind, 0])
         # 仅新版本且执行器静止模式才读冻结页，不挤占运动期反馈；不扩大实车运动版本白名单。
-        if (self.firmware == 'GC-BASE-0.3.12' and self.execution
+        if (self.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14') and self.execution
                 and self.execution['mode'] in (0, 1, 6) and self.execution['can_errors']
                 and not self.can_capture.result and not self.can_capture_error
                 and now - self.last_can_capture >= .05):

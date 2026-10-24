@@ -73,3 +73,26 @@ def router(client):
             pass
 
     return api
+
+
+def device_router(client=None):
+    """同一工作台的实车通道；只转发固定回环核心，网页不打开设备。"""
+    from ..mech_core import DeviceCommand
+    client = client or CoreClient('http://127.0.0.1:8091')
+    api = APIRouter(prefix='/api/device')
+
+    @api.get('/state')
+    def state():
+        try:
+            return client.request('/state')
+        except HTTPException:
+            return dict(available=False, connected=False, domain='physical', reason='实车核心未连接；没有打开串口')
+
+    @api.post('/command')
+    def command(value: DeviceCommand, request: Request):
+        origin = request.headers.get('origin')
+        if request.headers.get('x-workbench') != '1' or (origin and origin != str(request.base_url).rstrip('/')):
+            raise HTTPException(403, '仅接受同源实车调试请求')
+        return client.request('/command', value.model_dump())
+
+    return api

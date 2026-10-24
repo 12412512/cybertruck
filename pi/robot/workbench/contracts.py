@@ -77,7 +77,7 @@ class Empty(Input):
 
 class MechGoal(Input):
     """机构离线接口；草稿、明确执行与实物验收分别表示。"""
-    action: Literal['jog', 'move', 'teach', 'preview', 'pose', 'zero', 'anchor', 'invalidate', 'reset_model', 'stop']
+    action: Literal['jog', 'move', 'teach', 'preview', 'pose', 'next', 'zero', 'anchor', 'invalidate', 'reset_model', 'stop']
     axis: Literal['lift', 'reach', 'arm', 'tray', 'gripper'] = 'lift'
     target_m: float | None = None
     target_rad: float | None = None
@@ -89,10 +89,17 @@ class MechGoal(Input):
     revision: int = Field(default=0, ge=0)
     confirmed: bool = False
     release_confirmed: bool = False
+    single_step: bool = False
+    action_id: int | None = Field(default=None, ge=1)
+    step_index: int | None = Field(default=None, ge=0, le=8)
     targets: dict[str, float] = Field(default_factory=dict, max_length=5)
 
     @model_validator(mode='after')
     def check_units(self):
+        if self.action == 'next' and (self.action_id is None or self.step_index is None):
+            raise ValueError('单步继续必须绑定当前动作和步骤')
+        if self.single_step and self.action != 'pose':
+            raise ValueError('逐步确认仅用于姿态执行')
         linear = self.axis in ('lift', 'reach')
         if (linear and (self.target_rad is not None or self.velocity_rad_s is not None)
                 or not linear and (self.target_m is not None or self.velocity_m_s is not None)):

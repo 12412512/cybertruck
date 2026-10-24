@@ -22,5 +22,9 @@ uint8_t Bus_Read(BusFrame *frame);
 void Bus_Drop(void);
 void Bus_Release(void);
 const BusWheel *Bus_Wheels(void);
+/* 机构接入后保留ID5/6停止地址；只由唯一板级适配器调用。 */
+void Bus_MechWatch(void);
+uint8_t Bus_MechDone(void);
+void Bus_Observe(void (*receive)(const BusFrame *frame));
 
 #endif

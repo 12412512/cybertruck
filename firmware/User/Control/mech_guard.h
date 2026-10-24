@@ -27,6 +27,8 @@ uint8_t Mech_Feed(MechGuard *guard, const MotorReply *reply, uint32_t now_ms);
 void Mech_Poll(MechGuard *guard, uint32_t now_ms, uint8_t base_stopped);
 void Mech_Invalidate(MechGuard *guard, uint32_t reason);
 uint8_t Mech_Zero(MechGuard *guard, uint32_t now_ms, uint8_t manual_confirmed);
+/* 只检查当前基准、反馈与底盘静止，不产生轴运动或PWM。 */
+uint8_t Mech_Ready(const MechGuard *guard, uint32_t now_ms, uint32_t zero_version);
 int64_t Mech_Position(const MechGuard *guard, uint8_t axis_index);
 uint8_t Mech_CheckAxis(const MechGuard *guard, uint32_t now_ms, uint32_t zero_version,
                        uint8_t axis_index, int32_t target_um, uint8_t arm_known, int32_t arm_mdeg);

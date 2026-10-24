@@ -35,8 +35,9 @@ def image_check(path, expected):
 
 def read_flash(target, start, size):
     result = bytearray()
-    for offset in range(0, size, 4096):
-        result.extend(target.read_memory_block8(start + offset, min(4096, size - offset)))
+    # 复用0.3.12已验证的小块读取，避免ST-Link大块USB传输失败；不跳过任何字节。
+    for offset in range(0, size, 256):
+        result.extend(target.read_memory_block8(start + offset, min(256, size - offset)))
     return bytes(result)
 
 

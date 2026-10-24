@@ -1,3 +1,4 @@
+import { initDevice } from './workbench-device.js';
 // 机构页面只编辑草稿并调用统一核心，不打开设备、不产生真实PWM。
 import {initAcceptance} from './workbench-acceptance.js';
 const $ = id => document.getElementById(id);
@@ -10,7 +11,10 @@ let activeBefore = '', enabled = false;
 let preparationKey = '';
 let prepared = null;
 const modes = {IDLE:'待命',RUNNING:'执行中',COMPLETE:'模型完成',STOPPED:'已停止',FAILED:'模型故障',CANCELLED:'已取消'};
-const statusNames = {ACCEPTED:'已接受', RUNNING:'运行中', COMPLETE:'模型完成', CANCELLED:'取消', FAILED:'失败'};
+const statusNames = {ACCEPTED:'已接受', RUNNING:'运行中', WAIT_STEP:'等待本步确认', WAIT_MODEL_CONFIRM:'等待模型确认', COMPLETE:'模型完成', CANCELLED:'取消', FAILED:'失败'};
+const phaseNames = {READY:'已冻结姿态版本',WAIT_STEP:'等待本步确认',AXIS_MODEL_MOVING:'轴模型运动',
+    AXIS_MODEL_SETTLING:'轴模型停稳',SERVO_MODEL_SLEWING:'舵机命令缓动',SERVO_COMMAND_SETTLING:'舵机命令等待',
+    COMMAND_DONE:'命令完成，尚无姿态确认',MODEL_CONFIRMED:'仅模型确认'};
 const fmt = (axis, value) => value == null ? '未知' : axes.includes(axis) ? `${(value * 1000).toFixed(2)} mm` : `${degrees(value).toFixed(1)}°`;
 const targets = () => Object.fromEntries(all.map(axis => [axis, numeric(`teach-${axis}`) * (axes.includes(axis) ? .001 : Math.PI / 180)]));
 
@@ -116,14 +120,21 @@ export function initMechanism(options) {
         <div class="button-row"><button id="pose-preview">预览逐步过渡</button><button id="pose-save">保存新版本</button></div>
         <ol id="mech-preview" class="mech-preview"></ol>
         <div class="plan-inputs"><label>已保存版本<select id="pose-version"><option value="">暂无示教版本</option></select></label><button id="pose-load">读取到草稿</button><button id="pose-run" class="primary">执行选中版本</button></div>
+        <div class="button-row"><label><input type="checkbox" id="pose-single-step">每一步执行前确认（仅离线）</label><button id="pose-next" disabled>确认执行当前步</button></div>
+        <p id="pose-stage" class="hint">舵机命令完成与实际姿态确认分开；当前仅提供模型证据。</p>
         <p class="hint">保存只记录相对基准的SI目标与校验，不记录有效零点或真实成功。读取不运动。执行需草稿与选中版本一致、当前零点有效；每一步独立停稳。历史版本保留，重启不自动建零或续跑。</p>
        </article>
        <article class="card mech-wide"><div class="card-head"><h2>动作与互锁记录</h2><span id="mech-step" class="badge muted">无动作</span></div><p id="mech-active"></p><div id="mech-results" class="mech-results"></div>
         <p class="hint">本轮只验证软件状态机。碰撞互锁阈值为保守代理，未建立实物包络。机构动作不会增加真实抓放计数。</p>
        </article>
       </div>`;
+    initDevice($('mechanism-root'));
     $('mech-claim').onclick = () => $('claim').click();
     $('mech-stop').onclick = () => { cancelMechHeld(); invoke('stop'); };
+    $('pose-next').onclick = () => {
+        if (!state?.active) return;
+        invoke('next',{action_id:state.active.id,step_index:state.active.step,revision:state.active.pose_revision});
+    };
     $('mech-zero').onclick = () => invoke('zero',{confirmed:$('mech-confirm').checked});
     $('mech-anchor').onclick = () => invoke('anchor',{confirmed:$('mech-confirm').checked});
     $('mech-invalidate').onclick = () => invoke('invalidate');
@@ -193,7 +204,8 @@ export function initMechanism(options) {
             if (!pose || !sameTargets(targets(),pose.targets) || $('pose-id').value !== pose.id) throw new Error('请先读取选中版本；草稿改动需保存后再执行');
             const release = $('mech-release').checked;
             $('mech-release').checked = false;
-            invoke('pose',{pose_id:pose.id,revision:pose.revision,release_confirmed:release});
+            invoke('pose',{pose_id:pose.id,revision:pose.revision,release_confirmed:release,
+                ...(state.execution_schema>=2?{single_step:$('pose-single-step').checked}:{})});
         } catch (error) { api.notify(error.message,true); }
     };
     setInterval(pulse,100);
@@ -229,8 +241,9 @@ export function renderMechanism(snapshot, canControl) {
         const rows = [...preparation.axes.map(a => `${a.name}：CAN ID${a.address}，${a.direction}，初始限程${a.max_mm}mm`),
             ...preparation.servos.map(s => `${s.name}：${s.pin} / TIM1_CH${s.channel}`),
             `人工基准：${preparation.baseline}`, `接线：${preparation.wiring_confirmed?'用户已确认，待本次只读反馈核对':'待确认'}`];
-        if (preparation.axis_executor) rows.push('单轴执行器：离线反馈闭环已验证，未绑定实车',
+        if (preparation.axis_executor) rows.push('单轴执行器：正式固件已接入，实车反馈与动作仍待本次验收',
             `到位证据：${preparation.axis_executor.completion}`);
+        if (preparation.servo_executor) rows.push('舵机/姿态执行器：正式固件已接入；命令完成与姿态确认分开，实际动作待验收');
         $('mech-mapping').replaceChildren(...rows.map(value => {const item=document.createElement('p');item.textContent=value;return item;}));
         const pendingItems=['板端状态见上方带时间的只读验收记录；每次接入都需重新核对',...preparation.pending.slice(1)];
         $('mech-pending').replaceChildren(...pendingItems.map(value => {const item=document.createElement('li');item.textContent=value;return item;}));
@@ -245,6 +258,10 @@ export function renderMechanism(snapshot, canControl) {
     $('mech-claim').hidden = enabled;
     $('mech-claim').disabled = !snapshot.available || (!!snapshot.owner.client && !enabled);
     $('mech-stop').disabled = !enabled;
+    $('pose-single-step').disabled = state.busy || !(state.execution_schema>=2);
+    $('pose-next').disabled = !enabled || !stopped || !state.active?.waiting_step || !!state.fault;
+    $('pose-stage').textContent = state.active ? `${phaseNames[state.active.phase] || '模型动作执行中'} · ${state.active.pose_revision?`姿态v${state.active.pose_revision} · `:''}仅模拟证据，实际舵机角度未知` :
+        state.execution_schema>=2?'命令完成→模型确认分开显示；逐步模式每次只放行一步，实际角度始终未知。':'当前核心仍为旧模型；新增逐步模式待离线核心更新，原控制可继续模拟。';
     for (const id of ['mech-zero','mech-anchor','mech-reset']) $(id).disabled = !ready;
     $('mech-invalidate').disabled = !enabled;
     for (const id of ['axis-move','servo-move','pose-preview','pose-save','pose-run']) $(id).disabled = !ready || !state.zero_valid || !!state.fault;

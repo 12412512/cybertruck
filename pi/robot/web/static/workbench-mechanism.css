@@ -27,3 +27,9 @@
 #mech-pending { line-height:1.9; color:#657c86; }
 .mech-presets { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0; }
 .mech-presets button { font-size:12px; padding:8px 10px; }
+
+/* 实车通道与模型卡片明确区分；只读状态不授予动作权限。 */
+.physical-channel { border-top: 3px solid #d18b20; }
+.physical-channel pre { white-space: pre-wrap; line-height: 1.7; }
+#mechanism-root .physical-channel { border-top: 3px solid #d18b20; }
+#mechanism-root .physical-channel input[type='checkbox'] { width: 18px; height: 18px; min-height: 18px; margin: 0 6px 0 0; vertical-align: middle; }

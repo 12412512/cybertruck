@@ -346,7 +346,7 @@ function render(state) {
     $('connection').className = `badge ${state.available ? 'good' : 'muted'}`;
     if (!state.available) { invalidate(); return; }
     if ($('notice').textContent.trim().startsWith('正在连接离线核心')) {
-        notify('离线核心已连接。先获取控制权；所有操作仅作用于模型，不连接实车。');
+        notify('离线核心已连接；原控制区只作用于模型。实车状态与命令见独立实车区。');
     }
     if (token && state.owner.client !== client && performance.now() - tokenSince > 300) { token = ''; clearHeld(); }
     const sim = state.simulation;
