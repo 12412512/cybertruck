@@ -37,10 +37,11 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
     if route is not None:
         from .nav.route import validate
         validate(route)
-    batch_route = route is not None and route['id'] == 'start1_two_batch_v1'
-    tour_route = route is not None and route['id'] in ('start1_tour_v1', 'start1_two_batch_v1')
-    raw_route = route is not None and route['id'] in ('start1_qr_raw_v1', 'start1_tour_v1', 'start1_two_batch_v1')
-    if (raw_route and profile.get('version') != (5 if batch_route else 4 if tour_route else 3)) or (not raw_route and profile.get('version') in (3, 4, 5)):
+    start2_route = route is not None and route['id'] == 'start2_workbench_v1'
+    batch_route = start2_route or (route is not None and route['id'] == 'start1_two_batch_v1')
+    tour_route = start2_route or (route is not None and route['id'] in ('start1_tour_v1', 'start1_two_batch_v1'))
+    raw_route = start2_route or (route is not None and route['id'] in ('start1_qr_raw_v1', 'start1_tour_v1', 'start1_two_batch_v1'))
+    if (raw_route and profile.get('version') != (7 if start2_route else 5 if batch_route else 4 if tour_route else 3)) or (not raw_route and profile.get('version') in (3, 4, 5, 7)):
         raise ValueError('高速配置只允许对应版本的冻结路线')
     if raw_route and profile.get('max_rpm') != 100:
         raise ValueError('冻结路线必须使用100RPM配置')
@@ -104,6 +105,7 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                 anchor_policy='每段实际起点；蓝线为名义累计参考',
                 reason='段间完成停车稳定屏障；尚非跨段非零速度衔接',
                 map_registered=False, physical_precision_verified=False)
+            state['route_execution']['planned_map_origin'] = route.get('map_origin')
         if force or now - written_at >= .1:
             save_snapshot(Path(runtime) / 'state.json', state)
             record('state', execution=state.get('execution'), odom_fault_record=state.get('odom_fault_record'), stage=stage,
@@ -136,9 +138,11 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                 if box[0] <= 0 or box[1] <= 0 or box[2] >= 2.4 or box[3] >= 2.4:
                     raise ValueError('估计车体包络接近场界，停止；不将里程计当成独立定位证明')
             if stage == 'connect' and link.bound and state and (state['mode'] != 0 or state['stop_confirmed']):
+                if (wait_start and link.firmware not in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18')) or (start2_route and link.firmware != 'GC-BASE-0.3.18'):
+                    raise ValueError('选定入口要求PC0协议，固件不匹配，禁止自动启动')
                 # 新候选仅在显式离线模式回归既有轨迹；实车版本入口仍待烧录/只读验收。
-                offline_candidate = simulation and link.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17')
-                keyed_firmware = link.firmware == 'GC-BASE-0.3.17'
+                offline_candidate = simulation and link.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18')
+                keyed_firmware = link.firmware in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18')
                 if ((not offline_candidate and not keyed_firmware and (link.firmware not in ('GC-BASE-0.3.6', 'GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11')
                         or (raw_route and link.firmware not in ('GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11'))
                         or (case == 'north' and link.firmware not in ('GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11'))
@@ -161,8 +165,8 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                     north_origin = Pose(state['x_m'], state['y_m'], state['yaw_rad'])
                     record('map_binding', map_pose=[.15, 2.25, 0], odom=north_origin.values(),
                            boot_id=link.boot, session_id=link.session, source='本次人工摆放记录')
-                if wait_start or (not simulation and link.firmware == 'GC-BASE-0.3.17'):
-                    if link.firmware != 'GC-BASE-0.3.17':
+                if wait_start or (not simulation and link.firmware in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18')):
+                    if link.firmware not in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18'):
                         raise ValueError('当前固件未实现PC0启动协议')
                     link.submit(START_PREPARE, struct.pack('<II', start_ticket, profile['version']))
                     record('intent', operation='prepare_physical_key', ticket=start_ticket)
@@ -296,15 +300,16 @@ def observe(transport, runtime, seconds, clock=time.monotonic, sleep=time.sleep)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='默认仅准备；显式执行单段或冻结短组合')
+    parser = argparse.ArgumentParser(description='默认仅预览；显式执行单段或已验证的冻结路线')
     parser.add_argument('--case', choices=('straight', 'side', 'turn', 'turn90', 'diagonal', 'arc', 'pose', 'north',
                                           'cal_slow', 'cal_medium', 'cal_fast'), default='straight')
-    parser.add_argument('--route', type=Path, help='仅接受已冻结的短组合路线；不接受场地整图')
+    parser.add_argument('--route', type=Path, help='仅接受白名单冻结路线，含两批9段；不接受网页动态规划')
     parser.add_argument('--profile', type=Path, default=Path('config/base_trials.json'))
     parser.add_argument('--runtime', type=Path, default=Path('output/base-trials'))
     parser.add_argument('--owner-url', default='http://172.20.10.4:8080')
     parser.add_argument('--port', help='旧所有者已释放后，明确指定唯一串口')
     parser.add_argument('--execute', action='store_true')
+    parser.add_argument('--wait-key', action='store_true', help='明确要求PC0单次启动；固件不支持则拒绝，不降级自动执行')
     parser.add_argument('--observe', action='store_true', help='新固件只读查询，不配置或使能')
     parser.add_argument('--seconds', type=float, default=30)
     parser.add_argument('--accept-candidate', action='store_true', help='仅试验：接受尚未实测的声明参数')
@@ -320,11 +325,14 @@ def main():
             parser.error('只读观察不能选择执行路线')
     if args.execute and args.observe:
         parser.error('只读与执行不能同时选择')
+    if args.observe and args.wait_key:
+        parser.error('只读观察不能准备PC0启动')
     if not 1 <= args.seconds <= 3600:
         parser.error('只读窗口须为1～3600秒')
     if not args.execute and not args.observe:
         preparation = trials()
-        preparation.update(selected_case='short_route' if route else args.case, route=route, profile=profile, command_sent=False)
+        preparation.update(selected_case='short_route' if route else args.case, route=route, profile=profile,
+                           command_sent=False, physical_key_required=args.wait_key)
         print(json.dumps(preparation, ensure_ascii=False, indent=2))
         return
     if not args.port or (args.execute and (not args.accept_candidate or not args.site_ready)):
@@ -355,7 +363,8 @@ def main():
                 if args.observe:
                     observe(transport, args.runtime, args.seconds)
                 else:
-                    result = run_trial(transport, profile, args.case, args.runtime, record, route=route)
+                    result = run_trial(transport, profile, args.case, args.runtime, record, route=route,
+                                       wait_start=args.wait_key)
                     record('result', **result)
                     print(json.dumps(result, ensure_ascii=False))
             except BaseException as exc:

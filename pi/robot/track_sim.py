@@ -65,7 +65,10 @@ def goal(kind='diagonal', action=1):
 
 
 class Plant:
-    def __init__(self, stalled=False, ideal=False):
+    def __init__(self, stalled=False, ideal=False, radius_m=.05, k_m=.22):
+        if not math.isfinite(radius_m) or not math.isfinite(k_m) or radius_m <= 0 or k_m <= 0:
+            raise ValueError('模型轮径和轮距几何必须为正')
+        self.radius_m, self.k_m = radius_m, k_m
         self.targets = [0.] * 4
         self.rpm = [0.] * 4
         self.turns = [0.] * 4
@@ -91,10 +94,10 @@ class Plant:
             self.rpm[index] += (requested - self.rpm[index]) * (1 - math.exp(-dt / self.tau[index]))
             self.turns[index] += self.rpm[index] * dt / 60
         # 独立刚体公式；不调用跟踪器或用参考位置修正车体真值。
-        travel = [value * (2 * math.pi * .05 / 60) for value in self.rpm]
+        travel = [value * (2 * math.pi * self.radius_m / 60) for value in self.rpm]
         vx = sum(travel) / 4
         vy = (-travel[0] + travel[1] + travel[2] - travel[3]) / 4
-        self.wz = (-travel[0] + travel[1] - travel[2] + travel[3]) / (4 * .22)
+        self.wz = (-travel[0] + travel[1] - travel[2] + travel[3]) / (4 * self.k_m)
         mid = self.yaw + self.wz * dt / 2
         self.x += (math.cos(mid) * vx - math.sin(mid) * vy) * dt
         self.y += (math.sin(mid) * vx + math.cos(mid) * vy) * dt

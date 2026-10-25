@@ -4,6 +4,7 @@
 #include "tour_route.h"
 #include "batch_route.h"
 #include "calibration_route.h"
+#include "start2_route.h"
 #include <math.h>
 #include <string.h>
 
@@ -64,7 +65,7 @@ int Exec_Config(Exec *exec, const ExecConfig *config, uint32_t now_ms)
     }
     if (!config || exec->mode != EXEC_DISABLED || !config->version || !isfinite(config->max_rpm) ||
         config->max_rpm < 1 || (config->version == 6 ? config->max_rpm != 150 :
-        (config->version == 3 || config->version == 4 || config->version == 5) ? config->max_rpm != 100 : config->max_rpm > 10) ||
+        (config->version == 3 || config->version == 4 || config->version == 5 || config->version == 7) ? config->max_rpm != 100 : config->max_rpm > 10) ||
         floor(config->max_rpm) != config->max_rpm ||
         !isfinite(config->gyro_scale_rad_s) || config->gyro_scale_rad_s <= 0 ||
         config->gyro_scale_rad_s > 0.01f)
@@ -109,7 +110,7 @@ int Exec_Config(Exec *exec, const ExecConfig *config, uint32_t now_ms)
     track.imu_epoch = odom.imu_epoch;
     track.imu_source_epoch = odom.imu_source_epoch;
     track.calibration = config->version;
-    if (config->version == 3 || config->version == 4 || config->version == 5 || config->version == 6)
+    if (config->version == 3 || config->version == 4 || config->version == 5 || config->version == 7 || config->version == 6)
     {
         /* 与离线闭环同一档；高轮速仅供下文冻结的两段目标使用。 */
         odom.max_rpm = config->version == 6 ? 180 : 120;
@@ -294,17 +295,17 @@ static unsigned TourIndex(const RefSpec *ref)
     return 0;
 }
 
-static unsigned BatchIndex(const RefSpec *ref, uint32_t action)
+static unsigned SavedIndex(const RefSpec *ref, uint32_t action, const unsigned char refs[][88], unsigned count)
 {
     unsigned index;
     RefSpec nominal, candidate;
-    if (action == 0 || action > BATCH_COUNT)
+    if (action == 0 || action > count)
     {
         return 0;
     }
     for (index = action - 1; index < action; index++)
     {
-        memcpy(&nominal, BatchRefs[index], sizeof(nominal));
+        memcpy(&nominal, refs[index], sizeof(nominal));
         candidate = *ref;
         /* 仅坐标边界的小幅修正；速度、曲率和其余字段逐字节冻结。 */
         if (!isfinite(ref->x_m) || !isfinite(ref->y_m) || !isfinite(ref->yaw_rad) ||
@@ -338,7 +339,9 @@ static unsigned BatchIndex(const RefSpec *ref, uint32_t action)
 
 static unsigned FrozenIndex(const RefSpec *ref, uint32_t version, uint32_t action)
 {
-    return version == 5 ? BatchIndex(ref, action) : version == 4 ? TourIndex(ref) : version == 3 ? RawIndex(ref) : 0;
+    return version == 7 ? SavedIndex(ref, action, Start2Refs, START2_COUNT) :
+        version == 5 ? SavedIndex(ref, action, BatchRefs, BATCH_COUNT) :
+        version == 4 ? TourIndex(ref) : version == 3 ? RawIndex(ref) : 0;
 }
 
 static int CalibrationMatch(const RefSpec *ref)
@@ -355,7 +358,8 @@ static int GoalValid(const TrackGoal *goal)
     const RefSpec *ref = &goal->reference;
     if (CalibrationMatch(ref))
         return goal->id == 1 && goal->timeout_ms == 10000;
-    if (RawIndex(ref) || TourIndex(ref) || BatchIndex(ref, goal->id))
+    if (RawIndex(ref) || TourIndex(ref) || SavedIndex(ref, goal->id, BatchRefs, BATCH_COUNT) ||
+        SavedIndex(ref, goal->id, Start2Refs, START2_COUNT))
     {
         return goal->id != 0 && goal->timeout_ms == 30000;
     }
@@ -425,8 +429,8 @@ int Exec_Goal(Exec *exec, const TrackGoal *goal, uint32_t now_ms)
     if ((exec->config.version == 6 && !CalibrationMatch(&goal->reference)) ||
         (exec->config.version != 6 && CalibrationMatch(&goal->reference)))
         return -1;
-    if (((exec->config.version == 3 || exec->config.version == 4 || exec->config.version == 5) && FrozenIndex(&goal->reference, exec->config.version, goal->id) == 0) ||
-        ((exec->config.version != 3 && exec->config.version != 4 && exec->config.version != 5) && (RawIndex(&goal->reference) || TourIndex(&goal->reference) || BatchIndex(&goal->reference, goal->id))) ||
+    if (((exec->config.version == 3 || exec->config.version == 4 || exec->config.version == 5 || exec->config.version == 7) && FrozenIndex(&goal->reference, exec->config.version, goal->id) == 0) ||
+        ((exec->config.version != 3 && exec->config.version != 4 && exec->config.version != 5 && exec->config.version != 7) && (RawIndex(&goal->reference) || TourIndex(&goal->reference) || SavedIndex(&goal->reference, goal->id, BatchRefs, BATCH_COUNT) || SavedIndex(&goal->reference, goal->id, Start2Refs, START2_COUNT))) ||
         (goal->reference.kind == 1 && goal->reference.x_m == 1.05f && exec->config.max_rpm > 6))
     {
         return -1;
@@ -435,7 +439,7 @@ int Exec_Goal(Exec *exec, const TrackGoal *goal, uint32_t now_ms)
     {
         return memcmp(goal, &exec->last_goal, sizeof(*goal)) == 0 ? 0 : -2;
     }
-    if ((exec->config.version == 3 || exec->config.version == 4 || exec->config.version == 5) &&
+    if ((exec->config.version == 3 || exec->config.version == 4 || exec->config.version == 5 || exec->config.version == 7) &&
         (goal->id != FrozenIndex(&goal->reference, exec->config.version, goal->id) ||
          (goal->id == 1 && exec->have_goal) ||
          (goal->id > 1 && (!exec->have_goal || exec->last_goal.id != goal->id - 1 ||

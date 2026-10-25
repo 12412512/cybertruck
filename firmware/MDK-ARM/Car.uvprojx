@@ -804,6 +804,11 @@
               <FilePath>../User/Config/raw_route.h</FilePath>
             </File>
             <File>
+              <FileName>start2_route.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Config/start2_route.h</FilePath>
+            </File>
+            <File>
               <FileName>tour_route.h</FileName>
               <FileType>5</FileType>
               <FilePath>../User/Config/tour_route.h</FilePath>

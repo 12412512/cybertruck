@@ -27,7 +27,7 @@ USER_FILES.update(FW / 'User' / name for name in (
     'Control/exec.c', 'Control/exec.h', 'Comm/execute.c', 'Comm/execute.h', 'Board/base_port.c', 'Board/base_port.h',
     'Device/can_tx.c', 'Device/can_tx.h', 'Device/can_internal.h',
     'Device/bus.c', 'Device/bus.h', 'Device/bus_internal.h', 'Device/bus_board.h',
-    'Device/drive.c', 'Device/drive.h', 'Config/bus_config.h', 'Config/addresses.h', 'Config/raw_route.h', 'Config/tour_route.h', 'Config/batch_route.h', 'Config/calibration_route.h'))
+    'Device/drive.c', 'Device/drive.h', 'Config/bus_config.h', 'Config/addresses.h', 'Config/raw_route.h', 'Config/tour_route.h', 'Config/batch_route.h', 'Config/calibration_route.h', 'Config/start2_route.h'))
 
 
 def check(ok, message):

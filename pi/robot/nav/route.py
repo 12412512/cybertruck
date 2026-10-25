@@ -62,6 +62,16 @@ def short_route(library):
 
 def validate(plan):
     """先于打开串口校验；整场规划只能预览，不能借改标签绕过白名单。"""
+    if plan.get('id') == 'start2_workbench_v1':
+        if (plan.get('sha256') != 'f565c61af4576b3473fde21d95a542398ac18519d4b3e3d51c093d6c298c862b'
+                or digest(plan) != plan['sha256']
+                or plan.get('cases') != [f'start2_{i+1}' for i in range(10)]
+                or plan.get('map_origin') != [2.25, 2.25, math.pi]):
+            raise ValueError('不是本次保存的启停区2冻结路线')
+        encoded = b''.join(bytes.fromhex(value) for value in plan['goals'])
+        if hashlib.sha256(encoded).hexdigest() != '2029dea003aa80ae5091301106dcd1373beb227583de3ec644096db140432fa2':
+            raise ValueError('启停区2目标摘要不一致')
+        return
     if plan.get('id') in ('start1_qr_raw_v1', 'start1_tour_v1', 'start1_two_batch_v1'):
         batch = plan['id'] == 'start1_two_batch_v1'
         tour = plan['id'] in ('start1_tour_v1', 'start1_two_batch_v1')

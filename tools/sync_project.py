@@ -18,6 +18,18 @@ def put(parent, path, value):
 
 
 def sync():
+    # 工作台启停区2只接受本轮已校验冻结包；不直接编译任意网页草稿。
+    sys.path.insert(0, str(ROOT / 'pi'))
+    from robot.nav.route import validate
+    route = json.loads((ROOT/'config/start2_route.json').read_text(encoding='utf-8'))
+    validate(route)
+    refs = [bytes.fromhex(raw)[8:] for raw in route['goals']]
+    rows = ['    {' + ','.join(str(value) for value in raw) + '}' for raw in refs]
+    header = ('/* 由启停区2冻结路线生成；不接受任意网页轨迹。 */\n'
+              '#ifndef START2_ROUTE_H\n#define START2_ROUTE_H\n'
+              '#define START2_COUNT ' + str(len(refs)) + '\n'
+              'static const unsigned char Start2Refs[START2_COUNT][88] = {\n' + ',\n'.join(rows) + '\n};\n#endif\n')
+    (ROOT/'firmware/User/Config/start2_route.h').write_text(header, encoding='utf-8')
     # 一米标定冻结目标与Python正式协议同源，不手工维护第二份速度常量。
     sys.path.insert(0, str(ROOT / 'pi'))
     from robot.device.execution import trial

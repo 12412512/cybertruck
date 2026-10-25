@@ -27,7 +27,7 @@ def config_payload(profile):
     if any(type(v) not in (int, float) or not math.isfinite(v) or not 0 < v <= .5 for v in geometry):
         raise ValueError('试验几何无效')
     counts, maximum = profile['counts_per_rev'], profile['max_rpm']
-    allowed = maximum == 150 if profile['version'] == 6 else maximum == 100 if profile['version'] in (3, 4, 5) else 1 <= maximum <= 10
+    allowed = maximum == 150 if profile['version'] == 6 else maximum == 100 if profile['version'] in (3, 4, 5, 7) else 1 <= maximum <= 10
     if counts != 65536 or type(maximum) is not int or not allowed:
         raise ValueError('反馈单位或试验轮速不符合本阶段范围')
     addresses = profile['addresses']
@@ -157,7 +157,7 @@ class MotionLink(Link):
         if now - self.last_execution >= .05:
             self.last_execution = now
             return STATUS, b''
-        if self.firmware in ('GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11', 'GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17') and now - self.last_fault_query >= .2:
+        if self.firmware in ('GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11', 'GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18') and now - self.last_fault_query >= .2:
             self.last_fault_query = now
             return 37, b''
         if now - self.last_sample >= .05:
@@ -165,7 +165,7 @@ class MotionLink(Link):
             self.sample_kind = 5 if self.sample_kind == 4 else 4
             return FEEDBACK, bytes([self.sample_kind, 0])
         # 仅新版本且执行器静止模式才读冻结页，不挤占运动期反馈；不扩大实车运动版本白名单。
-        if (self.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17') and self.execution
+        if (self.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18') and self.execution
                 and self.execution['mode'] in (0, 1, 6) and self.execution['can_errors']
                 and not self.can_capture.result and not self.can_capture_error
                 and now - self.last_can_capture >= .05):

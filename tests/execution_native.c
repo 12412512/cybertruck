@@ -1,11 +1,14 @@
 /* 复用正式执行器与GC入口，只有设备IO和物理传输由夹具代替。 */
 #include "execute.h"
 #include "comm.h"
+#include "start.h"
 #include <math.h>
 #include <string.h>
 
 #define API __declspec(dllexport)
 static Exec executor;
+static Start key_gate;
+static ExecGate key_failure;
 
 API int Device_StartReady(uint32_t now_ms)
 {
@@ -30,7 +33,7 @@ static uint32_t imu_epoch;
 static int Ready(uint32_t tick, int enable, uint32_t since)
 { (void)tick; (void)enable; (void)since; return 1; }
 static int Enable(unsigned wheel) { (void)wheel; enabled++; return 1; }
-static int Start(void) { starts++; return 1; }
+static int StartBus(void) { starts++; return 1; }
 static int Send(const int16_t rpm[4], uint32_t id, uint32_t zero)
 {
     memcpy(target, rpm, sizeof(target)); sends++;
@@ -50,14 +53,46 @@ static uint8_t Command(uint8_t type,const uint8_t *data,uint16_t size,
 
 API void Device_Init(void)
 {
-    ExecIo io={Ready,Enable,Start,Send,Stop,Fault,Stopped,Rearm};
+    ExecIo io={Ready,Enable,StartBus,Send,Stop,Fault,Stopped,Rearm};
     CommHooks hooks={StopCommand,Command};
     now=sequence=error=starts=stops=sends=enabled=drop=0;
     pending_id=pending_zero=pending_tick=0; allow_ack=1;
     imu_epoch=1;
     memset(target,0,sizeof(target));
     Exec_Init(&executor,io); executor.stop_confirmed=1;
+    Start_Init(&key_gate);
+    memset(&key_failure,0,sizeof(key_failure));
     Comm_Init(123,0); Comm_Bind(hooks);
+}
+
+/* 只在主机夹具接入正式Start与Exec；GPIO和应答传输仍为合成输入。 */
+API int Device_KeyPrepare(uint32_t ticket, uint32_t version)
+{
+    return version == executor.config.version && Start_Prepare(&key_gate, Comm_Boot(), Comm_Session(),
+        ticket, version, now, 0, (uint8_t)Exec_Ready(&executor, now));
+}
+
+API void Device_KeyTick(uint32_t tick, uint8_t pressed)
+{
+    uint32_t previous = key_gate.phase;
+    uint8_t ready = (uint8_t)Exec_Ready(&executor, tick);
+    Start_Run(&key_gate, Comm_Boot(), Comm_Session(), tick, pressed, ready);
+    if (previous >= START_RELEASE && previous <= START_BEEP && key_gate.phase == START_ABORTED)
+        key_failure = executor.gate;
+}
+
+API void Device_KeyRead(uint32_t values[21])
+{
+    memset(values, 0, 21 * sizeof(uint32_t));
+    values[0] = 2;
+    values[1] = key_gate.phase;
+    values[2] = key_gate.ticket;
+    values[3] = key_gate.version;
+    values[4] = key_gate.phase == START_FIRED;
+    values[5] = key_gate.beep;
+    values[6] = key_gate.reason;
+    values[7] = key_gate.aborted_ms;
+    memcpy(values + 8, &key_failure, sizeof(key_failure));
 }
 API void Device_Tick(uint32_t tick,const int64_t *counts,const int16_t *rpm,int16_t yaw,int16_t gyro)
 {

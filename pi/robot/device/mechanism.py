@@ -172,7 +172,7 @@ class MechanismLink(Link):
         return True
 
     def submit(self, request_id, action, args, now):
-        if (self.latched or not self.bound or self.firmware not in ('GC-BASE-0.3.14', 'GC-BASE-0.3.15', 'GC-BASE-0.3.17')
+        if (self.latched or not self.bound or self.firmware not in ('GC-BASE-0.3.14', 'GC-BASE-0.3.15', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18')
                 or now - self.actual_at >= .25 or now - self.base_at >= .25):
             raise ValueError('实车固件/会话/反馈未就绪')
         if self.commands or self.operation or (self.pending and self.pending[0].kind in range(48, 58)):

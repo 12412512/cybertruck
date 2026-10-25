@@ -4,6 +4,7 @@ import ctypes as c
 import json
 import math
 import os
+import struct
 from pathlib import Path
 import subprocess
 import sys
@@ -17,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'pi'))
 from robot.device import protocol as p
 from robot.device.execution import MotionLink, CONFIG, ARM, GOAL, STATUS, STATUS_DATA, config_payload, trial
+from robot.device.execution import START_PREPARE, START_STATE
 from robot.drive_core import run_trial, require_owner_stopped, observe
 from robot.track_sim import Plant
 from robot.web.app import create_app
@@ -127,6 +129,54 @@ class SimTransport(Device):
             self.now = tick / 1000
 
 
+class KeyTransport(SimTransport):
+    """复用正式C按键和闭环；仅按键电平、传输和车辆由模型提供。"""
+
+    def __init__(self, library, press_at=2., drop_gyro_at=None):
+        super().__init__(library)
+        self.press_at = press_at
+        self.drop_gyro_at = drop_gyro_at
+        self.replies = []
+        self.sweep = None
+        self.lib.Device_KeyPrepare.argtypes = [c.c_uint32, c.c_uint32]
+        self.lib.Device_KeyTick.argtypes = [c.c_uint32, c.c_uint8]
+        self.lib.Device_KeyRead.argtypes = [c.POINTER(c.c_uint32)]
+
+    def key_state(self):
+        values = (c.c_uint32 * 21)()
+        self.lib.Device_KeyRead(values)
+        return list(values)
+
+    def write(self, wire):
+        packet = p.Decoder().feed(wire)[0]
+        if packet.kind in (START_PREPARE, START_STATE):
+            self.requests.append(packet)
+            accepted = True
+            if packet.kind == START_PREPARE:
+                ticket, version = struct.unpack('<II', packet.payload)
+                accepted = bool(self.lib.Device_KeyPrepare(ticket, version))
+            data = bytes([p.OK if accepted else p.READONLY]) + struct.pack('<21I', *self.key_state())
+            self.replies.append(p.Packet(packet.kind | 0x80, packet.boot, packet.session,
+                                         packet.request, 0, data).encode())
+            return len(wire)
+        if packet.kind in (ARM, GOAL):
+            assert self.key_state()[4] and not self.key_state()[5], '按键短鸣结束前禁止使能或目标'
+        return super().write(wire)
+
+    def read(self, size=4096):
+        return self.replies.pop(0) if self.replies else super().read(size)
+
+    def sleep(self, seconds):
+        super().sleep(seconds)
+        if self.sweep:
+            self.sweep(self.plant)
+        if self.drop_gyro_at is not None and self.now >= self.drop_gyro_at:
+            self.lib.Device_Drop(8)
+        # 按住电平可跨越路线时长；正式Start只能消费一次事件。
+        pressed = self.press_at is not None and self.now >= self.press_at
+        self.lib.Device_KeyTick(self.plant.ms, int(pressed))
+
+
 class ExecutionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -137,7 +187,7 @@ class ExecutionTests(unittest.TestCase):
         # 同进程聚合运行时可能再次构建；Windows不能覆盖已被ctypes加载的DLL。
         library = output / f'execution-{os.getpid()}-{time.time_ns()}.dll'
         compile_c(library, [*(control / name for name in ('exec.c', 'track.c', 'ref.c', 'odom.c',
-                    'kin.c', 'yaw.c', 'curve.c', 'line.c', 'path.c')),
+                    'kin.c', 'yaw.c', 'curve.c', 'line.c', 'path.c', 'start.c')),
                     ROOT / 'firmware/User/Device/stamp.c', comm / 'frame.c', comm / 'comm.c',
                     comm / 'execute.c', comm / 'feedback.c', ROOT / 'tests/execution_native.c'], extra=['-shared'])
         cls.lib = c.CDLL(str(library))
@@ -458,6 +508,190 @@ class ExecutionTests(unittest.TestCase):
         (ROOT/'output/two-batch/execution.json').write_text(json.dumps(dict(result=result,
             records=records,elapsed_s=transport.now,truth=[transport.plant.x,transport.plant.y,transport.plant.yaw],
             domain='simulation'),indent=2),encoding='utf-8')
+
+    def test_pc0_two_batch_route_keeps_one_session_and_nine_handoffs(self):
+        plan = json.loads((ROOT/'config/batch_route.json').read_text(encoding='utf-8'))
+        value = profile()
+        value.update(version=5, max_rpm=100)
+        transport = KeyTransport(self.lib, press_at=50.)
+        records = []
+        with tempfile.TemporaryDirectory() as directory:
+            result = run_trial(transport, value, 'straight', directory,
+                lambda kind, **v: records.append(dict(kind=kind, **v)), clock=lambda: transport.now,
+                sleep=transport.sleep, route=plan, simulation=True, wait_start=True)
+        self.assertTrue(result['controller_complete'])
+        self.assertEqual(len(result['completed_segments']), 9)
+        goals = [v for v in transport.requests if v.kind == GOAL]
+        self.assertEqual([int.from_bytes(v.payload[:4], 'little') for v in goals], list(range(1, 10)))
+        self.assertEqual(len({(v.boot, v.session) for v in goals}), 1)
+        for kind in (CONFIG, ARM, START_PREPARE, p.OPEN):
+            self.assertEqual(sum(v.kind == kind for v in transport.requests), 1)
+        start = next(v for v in records if v['kind'] == 'physical_key_started')
+        self.assertGreaterEqual(start['event']['phase'], 4)
+        self.assertEqual(start['event']['reason'], 0)
+        self.assertTrue(next(v for v in records if v['kind'] == 'stop_result')['confirmed'])
+        self.assertEqual(self.lib.Device_Value(7), 0)
+        end = plan['boundaries'][-1]
+        self.assertLess(math.hypot(transport.plant.x-end[0], transport.plant.y-end[1]), .01)
+        self.assertLess(abs(transport.plant.yaw-end[2]), .03)
+        output = ROOT/'output/two-batch/pc0-execution.json'
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(dict(domain='simulation', result=result, records=records,
+            physical_validated=False, total_model_s=transport.now, key_wait_model_s=50.,
+            truth=[transport.plant.x, transport.plant.y, transport.plant.yaw]), indent=2), encoding='utf-8')
+
+    def test_pc0_batch_timeout_and_stale_gyro_never_arm(self):
+        plan = json.loads((ROOT/'config/batch_route.json').read_text(encoding='utf-8'))
+        value = profile()
+        value.update(version=5, max_rpm=100)
+        for case, press_at, drop_at, reason in [('timeout', None, None, 3), ('gyro', 2., 1., 1)]:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                transport = KeyTransport(self.lib, press_at=press_at, drop_gyro_at=drop_at)
+                records = []
+                with self.assertRaisesRegex(ValueError, '按键准备'):
+                    run_trial(transport, value, 'straight', directory,
+                        lambda kind, **v: records.append(dict(kind=kind, **v)), clock=lambda: transport.now,
+                        sleep=transport.sleep, route=plan, simulation=True, wait_start=True)
+                event = next(v['event'] for v in records if v['kind'] == 'physical_key_cancelled')
+                self.assertEqual(event['reason'], reason)
+                self.assertFalse(any(v.kind in (ARM, GOAL) for v in transport.requests))
+                self.assertEqual(self.lib.Device_Value(4), 0)
+                self.assertEqual(self.lib.Device_Value(3), 0)
+                if case == 'gyro':
+                    self.assertEqual(event['guard_mask'] & 512, 512)
+
+    def test_explicit_pc0_entry_rejects_legacy_firmware_before_config(self):
+        class LegacyLink(MotionLink):
+            def feed(self, wire, now):
+                super().feed(wire, now)
+                if self.firmware:
+                    self.firmware = 'GC-BASE-0.3.11'
+        plan = json.loads((ROOT/'config/batch_route.json').read_text(encoding='utf-8'))
+        value = profile()
+        value.update(version=5, max_rpm=100)
+        transport = SimTransport(self.lib)
+        with tempfile.TemporaryDirectory() as directory, patch('robot.drive_core.MotionLink', LegacyLink):
+            with self.assertRaisesRegex(ValueError, '要求PC0协议'):
+                run_trial(transport, value, 'straight', directory, lambda *a, **k: None,
+                    clock=lambda: transport.now, sleep=transport.sleep, route=plan,
+                    simulation=True, wait_start=True)
+        self.assertFalse(any(v.kind in (CONFIG, ARM, GOAL) for v in transport.requests))
+
+    def test_pc0_batch_cli_preview_never_opens_transport(self):
+        import contextlib
+        import io
+        from robot.drive_core import main
+        output = io.StringIO()
+        args = ['drive_core', '--route', str(ROOT/'config/batch_route.json'),
+                '--profile', str(ROOT/'config/batch_trials.json'), '--wait-key']
+        with patch('sys.argv', args), patch('robot.drive_core.open_transport') as opened:
+            with contextlib.redirect_stdout(output):
+                main()
+        self.assertFalse(opened.called)
+        preview = json.loads(output.getvalue())
+        self.assertTrue(preview['physical_key_required'])
+        self.assertFalse(preview['command_sent'])
+        self.assertEqual(preview['route']['cases'], [f'batch_{i}' for i in range(1, 10)])
+
+    def test_start2_saved_plan_pc0_closed_loop_and_actual_sweep(self):
+        from robot.nav.field import Field
+        from robot.nav.frames import Pose, compose
+        plan = json.loads((ROOT/'config/start2_route.json').read_text(encoding='utf-8'))
+        value = json.loads((ROOT/'config/start2_trials.json').read_text(encoding='utf-8'))
+        field = Field(data=plan['field'])
+        origin = Pose(*plan['map_origin'])
+        transport = KeyTransport(self.lib)
+        transport.plant = Plant(ideal=True, radius_m=value['wheel_radius_m'],
+                                k_m=value['half_length_m']+value['half_width_m'])
+        transport.sensor_sign = -1
+        transport.sensor_offset_rad = .7
+        checked = [-1]
+        trace = []
+        def sweep(plant):
+            speed = max(abs(rpm) for sample in plant.history for rpm in sample[1]) * 2*math.pi*plant.radius_m/60
+            movement = (math.sqrt(2)*speed+(field.radius+.04)*speed/plant.k_m)*.002
+            for tick, x, y, yaw in plant.positions:
+                if tick <= checked[0]:
+                    continue
+                pose = compose(origin, Pose(x, y, yaw))
+                self.assertEqual(field.errors(pose, 'start_2', movement, tracking=False), [],
+                                 f'实际模型扫掠失败：{tick}, {pose}')
+                checked[0] = tick
+                if tick % 100 == 0:
+                    trace.append(pose.values())
+        transport.sweep = sweep
+        records = []
+        with tempfile.TemporaryDirectory() as directory:
+            result = run_trial(transport, value, 'straight', directory,
+                lambda kind, **v: records.append(dict(kind=kind, **v)), clock=lambda: transport.now,
+                sleep=transport.sleep, route=plan, simulation=True, wait_start=True)
+        self.assertTrue(result['controller_complete'])
+        self.assertEqual(len(result['completed_segments']), 10)
+        goals = [v for v in transport.requests if v.kind == GOAL]
+        self.assertEqual([int.from_bytes(v.payload[:4], 'little') for v in goals], list(range(1, 11)))
+        self.assertEqual(len({(v.boot, v.session) for v in goals}), 1)
+        self.assertEqual(sum(v.kind == CONFIG for v in transport.requests), 1)
+        self.assertEqual(sum(v.kind == ARM for v in transport.requests), 1)
+        self.assertTrue(next(v for v in records if v['kind'] == 'stop_result')['confirmed'])
+        self.assertEqual(self.lib.Device_Value(7), 0)
+        final = compose(origin, Pose(transport.plant.x, transport.plant.y, transport.plant.yaw))
+        self.assertTrue(field.parked(final, 'start_2'))
+        first_move = next(point for point in trace if math.dist(point[:2], origin.values()[:2]) > .005)
+        self.assertLess(first_move[0], origin.x_m)  # 跳过按键等待帧，起步应朝地图-X。
+        (ROOT/'output/start2/exec_with_pc0.json').write_text(json.dumps(dict(domain='simulation',
+            physical_validated=False, result=result, records=records, elapsed_s=transport.now,
+            samples_2ms=checked[0]//2, truth=final.values(), trace=trace), indent=2), encoding='utf-8')
+
+    def test_start2_white_list_rejects_speed_order_and_wrong_version(self):
+        from robot.device.tracking import Spec
+        plan = json.loads((ROOT/'config/start2_route.json').read_text(encoding='utf-8'))
+        value = profile()
+        value.update(version=7, max_rpm=100)
+        self.device.open()
+        self.device.assert_ok(self.device.call(CONFIG, config_payload(value)))
+        for _ in range(8):self.device.step()
+        self.device.assert_ok(self.device.call(ARM))
+        for _ in range(8):self.device.step()
+        self.assertNotEqual(self.device.call(GOAL, bytes.fromhex(plan['goals'][1])).payload[0], p.OK)
+        raw = bytearray.fromhex(plan['goals'][0])
+        spec = Spec.from_buffer_copy(raw[8:])
+        spec.linear.velocity = .31
+        raw[8:] = bytes(spec)
+        self.assertNotEqual(self.device.call(GOAL, bytes(raw)).payload[0], p.OK)
+        self.assertEqual(self.device.call(GOAL, bytes.fromhex(plan['goals'][0])).payload[0], p.OK)
+        self.device = Device(self.lib)
+        self.device.open()
+        value['version'] = 5
+        self.device.assert_ok(self.device.call(CONFIG, config_payload(value)))
+        for _ in range(8):self.device.step()
+        self.device.assert_ok(self.device.call(ARM))
+        for _ in range(8):self.device.step()
+        self.assertNotEqual(self.device.call(GOAL, bytes.fromhex(plan['goals'][0])).payload[0], p.OK)
+
+    def test_start2_map_origin_tampering_is_rejected(self):
+        from robot.nav.route import validate, digest
+        plan = json.loads((ROOT/'config/start2_route.json').read_text(encoding='utf-8'))
+        validate(plan)
+        plan['map_origin'][2] = 0
+        plan['sha256'] = digest(plan)
+        with self.assertRaises(ValueError):
+            validate(plan)
+
+    def test_start2_refuses_0317_before_any_configuration(self):
+        class PreviousLink(MotionLink):
+            def feed(self, wire, now):
+                super().feed(wire, now)
+                if self.firmware:
+                    self.firmware = 'GC-BASE-0.3.17'
+        route = json.loads((ROOT/'config/start2_route.json').read_text(encoding='utf-8'))
+        value = json.loads((ROOT/'config/start2_trials.json').read_text(encoding='utf-8'))
+        transport = SimTransport(self.lib)
+        with tempfile.TemporaryDirectory() as directory, patch('robot.drive_core.MotionLink', PreviousLink):
+            with self.assertRaisesRegex(ValueError, '要求PC0协议'):
+                run_trial(transport, value, 'straight', directory, lambda *a, **k: None,
+                    clock=lambda: transport.now, sleep=transport.sleep, route=route,
+                    simulation=True, wait_start=True)
+        self.assertFalse(any(v.kind in (CONFIG, ARM, GOAL) for v in transport.requests))
 
     def test_batch_repeated_geometry_cannot_skip_first_batch(self):
         plan=json.loads((ROOT/'config/batch_route.json').read_text())
