@@ -60,13 +60,10 @@ def payload(action, args, state, token):
             raise ValueError('继续必须绑定当前实车姿态、版本和步骤')
         return 56, prefix + struct.pack('<IIB', args['action_id'], args['revision'], args['step_index'])
     if action == 'pose':
-        targets = args.get('targets', {})
         if args.get('physical_taught') is not True or not args.get('revision'):
             raise ValueError('只允许显式确认的实车示教版本，禁止直接执行模型示教')
-        values = [integer(targets.get(key), 1e6 if key in ('lift', 'reach') else 180000 / math.pi)
-                  for key in ('lift', 'reach', 'arm', 'tray', 'gripper')]
-        return 55, prefix + struct.pack('<III5iBB', action_id, args['revision'], 120000,
-            *values, args.get('single_step', True) is True, args.get('release_confirmed') is True)
+        return 55, prefix + pose_body(action_id,args['revision'],args.get('targets',{}),
+                                      args.get('single_step',True),args.get('release_confirmed',False))
     raise ValueError('不支持的实车动作；本版不开放连续点动')
 
 
@@ -77,6 +74,15 @@ def integer(value, scale):
     if not -2**31 <= result < 2**31:
         raise ValueError('目标超出整数接口范围')
     return result
+
+
+def pose_body(action_id, revision, targets, single_step=True, release_confirmed=False):
+    """正式55载荷的纯编码部分；无会话/零点权限，也不发送设备命令。"""
+    if any(type(value) is not int or not 1 <= value < 0xFFFFFFF0 for value in (action_id,revision)):
+        raise ValueError('姿态动作/版本编号无效')
+    values = [integer(targets.get(key),1e6 if key in ('lift','reach') else 180000/math.pi)
+              for key in ('lift','reach','arm','tray','gripper')]
+    return struct.pack('<III5iBB',action_id,revision,120000,*values,single_step is True,release_confirmed is True)
 
 
 class MechanismLink(Link):

@@ -8,7 +8,7 @@ $taskPython = Join-Path $taskRoot '.venv/Scripts/python.exe'
 $taskLibrary = Join-Path $taskRuntime 'native.dll'
 $taskState = Invoke-RestMethod 'http://127.0.0.1:8090/state' -TimeoutSec 3
 if (-not $taskState.available -or $taskState.domain -ne 'simulation' -or $taskState.real_connected -or
-    $taskState.mechanism.busy -or $taskState.execution_check.status -eq 'RUNNING' -or $taskState.simulation.mode -in @('RUNNING', 'MANUAL') -or
+    $taskState.mechanism.busy -or $taskState.program.busy -or $taskState.execution_check.status -eq 'RUNNING' -or $taskState.simulation.mode -in @('RUNNING', 'MANUAL') -or
     $taskState.owner.remaining_s -gt 0) {
     throw '请先结束模拟动作并释放工作台控制权；没有结束进程。'
 }
@@ -65,7 +65,7 @@ try {
     for ($taskTry = 0; $taskTry -lt 60; $taskTry++) {
         try {
             $taskNew = Invoke-RestMethod 'http://127.0.0.1:8090/state' -TimeoutSec 1
-            if ($taskNew.available -and $taskNew.mechanism.execution_schema -eq 2 -and $taskNew.execution_check.available -and $taskNew.lidar.domain -eq 'simulation') { $taskReady=$true; break }
+            if ($taskNew.available -and $taskNew.mechanism.execution_schema -eq 2 -and $taskNew.execution_check.available -and $taskNew.lidar.domain -eq 'simulation' -and $taskNew.program.domain -eq 'simulation') { $taskReady=$true; break }
         } catch { Start-Sleep -Milliseconds 200 }
     }
     if (-not $taskReady) { throw "新离线核心未就绪，检查$taskBackup/core.err；不会连接实车" }

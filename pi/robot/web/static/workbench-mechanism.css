@@ -1,4 +1,17 @@
 /* PC机械工作区；共用主界面卡片和颜色，动作区按职责排列。 */
+.mech-simple-layout { display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start; margin:20px 0; }
+#mechanism-root input[type=checkbox] { width:16px; height:16px; min-height:16px; vertical-align:middle; margin-right:6px; }
+.mech-basebar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.mech-basebar .mech-confirm { margin:0; flex:1; }
+.mech-quick td input { min-width:80px; max-width:130px; }
+.mech-quick .hint,.mech-program .hint { color:var(--muted); font-size:12px; line-height:1.8; }
+.mech-program { margin-bottom:20px; }
+.mech-program #program-export { overflow-wrap:anywhere; }
+.mech-program .button-row { margin:14px 0; }
+.mech-program li { padding:5px 0; }
+.mech-advanced > summary,.mech-program > summary { cursor:pointer; font-weight:600; padding-bottom:14px; }
+.mech-advanced > article { margin-bottom:20px; }
+@media(max-width:1100px) { .mech-simple-layout { grid-template-columns:1fr; } }
 .mech-banner { display:flex; align-items:center; gap:16px; margin:20px 0; padding:20px; border:1px solid #c9e7e5; background:#eef8f7; border-radius:12px; }
 .mech-banner > div { flex:1; }
 .mech-banner p { margin:8px 0 0; color:var(--muted); }

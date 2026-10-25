@@ -11,7 +11,7 @@ class Input(BaseModel):
 
 class Command(Input):
     op: Literal['claim', 'renew', 'release', 'stop', 'manual_stop', 'manual', 'move', 'reset',
-                'plan', 'run', 'save', 'load', 'defaults', 'mechanism', 'transfer', 'verify', 'verify_cancel', 'lidar']
+                'plan', 'run', 'save', 'load', 'defaults', 'mechanism', 'transfer', 'verify', 'verify_cancel', 'lidar', 'program']
     client: str = Field(min_length=1, max_length=64, pattern=r'^[a-zA-Z0-9_-]+$')
     token: str = Field(default='', max_length=64)
     request_id: str = Field(min_length=1, max_length=64, pattern=r'^[a-zA-Z0-9_-]+$')
@@ -86,6 +86,22 @@ class Empty(Input):
     pass
 
 
+class ProgramStep(Input):
+    after_segment: int = Field(ge=1,le=64)
+    pose_id: str = Field(min_length=1,max_length=48,pattern=r'^[a-zA-Z0-9_-]+$')
+    revision: int = Field(ge=1,le=2147483647)
+    release_confirmed: bool = False
+
+
+class ProgramGoal(Input):
+    action: Literal['save','load','run','compile','stop']
+    id: str = Field(default='cycle_1',min_length=1,max_length=48,pattern=r'^[a-zA-Z0-9_-]+$')
+    name: str = Field(default='工位流程',min_length=1,max_length=64)
+    revision: int = Field(default=0,ge=0,le=2147483647)
+    plan_id: str | None = Field(default=None,pattern=r'^[a-f0-9]{32}$')
+    steps: list[ProgramStep] = Field(default_factory=list,max_length=32)
+
+
 class LidarGoal(Input):
     action: Literal['replay', 'plan', 'clear']
     case: Literal['detour', 'clear', 'blocked', 'partial', 'bad_crc', 'missing',
@@ -155,4 +171,4 @@ class TransferGoal(Input):
 ARGUMENTS = dict(claim=Empty, renew=Empty, release=Empty, stop=Empty, manual_stop=Empty,
                  manual=Manual, move=Move, reset=Reset, plan=PlanInput, run=Run, save=Run,
                  load=Run, defaults=Empty, mechanism=MechGoal, transfer=TransferGoal,
-                 verify=Run, verify_cancel=Empty, lidar=LidarGoal)
+                 verify=Run, verify_cancel=Empty, lidar=LidarGoal, program=ProgramGoal)

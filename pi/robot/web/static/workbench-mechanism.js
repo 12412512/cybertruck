@@ -1,5 +1,7 @@
 import {initTransfer,renderTransfer} from './workbench-transfer.js';
 import { initDevice } from './workbench-device.js';
+import {initCompact,renderCompact} from './workbench-mech-simple.js';
+import {initProgram,renderProgram} from './workbench-program.js';
 // 机构页面只编辑草稿并调用统一核心，不打开设备、不产生真实PWM。
 import {initAcceptance} from './workbench-acceptance.js';
 const $ = id => document.getElementById(id);
@@ -129,10 +131,11 @@ export function initMechanism(options) {
         <p class="hint">本轮只验证软件状态机。碰撞互锁阈值为保守代理，未建立实物包络。机构动作不会增加真实抓放计数。</p>
        </article>
       </div>`;
-    initDevice($('mechanism-root'));
     initTransfer($('mechanism-root'),api);
     $('mech-claim').onclick = () => $('claim').click();
-    $('mech-stop').onclick = () => { cancelMechHeld(); invoke('stop'); };
+    $('mech-stop').onclick = () => { cancelMechHeld();
+        if (snapshotBefore?.program?.busy) api.command('program',{action:'stop'}).catch(error=>api.notify(error.message,true));
+        else invoke('stop'); };
     $('pose-next').onclick = () => {
         if (!state?.active) return;
         invoke('next',{action_id:state.active.id,step_index:state.active.step,revision:state.active.pose_revision});
@@ -212,6 +215,14 @@ export function initMechanism(options) {
     };
     setInterval(pulse,100);
     initAcceptance();
+    initCompact($('mechanism-root'),{targets,invoke,notify:api.notify,loadDevice:initDevice});
+    initProgram({...api,planId:()=>snapshotBefore?.planning?.status==='READY'?snapshotBefore.planning.plan.id:null,
+        selectedPose:()=>{
+            const pose=state?.poses.find(p=>`${p.id}:${p.revision}`===$('pose-version').value);
+            if(!pose||!sameTargets(targets(),pose.targets)||$('pose-id').value!==pose.id)
+                throw new Error('先保存姿态并读取对应版本；草稿改动不能当作已保存目标');
+            return pose;
+        }});
     // 接入准备只读本地源码；不接管控制核心或重建用户的模拟任务。
     fetch('/api/workbench/preparation',{cache:'no-store',signal:AbortSignal.timeout(2000)})
         .then(async response=>{
@@ -225,10 +236,14 @@ export function initMechanism(options) {
         .catch(()=>{});
 }
 
+let snapshotBefore = null;
 export function renderMechanism(snapshot, canControl) {
-    renderTransfer(snapshot,canControl);
+    snapshotBefore = snapshot;
+    renderTransfer(snapshot,canControl && !snapshot?.program?.busy);
+    renderCompact(snapshot,canControl);
+    renderProgram(snapshot,canControl);
     state = snapshot?.mechanism;
-    enabled = !!canControl;
+    enabled = !!canControl && !snapshot?.program?.busy;
     if (!state) {
         cancelMechHeld(); $('mech-mode').textContent = '状态过期'; $('mech-reason').textContent = '无法确认机构模型状态';
         $('mech-values').replaceChildren(); $('mech-bars').replaceChildren();
@@ -252,7 +267,7 @@ export function renderMechanism(snapshot, canControl) {
         $('mech-pending').replaceChildren(...pendingItems.map(value => {const item=document.createElement('li');item.textContent=value;return item;}));
         $('tray-presets').replaceChildren(...[preparation.tray_reference_deg,...preparation.tray_slot_deg].map(angle => {
             const button=document.createElement('button');button.textContent=`料盘${angle}°${angle===preparation.tray_reference_deg?' · 基准':''}`;
-            button.onclick=() => {$('mech-servo').value='tray';$('mech-servo').onchange();$('servo-target').value=angle;api.notify(`已填入料盘${angle}°草稿，未执行。`);};return button;
+            button.onclick=() => {$('mech-servo').value='tray';$('mech-servo').onchange();$('servo-target').value=angle;$('teach-tray').value=angle;api.notify(`已填入料盘${angle}°草稿，未执行。`);};return button;
         }));
     }
     document.querySelectorAll('#tray-presets button').forEach(button => {button.disabled=state.busy;});
@@ -260,7 +275,7 @@ export function renderMechanism(snapshot, canControl) {
     $('mech-reason').textContent = state.fault || state.reason;
     $('mech-claim').hidden = enabled;
     $('mech-claim').disabled = !snapshot.available || (!!snapshot.owner.client && !enabled);
-    $('mech-stop').disabled = !enabled;
+    $('mech-stop').disabled = !canControl;
     $('pose-single-step').disabled = state.busy || !(state.execution_schema>=2);
     $('pose-next').disabled = !enabled || !stopped || !state.active?.waiting_step || !!state.fault;
     $('pose-stage').textContent = state.active ? `${phaseNames[state.active.phase] || '模型动作执行中'} · ${state.active.pose_revision?`姿态v${state.active.pose_revision} · `:''}仅模拟证据，实际舵机角度未知` :

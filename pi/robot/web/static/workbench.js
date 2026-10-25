@@ -4,7 +4,7 @@ import {initLidar, renderLidar} from './workbench-lidar.js?v=1';
 import {modelView} from './workbench-execution.js?v=1';
 import {initScene, sceneValues, applyScene, overlayDraft} from './workbench-scene.js?v=3';
 import {isEditing, motionDirection, matchesRelease} from './workbench-input.js';
-import {initMechanism, renderMechanism, cancelMechHeld, stopMechHeld} from './workbench-mechanism.js';
+import {initMechanism, renderMechanism, cancelMechHeld, stopMechHeld} from './workbench-mechanism.js?v=3';
 
 const $ = id => document.getElementById(id);
 const text = (id, value) => { $(id).textContent = value; };
@@ -23,7 +23,7 @@ let hydrated = false, localEdited = false, autoTimer = null, autoPending = false
 let submitted = '', versionsKey = '';
 let preferredVersion = '';
 
-function moving() { return current?.execution_check?.status === 'RUNNING' || ['RUNNING','MANUAL','STOPPING'].includes(current?.simulation?.mode); }
+function moving() { return current?.program?.busy || current?.execution_check?.status === 'RUNNING' || ['RUNNING','MANUAL','STOPPING'].includes(current?.simulation?.mode); }
 function canonical(value) {
     if (Array.isArray(value)) return value.map(canonical);
     if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]));
@@ -189,7 +189,7 @@ function updateButtons() {
     const enabled = !!token && online();
     const mode = current?.simulation?.mode;
     const checkBusy = current?.execution_check?.status === 'RUNNING';
-    const mechBusy = checkBusy || !!current?.mechanism?.busy || ['RUNNING','WAIT_OBSERVATION'].includes(current?.transfer?.mode);
+    const mechBusy = checkBusy || !!current?.program?.busy || !!current?.mechanism?.busy || ['RUNNING','WAIT_OBSERVATION'].includes(current?.transfer?.mode);
     const mechReady = !mechBusy && (!current?.mechanism?.zero_version || current?.mechanism?.transport_ready);
     const idle = current?.simulation?.stopped && mode !== 'FAILED' && mechReady;
     for (const button of document.querySelectorAll('.controlled')) button.disabled = !enabled;

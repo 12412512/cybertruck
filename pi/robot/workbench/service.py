@@ -18,6 +18,7 @@ from .storage import write_json, payload, versions
 from .simulation import Simulation
 from .mechanism import Mechanism
 from .transfer import Transfer
+from .program import Program
 from ..device.integration import preparation
 
 
@@ -33,6 +34,7 @@ class Workbench:
         self.sim = Simulation(self.library)
         self.mech = Mechanism(self.runtime, self.clock)
         self.transfer = Transfer(self.mech)
+        self.program = Program(self.mech,self.library)
         self.preparation = preparation()
         self.owner, self.token, self.lease_until, self.sequence = '', '', 0., -1
         self.manual_until = 0.
@@ -124,12 +126,15 @@ class Workbench:
             self.record('自动停车', '点动帧超过350ms或控制权过期')
         if self.token and now >= self.lease_until:
             self.execution_cancel.set()
+            self.program.cancel('离线控制权过期')
             self.transfer.cancel('离线控制权过期，不自动续跑')
             if self.mech.busy:
                 self.mech.stop('控制权过期，机构调试已停止')
             self.owner, self.token = '', ''
 
     def _idle(self):
+        if self.program.busy:
+            raise Rejected('工位姿态流程正在联调，请先停止或等待完成')
         if self.execution_check['status'] == 'RUNNING':
             raise Rejected('执行链离线联调未结束，请先取消并等待模型停车')
         if self.transfer.busy:
@@ -225,6 +230,7 @@ class Workbench:
             self._expire()
             if command.op == 'stop':
                 self.execution_cancel.set()
+                self.program.cancel('工作台停止')
                 self.transfer.cancel('工作台停止')
                 self.sim.halt('工作台停止')
                 self.mech.stop('工作台停止，保持夹爪估计')
@@ -261,6 +267,8 @@ class Workbench:
     def _apply(self, op, arguments):
         if self.execution_check['status'] == 'RUNNING' and op not in ('renew','release','verify_cancel'):
             raise Rejected('执行链联调持有底盘模型，不能插入动作或修改路线')
+        if self.program.busy and op not in ('program','renew','release'):
+            raise Rejected('工位姿态流程持有机构模型，不能插入动作或导航')
         if op == 'verify_cancel':
             self.execution_cancel.set()
             return dict(ok=True,domain='simulation')
@@ -288,6 +296,31 @@ class Workbench:
             return dict(ok=True,job_id=job_id,domain='simulation')
         if self.transfer.busy and op not in ('transfer','mechanism','renew','release'):
             raise Rejected('离线转存尚未结束，禁止修改或启动其他动作')
+        if op == 'program':
+            if arguments.action == 'stop':
+                self.program.cancel('操作员停止工位流程')
+                return dict(ok=True,domain='simulation')
+            if self.program.busy or self.mech.busy or not self.sim.stopped() or self.sim.mode == 'FAILED':
+                raise Rejected('先等待底盘及机构模型停车，且无运行中的流程')
+            plan = self.plans.get(self.job.get('plan',{}).get('id')) if self.job['status']=='READY' else None
+            try:
+                if arguments.action == 'save':
+                    record = self.program.save(arguments,plan)
+                else:
+                    record = self.program.selected(arguments)
+                if arguments.action == 'compile':
+                    if plan:
+                        self._scan_matches(plan)
+                    result = self.program.compile(record,plan)
+                elif arguments.action == 'run':
+                    self.program.run(record)
+                    result = dict(status='ACCEPTED',domain='simulation')
+                else:
+                    result = dict(program=record,domain='simulation')
+            except ValueError as exc:
+                raise Rejected(str(exc)) from exc
+            self.record('工位流程'+arguments.action,arguments.id+f' v{record["revision"]}')
+            return dict(ok=True,**result)
         if op == 'transfer':
             if not self.sim.stopped() or self.sim.mode == 'FAILED':
                 raise Rejected('转存流程要求底盘模型已停车且无故障')
@@ -316,6 +349,7 @@ class Workbench:
             return result
         if op == 'release':
             self.execution_cancel.set()
+            self.program.cancel('释放离线控制权')
             self.transfer.cancel('释放离线控制权')
             if self.mech.busy:
                 self.mech.stop('释放控制权，机构调试已停止')
@@ -467,6 +501,7 @@ class Workbench:
             if self.mech.busy and (not self.sim.stopped() or self.sim.mode == 'FAILED'):
                 self.mech.fail('执行中底盘未停稳或发生故障')
             self.mech.tick(gap_s)
+            self.program.tick(self.sim.stopped() and self.sim.mode != 'FAILED')
             if self.transfer.busy and gap_s <= .1:
                 # 仅离线演示加速模型积分，不改变控制循环/反馈超时或实车参数。
                 for _ in range(self.transfer.frozen['configuration']['pace']-1):
@@ -496,6 +531,7 @@ class Workbench:
                         active_plan=copy.deepcopy(self.sim.plan.view) if self.sim.plan else None,
                         events=list(self.events), log_error=self.log_error,
                         mechanism=self.mech.view(), transfer=self.transfer.view(),
+                        program=self.program.view(self.plans.get(self.job.get('plan',{}).get('id')) if self.job['status']=='READY' else None),
                         integration=copy.deepcopy(self.preparation),
                         execution_check=dict(copy.deepcopy(self.execution_check),available=self.preview_available),
                         lidar=copy.deepcopy(self.lidar),
@@ -506,6 +542,7 @@ class Workbench:
         with self.lock:
             self.closed = True
             self.execution_cancel.set()
+            self.program.cancel('离线核心退出')
             self.planning_cancel.set()
             self.sim.halt('离线核心退出')
             self.transfer.cancel('离线核心退出')
