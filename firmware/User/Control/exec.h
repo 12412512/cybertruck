@@ -76,12 +76,14 @@ typedef struct
     MotorSample position[4], speed[4], status[4];
     uint32_t mode, fault, tick_ms, arm_ms, stop_ms, control_ms;
     uint32_t have_goal, enabled_wheels, stop_confirmed;
+    uint32_t route_zone; /* version9在PC0准备前绑定，启动后不可修改。 */
     ExecFault first_fault; /* 只锁存首次里程计故障，普通查询/STOP不清除。 */
     ExecGate gate;
 } Exec;
 
 void Exec_Init(Exec *exec, ExecIo io);
 int Exec_Config(Exec *exec, const ExecConfig *config, uint32_t now_ms);
+int Exec_Select(Exec *exec, uint32_t zone);
 int Exec_Arm(Exec *exec, uint32_t now_ms);
 int Exec_Ready(Exec *exec, uint32_t now_ms);
 int Exec_Goal(Exec *exec, const TrackGoal *goal, uint32_t now_ms);

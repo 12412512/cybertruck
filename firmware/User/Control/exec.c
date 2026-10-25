@@ -5,6 +5,7 @@
 #include "batch_route.h"
 #include "calibration_route.h"
 #include "start2_route.h"
+#include "start1_route.h"
 #include <math.h>
 #include <string.h>
 
@@ -53,6 +54,17 @@ void Exec_Init(Exec *exec, ExecIo io)
     exec->io = io;
 }
 
+/* 仅首次启动前选区；保留同一odom历史，不用重新配置/清零掩盖位置变化。 */
+int Exec_Select(Exec *exec, uint32_t zone)
+{
+    if (exec->config.version != 9 || exec->mode != EXEC_OBSERVING ||
+        exec->have_goal || exec->last_goal.id || exec->enabled_wheels || exec->arm_ms ||
+        exec->fault || (zone != 1 && zone != 2))
+        return 0;
+    exec->route_zone = zone;
+    return 1;
+}
+
 int Exec_Config(Exec *exec, const ExecConfig *config, uint32_t now_ms)
 {
     OdomConfig odom = {0};
@@ -65,7 +77,7 @@ int Exec_Config(Exec *exec, const ExecConfig *config, uint32_t now_ms)
     }
     if (!config || exec->mode != EXEC_DISABLED || !config->version || config->version == 7 || !isfinite(config->max_rpm) ||
         config->max_rpm < 1 || (config->version == 6 ? config->max_rpm != 150 :
-        (config->version == 3 || config->version == 4 || config->version == 5 || config->version == 8) ? config->max_rpm != 100 : config->max_rpm > 10) ||
+        (config->version == 3 || config->version == 4 || config->version == 5 || config->version == 8 || config->version == 9) ? config->max_rpm != 100 : config->max_rpm > 10) ||
         floor(config->max_rpm) != config->max_rpm ||
         !isfinite(config->gyro_scale_rad_s) || config->gyro_scale_rad_s <= 0 ||
         config->gyro_scale_rad_s > 0.01f)
@@ -110,7 +122,7 @@ int Exec_Config(Exec *exec, const ExecConfig *config, uint32_t now_ms)
     track.imu_epoch = odom.imu_epoch;
     track.imu_source_epoch = odom.imu_source_epoch;
     track.calibration = config->version;
-    if (config->version == 3 || config->version == 4 || config->version == 5 || config->version == 8 || config->version == 6)
+    if (config->version == 3 || config->version == 4 || config->version == 5 || config->version == 8 || config->version == 9 || config->version == 6)
     {
         /* 与离线闭环同一档；高轮速仅供下文冻结的两段目标使用。 */
         odom.max_rpm = config->version == 6 ? 180 : 120;
@@ -227,7 +239,7 @@ int Exec_Ready(Exec *exec, uint32_t now_ms)
 
 int Exec_Arm(Exec *exec, uint32_t now_ms)
 {
-    if (!Exec_Ready(exec, now_ms))
+    if (!Exec_Ready(exec, now_ms) || (exec->config.version == 9 && !exec->route_zone))
     {
         return -1;
     }
@@ -337,8 +349,11 @@ static unsigned SavedIndex(const RefSpec *ref, uint32_t action, const unsigned c
     return 0;
 }
 
-static unsigned FrozenIndex(const RefSpec *ref, uint32_t version, uint32_t action)
+static unsigned FrozenIndex(const RefSpec *ref, uint32_t version, uint32_t action, uint32_t zone)
 {
+    if (version == 9)
+        return zone == 1 ? SavedIndex(ref, action, Start1Refs, START1_COUNT) :
+            zone == 2 ? SavedIndex(ref, action, Start2Refs, START2_COUNT) : 0;
     return version == 8 ? SavedIndex(ref, action, Start2Refs, START2_COUNT) :
         version == 5 ? SavedIndex(ref, action, BatchRefs, BATCH_COUNT) :
         version == 4 ? TourIndex(ref) : version == 3 ? RawIndex(ref) : 0;
@@ -359,7 +374,7 @@ static int GoalValid(const TrackGoal *goal)
     if (CalibrationMatch(ref))
         return goal->id == 1 && goal->timeout_ms == 10000;
     if (RawIndex(ref) || TourIndex(ref) || SavedIndex(ref, goal->id, BatchRefs, BATCH_COUNT) ||
-        SavedIndex(ref, goal->id, Start2Refs, START2_COUNT))
+        SavedIndex(ref, goal->id, Start2Refs, START2_COUNT) || SavedIndex(ref, goal->id, Start1Refs, START1_COUNT))
     {
         return goal->id != 0 && goal->timeout_ms == 30000;
     }
@@ -429,9 +444,9 @@ int Exec_Goal(Exec *exec, const TrackGoal *goal, uint32_t now_ms)
     if ((exec->config.version == 6 && !CalibrationMatch(&goal->reference)) ||
         (exec->config.version != 6 && CalibrationMatch(&goal->reference)))
         return -1;
-    if (((exec->config.version == 3 || exec->config.version == 4 || exec->config.version == 5 || exec->config.version == 8) && FrozenIndex(&goal->reference, exec->config.version, goal->id) == 0) ||
-        ((exec->config.version != 3 && exec->config.version != 4 && exec->config.version != 5 && exec->config.version != 8) && (RawIndex(&goal->reference) || TourIndex(&goal->reference) || SavedIndex(&goal->reference, goal->id, BatchRefs, BATCH_COUNT) || SavedIndex(&goal->reference, goal->id, Start2Refs, START2_COUNT))) ||
-        (goal->reference.kind == 1 && goal->reference.x_m == 1.05f && exec->config.max_rpm > 6))
+    if (((exec->config.version == 3 || exec->config.version == 4 || exec->config.version == 5 || exec->config.version == 8 || exec->config.version == 9) && FrozenIndex(&goal->reference, exec->config.version, goal->id, exec->route_zone) == 0) ||
+        ((exec->config.version != 3 && exec->config.version != 4 && exec->config.version != 5 && exec->config.version != 8 && exec->config.version != 9) && (RawIndex(&goal->reference) || TourIndex(&goal->reference) || SavedIndex(&goal->reference, goal->id, BatchRefs, BATCH_COUNT) || SavedIndex(&goal->reference, goal->id, Start2Refs, START2_COUNT) || SavedIndex(&goal->reference, goal->id, Start1Refs, START1_COUNT))) ||
+        (goal->reference.kind == 1 && goal->reference.x_m == 1.05f && goal->reference.y_m == -0.13f && exec->config.max_rpm > 6))
     {
         return -1;
     }
@@ -439,11 +454,11 @@ int Exec_Goal(Exec *exec, const TrackGoal *goal, uint32_t now_ms)
     {
         return memcmp(goal, &exec->last_goal, sizeof(*goal)) == 0 ? 0 : -2;
     }
-    if ((exec->config.version == 3 || exec->config.version == 4 || exec->config.version == 5 || exec->config.version == 8) &&
-        (goal->id != FrozenIndex(&goal->reference, exec->config.version, goal->id) ||
+    if ((exec->config.version == 3 || exec->config.version == 4 || exec->config.version == 5 || exec->config.version == 8 || exec->config.version == 9) &&
+        (goal->id != FrozenIndex(&goal->reference, exec->config.version, goal->id, exec->route_zone) ||
          (goal->id == 1 && exec->have_goal) ||
          (goal->id > 1 && (!exec->have_goal || exec->last_goal.id != goal->id - 1 ||
-          FrozenIndex(&exec->last_goal.reference, exec->config.version, exec->last_goal.id) != goal->id - 1))))
+          FrozenIndex(&exec->last_goal.reference, exec->config.version, exec->last_goal.id, exec->route_zone) != goal->id - 1))))
     {
         return -2;
     }
@@ -621,7 +636,7 @@ void Exec_Run(Exec *exec, uint32_t now_ms)
     {
         int north = exec->last_goal.reference.kind == 1 &&
             exec->last_goal.reference.x_m == 1.05f && exec->last_goal.reference.y_m == -0.13f;
-        unsigned raw = FrozenIndex(&exec->last_goal.reference, exec->config.version, exec->last_goal.id);
+        unsigned raw = FrozenIndex(&exec->last_goal.reference, exec->config.version, exec->last_goal.id, exec->route_zone);
         int calibration = exec->config.version == 6 && CalibrationMatch(&exec->last_goal.reference);
         double distance_limit = raw ? 2.0 : north ? 1.10 : calibration ? 1.02 : 0.20;
         double yaw_limit = raw ? fabs(exec->last_goal.reference.yaw_rad) + 0.10 : (north || calibration) ? 0.05 : QuarterTurn(&exec->last_goal.reference) ? EXEC_PI / 2 + 0.10 : 0.22;

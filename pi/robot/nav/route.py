@@ -62,6 +62,16 @@ def short_route(library):
 
 def validate(plan):
     """先于打开串口校验；整场规划只能预览，不能借改标签绕过白名单。"""
+    if plan.get('id') == 'start1_dock_v1':
+        if (plan.get('sha256') != '29323092ed7d800d1e6efabfdc086f141d15fde304e91b68db59752476fba86f'
+                or digest(plan) != plan['sha256']
+                or plan.get('cases') != [f'start1_{i+1}' for i in range(9)]
+                or plan.get('map_origin') != [.15, 2.25, 0.]):
+            raise ValueError('不是区1的50mm停靠冻结路线')
+        encoded = b''.join(bytes.fromhex(value) for value in plan['goals'])
+        if hashlib.sha256(encoded).hexdigest() != '6e5d53a08e6c904849ace8280e459857878f4939dda8bc873fda531464d89d33':
+            raise ValueError('启停区1目标摘要不一致')
+        return
     if plan.get('id') == 'start2_reverse_v1':
         if (plan.get('sha256') != 'fce040d2b91e0eed46bf4fb7f862a793b07025591a3bde741938ce36074f76bf'
                 or digest(plan) != plan['sha256']

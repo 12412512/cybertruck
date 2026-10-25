@@ -28,20 +28,32 @@ def require_owner_stopped(origin):
 
 
 def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, sleep=time.sleep, route=None, simulation=False,
-              wait_start=False):
+              wait_start=False, switch_routes=None):
     """同一会话执行冻结目标；异常停止，不重发或重连续跑。"""
     if (case in ('cal_slow', 'cal_medium', 'cal_fast')) != (profile.get('version') == 6):
         raise ValueError('一米标定必须使用独立version6配置，不能混入旧路线')
     if profile.get('version') == 6 and route is not None:
         raise ValueError('标定配置禁止整圈路线')
+    switching = switch_routes is not None
+    if switching:
+        from .nav.route import validate
+        if (set(switch_routes) != {1, 2} or profile.get('version') != 9 or not wait_start or route is not None
+                or switch_routes[1].get('id') != 'start1_dock_v1'
+                or switch_routes[2].get('id') != 'start2_reverse_v1'):
+            raise ValueError('PC1入口仅接受version9、两条冻结路线及PC0启动')
+        for value in switch_routes.values():
+            validate(value)
+        route = switch_routes[1]  # 仅占位供预览；实际选区必须来自新鲜PC1应答。
+    elif profile.get('version') == 9:
+        raise ValueError('version9只允许PC1选区入口')
     if route is not None:
         from .nav.route import validate
         validate(route)
     start2_route = route is not None and route['id'] == 'start2_reverse_v1'
-    batch_route = start2_route or (route is not None and route['id'] == 'start1_two_batch_v1')
-    tour_route = start2_route or (route is not None and route['id'] in ('start1_tour_v1', 'start1_two_batch_v1'))
-    raw_route = start2_route or (route is not None and route['id'] in ('start1_qr_raw_v1', 'start1_tour_v1', 'start1_two_batch_v1'))
-    if (raw_route and profile.get('version') != (8 if start2_route else 5 if batch_route else 4 if tour_route else 3)) or (not raw_route and profile.get('version') in (3, 4, 5, 8)):
+    batch_route = switching or start2_route or (route is not None and route['id'] == 'start1_two_batch_v1')
+    tour_route = switching or start2_route or (route is not None and route['id'] in ('start1_tour_v1', 'start1_two_batch_v1'))
+    raw_route = switching or start2_route or (route is not None and route['id'] in ('start1_qr_raw_v1', 'start1_tour_v1', 'start1_two_batch_v1'))
+    if (raw_route and profile.get('version') != (9 if switching else 8 if start2_route else 5 if batch_route else 4 if tour_route else 3)) or (not raw_route and profile.get('version') in (3, 4, 5, 8, 9)):
         raise ValueError('高速配置只允许对应版本的冻结路线')
     if raw_route and profile.get('max_rpm') != 100:
         raise ValueError('冻结路线必须使用100RPM配置')
@@ -78,6 +90,7 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
     route_origin = None
     route_reference = route['reference_trace'] if route else None
     north_origin = None
+    selected_zone = selected_epoch = 0
 
     def pump(force=False):
         nonlocal sequence, written_at
@@ -90,6 +103,10 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
         sequence += 1
         state.update(mode='sim' if simulation else 'serial', core_id=identity, core_sequence=sequence,
                      snapshot_at_s=now, snapshot_wall_s=time.time())
+        if switching:
+            state['route_selection'] = dict(source='PC1', low_zone=1, high_zone=2,
+                selected_zone=selected_zone, epoch=selected_epoch, locked=arm_attempted,
+                live=state.get('physical_start'), status=stage)
         if route:
             execution = state.get('execution')
             if execution and execution['odom_valid'] and (not trace or trace[-1][0] != execution['board_ms']):
@@ -138,11 +155,13 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                 if box[0] <= 0 or box[1] <= 0 or box[2] >= 2.4 or box[3] >= 2.4:
                     raise ValueError('估计车体包络接近场界，停止；不将里程计当成独立定位证明')
             if stage == 'connect' and link.bound and state and (state['mode'] != 0 or state['stop_confirmed']):
-                if (wait_start and link.firmware not in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19')) or (start2_route and link.firmware != 'GC-BASE-0.3.19'):
+                if switching and link.firmware != 'GC-BASE-0.3.20':
+                    raise ValueError('PC1选区要求GC-BASE-0.3.20，旧固件不得降级执行')
+                if (wait_start and link.firmware not in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19', 'GC-BASE-0.3.20')) or (start2_route and link.firmware not in ('GC-BASE-0.3.19', 'GC-BASE-0.3.20')):
                     raise ValueError('选定入口要求PC0协议，固件不匹配，禁止自动启动')
                 # 新候选仅在显式离线模式回归既有轨迹；实车版本入口仍待烧录/只读验收。
-                offline_candidate = simulation and link.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19')
-                keyed_firmware = link.firmware in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19')
+                offline_candidate = simulation and link.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19', 'GC-BASE-0.3.20')
+                keyed_firmware = link.firmware in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19', 'GC-BASE-0.3.20')
                 if ((not offline_candidate and not keyed_firmware and (link.firmware not in ('GC-BASE-0.3.6', 'GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11')
                         or (raw_route and link.firmware not in ('GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11'))
                         or (case == 'north' and link.firmware not in ('GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11'))
@@ -160,13 +179,17 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                 record('accepted', operation='config')
                 stage = 'observe'
             elif stage == 'observe' and state and state['mode'] == 1 and state['odom_valid']:
+                if switching:
+                    stage = 'select_key'
+                    start_poll = -1.
+                    continue
                 if north_site:
                     from .nav.frames import Pose
                     north_origin = Pose(state['x_m'], state['y_m'], state['yaw_rad'])
                     record('map_binding', map_pose=[.15, 2.25, 0], odom=north_origin.values(),
                            boot_id=link.boot, session_id=link.session, source='本次人工摆放记录')
-                if wait_start or (not simulation and link.firmware in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19')):
-                    if link.firmware not in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19'):
+                if wait_start or (not simulation and link.firmware in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19', 'GC-BASE-0.3.20')):
+                    if link.firmware not in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19', 'GC-BASE-0.3.20'):
                         raise ValueError('当前固件未实现PC0启动协议')
                     link.submit(START_PREPARE, struct.pack('<II', start_ticket, profile['version']))
                     record('intent', operation='prepare_physical_key', ticket=start_ticket)
@@ -177,6 +200,23 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                     arm_attempted = True
                     link.submit(ARM)
                     stage = 'arm'
+            elif stage == 'select_key':
+                from .nav.selection import choice
+                event = link.start_event
+                selected = choice(event, None if link.start_event_at is None else now-link.start_event_at)
+                if selected and not link.command and not (link.pending and link.pending[0].kind == START_STATE):
+                    selected_zone, selected_epoch = selected
+                    route = switch_routes[selected_zone]
+                    cases, route_reference = tuple(route['cases']), route['reference_trace']
+                    start_ticket = int(uuid.uuid4().hex[:8], 16) or 1
+                    record('route_selected', zone=selected_zone, epoch=selected_epoch,
+                           id=route['id'], sha256=route['sha256'], map_origin=route['map_origin'])
+                    link.submit(START_PREPARE, struct.pack('<4I', start_ticket, 9, selected_zone, selected_epoch))
+                    deadline = now + 180
+                    stage = 'prepare_key'
+                elif now-start_poll >= .05 and not link.command and not link.pending:
+                    link.submit(START_STATE)
+                    start_poll = now
             elif stage == 'prepare_key' and link.result == dict(kind=START_PREPARE, accepted=True):
                 record('waiting_physical_key', ticket=start_ticket, instruction='松开后按PC0，短鸣一声再启动')
                 stage = 'wait_key'
@@ -186,8 +226,14 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                     raise ValueError('按键事件与本次路线/准备票据不匹配')
                 if event and event['phase'] == 5:
                     record('physical_key_cancelled', event=event)
+                    if switching and event.get('reason') == 5:
+                        record('selection_changed', previous_zone=selected_zone)
+                        stage = 'select_key'
+                        continue
                     raise ValueError('按键准备因故障、失联或超时取消')
                 if event and event['fired'] and not event['beep']:
+                    if switching and (event.get('latched_zone') != selected_zone or event.get('latched_epoch') != selected_epoch):
+                        raise ValueError('启动选区与冻结路线不一致，拒绝使能')
                     record('physical_key_started', event=event)
                     arm_attempted = True
                     link.submit(ARM)
@@ -304,7 +350,8 @@ def main():
     parser.add_argument('--case', choices=('straight', 'side', 'turn', 'turn90', 'diagonal', 'arc', 'pose', 'north',
                                           'cal_slow', 'cal_medium', 'cal_fast'), default='straight')
     parser.add_argument('--route', type=Path, help='仅接受白名单冻结路线，含两批9段；不接受网页动态规划')
-    parser.add_argument('--profile', type=Path, default=Path('config/base_trials.json'))
+    parser.add_argument('--profile', type=Path)
+    parser.add_argument('--switch-zone', action='store_true', help='PC1选区、PC0启动；仅冻结区1/区2，不接受动态草稿')
     parser.add_argument('--runtime', type=Path, default=Path('output/base-trials'))
     parser.add_argument('--owner-url', default='http://172.20.10.4:8080')
     parser.add_argument('--port', help='旧所有者已释放后，明确指定唯一串口')
@@ -315,7 +362,18 @@ def main():
     parser.add_argument('--accept-candidate', action='store_true', help='仅试验：接受尚未实测的声明参数')
     parser.add_argument('--site-ready', action='store_true', help='本次现场已确认，不从历史快照继承')
     args = parser.parse_args()
+    if args.switch_zone and (args.route or args.observe or args.case != 'straight'):
+        parser.error('PC1选区不能与单段、固定路线参数或只读观察混用')
+    if args.switch_zone:
+        args.wait_key = True
+    args.profile = args.profile or Path('config/switch_trials.json' if args.switch_zone else 'config/base_trials.json')
     profile = json.loads(args.profile.read_text(encoding='utf-8'))
+    switch_routes = None
+    if args.switch_zone:
+        from .nav.selection import routes
+        switch_routes = routes()
+        if profile.get('version') != 9:
+            parser.error('PC1选区只能使用version9配置')
     route = None
     if args.route:
         from .nav.route import validate
@@ -332,7 +390,8 @@ def main():
     if not args.execute and not args.observe:
         preparation = trials()
         preparation.update(selected_case='short_route' if route else args.case, route=route, profile=profile,
-                           command_sent=False, physical_key_required=args.wait_key)
+                           command_sent=False, physical_key_required=args.wait_key,
+                           switch_routes=switch_routes)
         print(json.dumps(preparation, ensure_ascii=False, indent=2))
         return
     if not args.port or (args.execute and (not args.accept_candidate or not args.site_ready)):
@@ -364,7 +423,7 @@ def main():
                     observe(transport, args.runtime, args.seconds)
                 else:
                     result = run_trial(transport, profile, args.case, args.runtime, record, route=route,
-                                       wait_start=args.wait_key)
+                                       wait_start=args.wait_key, switch_routes=switch_routes)
                     record('result', **result)
                     print(json.dumps(result, ensure_ascii=False))
             except BaseException as exc:

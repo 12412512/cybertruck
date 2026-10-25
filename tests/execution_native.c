@@ -9,6 +9,8 @@
 static Exec executor;
 static Start key_gate;
 static ExecGate key_failure;
+static Select zone_input;
+API void Device_KeyRead(uint32_t values[21]);
 
 API int Device_StartReady(uint32_t now_ms)
 {
@@ -49,7 +51,17 @@ static int Rearm(void) { return 1; }
 static void StopCommand(uint32_t reason,uint32_t tick) { Exec_Stop(&executor,reason,tick); }
 static uint8_t Command(uint8_t type,const uint8_t *data,uint16_t size,
                        uint8_t *reply,uint16_t *reply_size,uint32_t tick)
-{ return Execute_Command(&executor,type,data,size,reply,reply_size,tick,error,sequence); }
+{
+    if (type == 60 && size == 0)
+    {
+        uint32_t values[21];
+        Device_KeyRead(values);
+        memcpy(reply, values, sizeof(values));
+        *reply_size = sizeof(values);
+        return COMM_OK;
+    }
+    return Execute_Command(&executor,type,data,size,reply,reply_size,tick,error,sequence);
+}
 
 API void Device_Init(void)
 {
@@ -61,6 +73,7 @@ API void Device_Init(void)
     memset(target,0,sizeof(target));
     Exec_Init(&executor,io); executor.stop_confirmed=1;
     Start_Init(&key_gate);
+    Select_Init(&zone_input, 0, 0);
     memset(&key_failure,0,sizeof(key_failure));
     Comm_Init(123,0); Comm_Bind(hooks);
 }
@@ -76,9 +89,43 @@ API void Device_KeyTick(uint32_t tick, uint8_t pressed)
 {
     uint32_t previous = key_gate.phase;
     uint8_t ready = (uint8_t)Exec_Ready(&executor, tick);
+    Start_Check(&key_gate, &zone_input, tick);
     Start_Run(&key_gate, Comm_Boot(), Comm_Session(), tick, pressed, ready);
     if (previous >= START_RELEASE && previous <= START_BEEP && key_gate.phase == START_ABORTED)
         key_failure = executor.gate;
+}
+
+API void Device_SelectLevel(uint32_t tick, uint8_t level)
+{
+    Select_Run(&zone_input, tick, level);
+    Start_Check(&key_gate, &zone_input, tick);
+}
+
+API int Device_Select(uint32_t zone)
+{
+    return Exec_Select(&executor, zone);
+}
+
+API int Device_SwitchPrepare(uint32_t ticket, uint32_t version, uint32_t zone, uint32_t epoch, uint8_t key)
+{
+    if (version != 9 || version != executor.config.version || zone != Select_Zone(&zone_input) ||
+        epoch != zone_input.epoch || !epoch || !zone)
+        return 0;
+    return Start_Prepare(&key_gate, Comm_Boot(), Comm_Session(), ticket, version, now, key,
+        (uint8_t)Exec_Ready(&executor, now)) && Exec_Select(&executor, zone) &&
+        Start_Bind(&key_gate, &zone_input, zone, epoch);
+}
+
+API void Device_SwitchRead(uint32_t values[27])
+{
+    Device_KeyRead(values);
+    values[0] = 3;
+    values[21] = zone_input.raw;
+    values[22] = Select_Zone(&zone_input);
+    values[23] = zone_input.valid;
+    values[24] = zone_input.epoch;
+    values[25] = key_gate.zone;
+    values[26] = key_gate.select_epoch;
 }
 
 API void Device_KeyRead(uint32_t values[21])

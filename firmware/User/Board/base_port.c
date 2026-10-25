@@ -15,6 +15,7 @@
 
 static Exec executor;
 static Start start_key;
+static Select zone_switch;
 static ExecGate start_failure;
 static uint32_t diag_busy, query_index, query_ms, enable_sent;
 static uint32_t zero_sequence, zero_action, zero_id;
@@ -169,26 +170,41 @@ static uint8_t Command(uint8_t type, const uint8_t *data, uint16_t size, uint8_t
                        uint32_t now)
 {
     uint32_t configured = executor.config.version;
+    Select_Run(&zone_switch, now, HAL_GPIO_ReadPin(ZONE_SWITCH_GPIO_Port, ZONE_SWITCH_Pin) == GPIO_PIN_SET);
+    Start_Check(&start_key, &zone_switch, now);
     if (type == EXEC_ARM && (start_key.phase != START_FIRED ||
         start_key.version != configured || start_key.boot != Comm_Boot() ||
-        start_key.session != Comm_Session()))
+        start_key.session != Comm_Session() ||
+        (configured == 9 && (!start_key.zone || start_key.zone != executor.route_zone))))
         return COMM_READONLY;
     if (type == 59 || type == 60)
     {
         if (type == 59)
         {
-            uint32_t ticket = size == 8 ? (uint32_t)Frame_Get(data, 4) : 0;
-            uint32_t version = size == 8 ? (uint32_t)Frame_Get(data + 4, 4) : 0;
+            uint32_t ticket = (size == 8 || size == 16) ? (uint32_t)Frame_Get(data, 4) : 0;
+            uint32_t version = (size == 8 || size == 16) ? (uint32_t)Frame_Get(data + 4, 4) : 0;
+            uint32_t zone = size == 16 ? (uint32_t)Frame_Get(data + 8, 4) : 0;
+            uint32_t epoch = size == 16 ? (uint32_t)Frame_Get(data + 12, 4) : 0;
             uint8_t ready = (uint8_t)(!startup_pending && !Fault() && !executor.fault &&
                 Exec_Ready(&executor, now) &&
                 !MechPort_Owned() && Ready(now, 0, 0));
+            if ((configured == 9 && (size != 16 || !zone || zone != Select_Zone(&zone_switch) ||
+                                     !epoch || epoch != zone_switch.epoch)) ||
+                (configured != 9 && size != 8))
+                return COMM_READONLY;
             if (!ticket || version != configured || !Start_Prepare(&start_key, Comm_Boot(), Comm_Session(),
                 ticket, version, now, HAL_GPIO_ReadPin(START_KEY_GPIO_Port, START_KEY_Pin) == GPIO_PIN_RESET, ready))
                 return COMM_READONLY;
+            if (configured == 9 && (!Exec_Select(&executor, zone) ||
+                !Start_Bind(&start_key, &zone_switch, zone, epoch)))
+            {
+                Start_Cancel(&start_key);
+                return COMM_READONLY;
+            }
         }
         else if (size)
             return COMM_FORMAT;
-        Frame_Put(reply, 2, 4);
+        Frame_Put(reply, 3, 4);
         Frame_Put(reply + 4, start_key.phase, 4);
         Frame_Put(reply + 8, start_key.ticket, 4);
         Frame_Put(reply + 12, start_key.version, 4);
@@ -203,7 +219,13 @@ static uint8_t Command(uint8_t type, const uint8_t *data, uint16_t size, uint8_t
         Frame_Put(reply + 48, start_failure.gyro_ms, 4);
         memcpy(reply + 52, start_failure.position_ms, 16);
         memcpy(reply + 68, start_failure.speed_ms, 16);
-        *reply_size = 84;
+        Frame_Put(reply + 84, zone_switch.raw, 4);
+        Frame_Put(reply + 88, Select_Zone(&zone_switch), 4);
+        Frame_Put(reply + 92, zone_switch.valid, 4);
+        Frame_Put(reply + 96, zone_switch.epoch, 4);
+        Frame_Put(reply + 100, start_key.zone, 4);
+        Frame_Put(reply + 104, start_key.select_epoch, 4);
+        *reply_size = 108;
         return COMM_OK;
     }
     if (type >= 48 && type <= 58)
@@ -248,6 +270,8 @@ void Base_Init(void)
     CommHooks hooks = {StopCommand, Command};
     Exec_Init(&executor, io);
     Start_Init(&start_key);
+    Select_Init(&zone_switch, HAL_GetTick(),
+        HAL_GPIO_ReadPin(ZONE_SWITCH_GPIO_Port, ZONE_SWITCH_Pin) == GPIO_PIN_SET);
     MechPort_Init();
     Bus_Observe(MechPort_Feed);
     /* 启动接收不等于使能或动作；配置/使能/目标分别显式提交。 */
@@ -387,6 +411,8 @@ void Base_Run(void)
     {
         uint32_t phase = start_key.phase;
         uint8_t ready = (uint8_t)Exec_Ready(&executor, now);
+        Select_Run(&zone_switch, now, HAL_GPIO_ReadPin(ZONE_SWITCH_GPIO_Port, ZONE_SWITCH_Pin) == GPIO_PIN_SET);
+        Start_Check(&start_key, &zone_switch, now);
         Start_Run(&start_key, Comm_Boot(), Comm_Session(), now,
             HAL_GPIO_ReadPin(START_KEY_GPIO_Port, START_KEY_Pin) == GPIO_PIN_RESET,
             (uint8_t)(!Fault() && ready && !MechPort_Owned()));

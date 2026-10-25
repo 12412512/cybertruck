@@ -21,6 +21,15 @@ def sync():
     # 工作台启停区2只接受本轮已校验冻结包；不直接编译任意网页草稿。
     sys.path.insert(0, str(ROOT / 'pi'))
     from robot.nav.route import validate
+    route1 = json.loads((ROOT/'config/start1_route.json').read_text(encoding='utf-8'))
+    validate(route1)
+    refs1 = [bytes.fromhex(raw)[8:] for raw in route1['goals']]
+    rows1 = ['    {' + ','.join(str(value) for value in raw) + '}' for raw in refs1]
+    header1 = ('/* 由区1的50mm停靠冻结包生成；旧BatchRefs保留。 */\n'
+               '#ifndef START1_ROUTE_H\n#define START1_ROUTE_H\n'
+               '#define START1_COUNT ' + str(len(refs1)) + '\n'
+               'static const unsigned char Start1Refs[START1_COUNT][88] = {\n' + ',\n'.join(rows1) + '\n};\n#endif\n')
+    (ROOT/'firmware/User/Config/start1_route.h').write_text(header1, encoding='utf-8')
     route = json.loads((ROOT/'config/start2_route.json').read_text(encoding='utf-8'))
     validate(route)
     refs = [bytes.fromhex(raw)[8:] for raw in route['goals']]
@@ -49,6 +58,9 @@ def sync():
               '#define BASE_SAFE_ADDRESSES {' + ', '.join(str(v) for v in addresses) + '}\n#endif\n')
     (ROOT / 'firmware/User/Config/addresses.h').write_text(header, encoding='utf-8')
     tree = ET.parse(PROJECT)
+    # CubeMX本次导出可能丢掉xsi前缀，恢复厂家XSD属性，避免写成无命名空间的同名字段。
+    schema = tree.getroot().attrib.pop('noNamespaceSchemaLocation', 'project_projx.xsd')
+    tree.getroot().set('{http://www.w3.org/2001/XMLSchema-instance}noNamespaceSchemaLocation', schema)
     targets = tree.findall("./Targets/Target")
     if len(targets) != 1 or targets[0].findtext("TargetName") != "Car":
         raise ValueError("必须只有一个 Car Target")

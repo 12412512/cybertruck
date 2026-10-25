@@ -53,11 +53,11 @@ void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pin : START_KEY_Pin */
-  GPIO_InitStruct.Pin = START_KEY_Pin;
+  /*Configure GPIO pins : START_KEY_Pin ZONE_SWITCH_Pin */
+  GPIO_InitStruct.Pin = START_KEY_Pin|ZONE_SWITCH_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(START_KEY_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pin : BUZZER_Pin */
   GPIO_InitStruct.Pin = BUZZER_Pin;

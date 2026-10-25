@@ -27,7 +27,7 @@ USER_FILES.update(FW / 'User' / name for name in (
     'Control/exec.c', 'Control/exec.h', 'Comm/execute.c', 'Comm/execute.h', 'Board/base_port.c', 'Board/base_port.h',
     'Device/can_tx.c', 'Device/can_tx.h', 'Device/can_internal.h',
     'Device/bus.c', 'Device/bus.h', 'Device/bus_internal.h', 'Device/bus_board.h',
-    'Device/drive.c', 'Device/drive.h', 'Config/bus_config.h', 'Config/addresses.h', 'Config/raw_route.h', 'Config/tour_route.h', 'Config/batch_route.h', 'Config/calibration_route.h', 'Config/start2_route.h'))
+    'Device/drive.c', 'Device/drive.h', 'Config/bus_config.h', 'Config/addresses.h', 'Config/raw_route.h', 'Config/tour_route.h', 'Config/batch_route.h', 'Config/calibration_route.h', 'Config/start2_route.h', 'Config/start1_route.h'))
 
 
 def check(ok, message):
@@ -113,6 +113,8 @@ def verify_ioc(data):
         "CAN1.BS2": "CAN_BS2_2TQ", "CAN1.NART": "DISABLE",
         "TIM1.Prescaler": "119", "TIM1.Period": "19999",
         "PC0.Signal": "GPIO_Input", "PC0.GPIO_PuPd": "GPIO_PULLUP",
+        "PC1.Signal": "GPIO_Input", "PC1.GPIO_PuPd": "GPIO_PULLUP",
+        "PC1.GPIO_Label": "ZONE_SWITCH",
         "PB0.Signal": "GPIO_Output", "PB0.PinState": "GPIO_PIN_SET",
         "PB0.GPIO_ModeDefaultOutputPP": "GPIO_MODE_OUTPUT_PP",
         "PA13.Signal": "SYS_JTMS-SWDIO", "PA14.Signal": "SYS_JTCK-SWCLK",
@@ -140,7 +142,7 @@ def verify_ioc(data):
     active_ips = {v for k, v in data.items() if re.fullmatch(r"Mcu\.IP\d+", k)}
     check(active_ips == {"CAN1", "NVIC", "RCC", "RNG", "SYS", "TIM1", "USART1", "USART2", "USART6"},
           f"IOC 启用外设不符：{sorted(active_ips)}")
-    check(not any(k.startswith("PC1.") for k in data), "IOC 不得分配 PC1")
+    check(data.get("PC1.Signal") == "GPIO_Input", "PC1仅作启停区只读开关输入")
     check(not any("CH4" in k or (k.endswith(".Signal") and "CH4" in v)
                   for k, v in data.items()), "IOC 不得配置 TIM1 CH4")
     try:
@@ -220,7 +222,7 @@ def verify_sources(data):
         ("GPIOC", {"GPIO_PIN_6", "GPIO_PIN_7"}, "GPIO_MODE_AF_PP", "GPIO_AF8_USART6"),
         ("GPIOA", {"GPIO_PIN_11", "GPIO_PIN_12"}, "GPIO_MODE_AF_PP", "GPIO_AF9_CAN1"),
         ("GPIOE", {"GPIO_PIN_9", "GPIO_PIN_11", "GPIO_PIN_13"}, "GPIO_MODE_AF_PP", "GPIO_AF1_TIM1"),
-        ("GPIOC", {"GPIO_PIN_0"}, "GPIO_MODE_INPUT", None),
+        ("GPIOC", {"GPIO_PIN_0", "GPIO_PIN_1"}, "GPIO_MODE_INPUT", None),
         ("GPIOB", {"GPIO_PIN_0"}, "GPIO_MODE_OUTPUT_PP", None),
     ]
     check(len(configs) == len(expected_gpio), "生成 GPIO 初始化组数量不符，检查额外引脚")
@@ -232,8 +234,8 @@ def verify_sources(data):
             check(state.get("Mode") == mode, f"生成 GPIO {port} {sorted(pins)} 模式不符")
             if alternate:
                 check(state.get("Alternate") == alternate, f"生成 GPIO {port} {sorted(pins)} 复用不符")
-            if port == "GPIOC" and pins == {"GPIO_PIN_0"}:
-                check(state.get("Pull") == "GPIO_PULLUP", "生成 PC0 必须上拉")
+            if port == "GPIOC" and pins == {"GPIO_PIN_0", "GPIO_PIN_1"}:
+                check(state.get("Pull") == "GPIO_PULLUP", "生成 PC0/PC1 必须上拉")
     gpio = body(sources["gpio"], "MX_GPIO_Init")
     call(gpio, "HAL_GPIO_WritePin", "BUZZER_GPIO_Port,BUZZER_Pin,GPIO_PIN_SET", "蜂鸣器默认电平")
     check(defines.get("BUZZER_Pin") == "GPIO_PIN_0" and defines.get("BUZZER_GPIO_Port") == "GPIOB",

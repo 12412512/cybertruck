@@ -88,3 +88,5 @@ $taskPython = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-ru
 `accept_base.py`须在旧所有者停用、当前串口明确后运行；仅发送白名单查询与保活，无配置、使能、运动或清故障。输出文件拒绝覆盖，任何判据失败均非零退出。当前串口打开可能使板复位，正式open_transport静默500ms后才允许握手，仍重新绑定boot/session。
 
 本次已执行命令、包来源、恢复边界、Pi部署及证据见[板端记录](../docs/board_readonly.md)。输出路径仅为本次证据，重做要用新的目录及新编译摘要，不能直接重复复制烧录命令。
+
+`freeze_start1.py`复用当前工作台参数，生成区1三工位外缘间隙50mm的两批路线，完成离线闭环后只写`output/start-switch/start1_candidate.json`，不覆盖用户草稿、不连接设备。受限执行候选在`config/start1_route.json`，同步工具按摘要生成`Config/start1_route.h`。PC1统一入口及离线/实物边界见[选区记录](../docs/zone_switch.md)。

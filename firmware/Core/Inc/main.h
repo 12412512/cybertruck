@@ -59,6 +59,8 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define START_KEY_Pin GPIO_PIN_0
 #define START_KEY_GPIO_Port GPIOC
+#define ZONE_SWITCH_Pin GPIO_PIN_1
+#define ZONE_SWITCH_GPIO_Port GPIOC
 #define BUZZER_Pin GPIO_PIN_0
 #define BUZZER_GPIO_Port GPIOB
 #define TRAY_PWM_Pin GPIO_PIN_9

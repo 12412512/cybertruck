@@ -29,7 +29,7 @@ def config_payload(profile):
     if any(type(v) not in (int, float) or not math.isfinite(v) or not 0 < v <= .5 for v in geometry):
         raise ValueError('试验几何无效')
     counts, maximum = profile['counts_per_rev'], profile['max_rpm']
-    allowed = maximum == 150 if profile['version'] == 6 else maximum == 100 if profile['version'] in (3, 4, 5, 8) else 1 <= maximum <= 10
+    allowed = maximum == 150 if profile['version'] == 6 else maximum == 100 if profile['version'] in (3, 4, 5, 8, 9) else 1 <= maximum <= 10
     if counts != 65536 or type(maximum) is not int or not allowed:
         raise ValueError('反馈单位或试验轮速不符合本阶段范围')
     addresses = profile['addresses']
@@ -113,9 +113,13 @@ class MotionLink(Link):
         self.last_can_capture = -1.
         self.can_capture_error = None
         self.start_event = None
+        self.start_event_at = None
+        self.last_start_query = -1.
 
     def reset(self, reason):
         self.start_event = None
+        self.start_event_at = None
+        self.last_start_query = -1.
         # 重连只恢复观察。未决命令作未知，不排队重放，不自动使能。
         if (self.command is not None or self.execution is not None
                 or (self.pending and self.pending[0].kind in (CONFIG, ARM, GOAL))):
@@ -131,11 +135,13 @@ class MotionLink(Link):
 
     def submit(self, kind, payload=b''):
         if (not self.bound or self.failed or self.command is not None
-                or (self.pending and self.pending[0].kind in (CONFIG, ARM, GOAL, START_PREPARE, START_STATE))
+                or (self.pending and self.pending[0].kind in (CONFIG, ARM, GOAL, START_PREPARE))
                 or kind not in (CONFIG, ARM, GOAL, START_PREPARE, START_STATE)):
             raise ValueError('会话未就绪、命令未决或执行已中断')
         self.command = (kind, payload)
         self.result = None
+        if kind == START_PREPARE:
+            self.start_event = self.start_event_at = None
 
     def stop(self):
         self.command = None
@@ -159,15 +165,19 @@ class MotionLink(Link):
         if now - self.last_execution >= .05:
             self.last_execution = now
             return STATUS, b''
-        if self.firmware in ('GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11', 'GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19') and now - self.last_fault_query >= .2:
+        if self.firmware in ('GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11', 'GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19', 'GC-BASE-0.3.20') and now - self.last_fault_query >= .2:
             self.last_fault_query = now
             return 37, b''
+        if (self.firmware == 'GC-BASE-0.3.20' and self.execution
+                and self.execution['mode'] in (0, 1) and now-self.last_start_query >= .1):
+            self.last_start_query = now
+            return START_STATE, b''
         if now - self.last_sample >= .05:
             self.last_sample = now
             self.sample_kind = 5 if self.sample_kind == 4 else 4
             return FEEDBACK, bytes([self.sample_kind, 0])
         # 仅新版本且执行器静止模式才读冻结页，不挤占运动期反馈；不扩大实车运动版本白名单。
-        if (self.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19') and self.execution
+        if (self.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19', 'GC-BASE-0.3.20') and self.execution
                 and self.execution['mode'] in (0, 1, 6) and self.execution['can_errors']
                 and not self.can_capture.result and not self.can_capture_error
                 and now - self.last_can_capture >= .05):
@@ -213,20 +223,31 @@ class MotionLink(Link):
             return True
         if request.kind != STATUS:
             if request.kind in (START_PREPARE, START_STATE):
-                if len(packet.payload) not in (25, 85):
+                if len(packet.payload) not in (25, 85, 109):
                     self.failed = True
                     return True
                 values = struct.unpack('<6I', packet.payload[1:25])
-                if (values[0] not in (1, 2) or len(packet.payload) != (25 if values[0] == 1 else 85)
+                if (values[0] not in (1, 2, 3) or len(packet.payload) != {1: 25, 2: 85, 3: 109}.get(values[0])
                         or values[1] > 5 or values[4] != int(values[1] == 4)):
                     self.failed = True
                     return True
                 self.start_event = dict(zip(('schema', 'phase', 'ticket', 'version', 'fired', 'beep'), values))
-                if values[0] == 2:
+                if values[0] >= 2:
                     names = ('reason', 'aborted_ms', 'guard_mask', 'guard_ms', 'pose_ms', 'yaw_ms',
                              'gyro_ms', 'position1_ms', 'position2_ms', 'position3_ms', 'position4_ms',
                              'speed1_ms', 'speed2_ms', 'speed3_ms', 'speed4_ms')
-                    self.start_event.update(zip(names, struct.unpack('<15I', packet.payload[25:])))
+                    self.start_event.update(zip(names, struct.unpack('<15I', packet.payload[25:85])))
+                if values[0] == 3:
+                    names = ('select_level', 'select_zone', 'select_valid', 'select_epoch', 'latched_zone', 'latched_epoch')
+                    self.start_event.update(zip(names, struct.unpack('<6I', packet.payload[85:])))
+                    event = self.start_event
+                    if (event['select_level'] not in (0, 1) or event['select_valid'] not in (0, 1)
+                            or event['select_zone'] != (event['select_level'] + 1 if event['select_valid'] else 0)
+                            or not event['select_epoch'] or event['latched_zone'] not in (0, 1, 2)):
+                        self.failed = True
+                        return True
+                self.start_event_at = now
+                self.last_start_query = now
             self.result = dict(kind=request.kind, accepted=True)
             return True
         if len(packet.payload) != 1 + STATUS_DATA.size:
@@ -251,6 +272,7 @@ class MotionLink(Link):
         state = super().snapshot(now)
         age = None if self.execution_at is None else (now - self.execution_at) * 1000
         state.update(execution=self.execution if age is not None and age < 250 else None,
+                     physical_start=self.start_event if self.start_event_at is not None and now-self.start_event_at < .25 else None,
                      odom_fault_record=self.first_fault,
                      can_fault_record=self.can_capture.result, can_capture_error=self.can_capture_error,
                      can_capture_status=self.can_capture.header,
