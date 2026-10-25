@@ -13,6 +13,12 @@ function numeric(id, low, high) {
 
 export function sceneValues() {
     return {max_rpm:numeric('model-rpm', 20, 350),
+        dynamics:{staging_slowdown:$('route-staging-slow').checked,
+            wheel_slew_rpm_s:numeric('route-wheel-slew', 60, 800),
+            lag_ff_s:numeric('route-lag-ff', 0, .15),
+            acceleration_m_s2:numeric('route-acceleration', .1, 1.5),
+            jerk_m_s3:numeric('route-jerk', .2, 5), dock_m_s:numeric('route-dock-speed', .015, .1),
+            turn_rate_rad_s:numeric('route-turn-rate', .3, 2)},
         docking:{raw_m:numeric('gap-raw', 0, 250) / 1000,
             rough_m:numeric('gap-rough', 0, 250) / 1000,
             staging_m:numeric('gap-staging', 0, 250) / 1000},
@@ -21,6 +27,14 @@ export function sceneValues() {
 
 export function applyScene(request) {
     $('model-rpm').value = request.max_rpm;
+    const dynamics = request.dynamics || {acceleration_m_s2:.25, jerk_m_s3:.8, dock_m_s:.025, turn_rate_rad_s:1.2};
+    $('route-acceleration').value = dynamics.acceleration_m_s2;
+    $('route-jerk').value = dynamics.jerk_m_s3;
+    $('route-dock-speed').value = dynamics.dock_m_s;
+    $('route-turn-rate').value = dynamics.turn_rate_rad_s;
+    $('route-staging-slow').checked = !!dynamics.staging_slowdown;
+    $('route-wheel-slew').value = dynamics.wheel_slew_rpm_s ?? 180;
+    $('route-lag-ff').value = dynamics.lag_ff_s ?? 0;
     $('gap-raw').value = request.docking.raw_m * 1000;
     $('gap-rough').value = request.docking.rough_m * 1000;
     $('gap-staging').value = request.docking.staging_m * 1000;
@@ -81,7 +95,9 @@ function renderList() {
 
 export function initScene(options) {
     ({changed, notify, isRunning} = options);
-    for (const id of ['model-rpm', 'gap-raw', 'gap-rough', 'gap-staging']) $(id).oninput = changed;
+    for (const id of ['model-rpm', 'gap-raw', 'gap-rough', 'gap-staging', 'route-acceleration',
+        'route-jerk', 'route-dock-speed', 'route-turn-rate', 'route-wheel-slew', 'route-lag-ff']) $(id).oninput = changed;
+    $('route-staging-slow').onchange = changed;
     $('clear-obstacles').onclick = () => {
         obstacles = [];
         renderList();

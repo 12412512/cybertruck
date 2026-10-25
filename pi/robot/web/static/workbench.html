@@ -320,6 +320,17 @@
                                 <label>模型轮速上限 / RPM<input id="model-rpm" class="scene-input" type="number" min="20" max="350" step="10" value="100"></label>
                                 <p class="help">100 RPM 沿用原模型上限。提高此值仅用于离线探索，不更改实车固件；1 m/s 是请求上限，不保证每段达到。</p>
                             </div>
+                            <details>
+                                <summary>分段速度与S曲线参数（离线候选，输入不驱动实车）</summary>
+                                <label>动力滞后前馈 / s（0关闭） <input id="route-lag-ff" class="scene-input" type="number" min="0" max="0.15" step="0.01" value="0"></label>
+                                <label>轮速变化率 / RPM/s <input id="route-wheel-slew" class="scene-input" type="number" min="60" max="800" step="20" value="180"></label>
+                                <label><input id="route-staging-slow" class="scene-input" type="checkbox">暂存入站使用保守档：加速度≤0.45、加加速度≤1.2、靠站≤0.025、转姿≤1.2</label>
+                                <label>平移加速度 / m/s² <input id="route-acceleration" class="scene-input" type="number" min="0.1" max="1.5" step="0.05" value="0.25"></label>
+                                <label>平移加加速度 / m/s³ <input id="route-jerk" class="scene-input" type="number" min="0.2" max="5" step="0.1" value="0.8"></label>
+                                <label>返回蓝区末段速度 / m/s <input id="route-dock-speed" class="scene-input" type="number" min="0.015" max="0.1" step="0.005" value="0.025"></label>
+                                <label>转姿角速度上限 / rad/s <input id="route-turn-rate" class="scene-input" type="number" min="0.3" max="2" step="0.1" value="1.2"></label>
+                                <p class="help">直线、弯道、转姿和靠站分别计算限速；需重新规划并通过闭环，不能直接发送实车。</p>
+                            </details>
                             <div class="plan-summary">
                                 <span>
                                     参考时间
@@ -595,7 +606,7 @@
                 </span>
             </footer>
         </main>
-        <script type="module" src="/static/workbench.js?v=4">
+        <script type="module" src="/static/workbench.js?v=5">
         </script>
         <script type="module" src="/static/workbench-vision.js?v=1"></script>
     </body>

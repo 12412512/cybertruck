@@ -3,6 +3,7 @@
 #include "raw_route.h"
 #include "tour_route.h"
 #include "batch_route.h"
+#include "calibration_route.h"
 #include <math.h>
 #include <string.h>
 
@@ -62,7 +63,8 @@ int Exec_Config(Exec *exec, const ExecConfig *config, uint32_t now_ms)
         return 0;
     }
     if (!config || exec->mode != EXEC_DISABLED || !config->version || !isfinite(config->max_rpm) ||
-        config->max_rpm < 1 || ((config->version == 3 || config->version == 4 || config->version == 5) ? config->max_rpm != 100 : config->max_rpm > 10) ||
+        config->max_rpm < 1 || (config->version == 6 ? config->max_rpm != 150 :
+        (config->version == 3 || config->version == 4 || config->version == 5) ? config->max_rpm != 100 : config->max_rpm > 10) ||
         floor(config->max_rpm) != config->max_rpm ||
         !isfinite(config->gyro_scale_rad_s) || config->gyro_scale_rad_s <= 0 ||
         config->gyro_scale_rad_s > 0.01f)
@@ -107,10 +109,10 @@ int Exec_Config(Exec *exec, const ExecConfig *config, uint32_t now_ms)
     track.imu_epoch = odom.imu_epoch;
     track.imu_source_epoch = odom.imu_source_epoch;
     track.calibration = config->version;
-    if (config->version == 3 || config->version == 4 || config->version == 5)
+    if (config->version == 3 || config->version == 4 || config->version == 5 || config->version == 6)
     {
         /* 与离线闭环同一档；高轮速仅供下文冻结的两段目标使用。 */
-        odom.max_rpm = 120;
+        odom.max_rpm = config->version == 6 ? 180 : 120;
         odom.max_yaw_rad_s = 5;
         track.kp_xy = 2;
         track.kp_yaw = 3;
@@ -171,10 +173,60 @@ static int Observe(Exec *exec, uint32_t now_ms)
     return Stamp_Check(&sample->gyro_stamp, now_ms, 250);
 }
 
+int Exec_Ready(Exec *exec, uint32_t now_ms)
+{
+    unsigned index;
+    ExecGate *gate;
+    /* 只更新实时观测快照，不使能、不发送CAN；供按键准备与正式使能共用。 */
+    if (!exec)
+    {
+        return 0;
+    }
+    gate = &exec->gate;
+    memset(gate, 0, sizeof(*gate));
+    gate->now_ms = now_ms;
+    gate->pose_ms = exec->odom.pose.tick_ms;
+    gate->yaw_ms = exec->odom.yaw_stamp.last_ms;
+    gate->gyro_ms = exec->gyro.stamp.last_ms;
+    for (index = 0; index < 4; index++)
+    {
+        gate->position_ms[index] = exec->position[index].stamp.last_ms;
+        gate->speed_ms[index] = exec->speed[index].stamp.last_ms;
+    }
+    if (exec->mode != EXEC_OBSERVING)
+        gate->mask |= 1U;
+    if (exec->fault)
+        gate->mask |= 2U;
+    if (!Observe(exec, now_ms))
+    {
+        OdomPose pose;
+        RxStamp stamp;
+        double heading;
+        gate->mask |= 4U;
+        if (!Odom_Read(&exec->odom, now_ms, &pose))
+            gate->mask |= 32U;
+        if (!Odom_Heading(&exec->odom, now_ms, &heading, &stamp))
+            gate->mask |= 64U;
+        for (index = 0; index < 4; index++)
+        {
+            if (!Stamp_Check(&exec->position[index].stamp, now_ms, 250))
+                gate->mask |= 128U;
+            if (!Stamp_Check(&exec->speed[index].stamp, now_ms, 250))
+                gate->mask |= 256U;
+        }
+        if (!Stamp_Check(&exec->gyro.stamp, now_ms, 250))
+            gate->mask |= 512U;
+    }
+    if (!exec->io.ready(now_ms, 0, 0))
+        gate->mask |= 8U;
+    if (exec->io.fault())
+        gate->mask |= 16U;
+    return !gate->mask;
+}
+
 int Exec_Arm(Exec *exec, uint32_t now_ms)
 {
-    if (exec->mode != EXEC_OBSERVING || exec->fault || !Observe(exec, now_ms) ||
-        !exec->io.ready(now_ms, 0, 0) || exec->io.fault())
+    if (!Exec_Ready(exec, now_ms))
     {
         return -1;
     }
@@ -289,9 +341,20 @@ static unsigned FrozenIndex(const RefSpec *ref, uint32_t version, uint32_t actio
     return version == 5 ? BatchIndex(ref, action) : version == 4 ? TourIndex(ref) : version == 3 ? RawIndex(ref) : 0;
 }
 
+static int CalibrationMatch(const RefSpec *ref)
+{
+    unsigned index;
+    for (index = 0; index < 3; index++)
+        if (memcmp(ref, CalibrationRefs[index], sizeof(*ref)) == 0)
+            return 1;
+    return 0;
+}
+
 static int GoalValid(const TrackGoal *goal)
 {
     const RefSpec *ref = &goal->reference;
+    if (CalibrationMatch(ref))
+        return goal->id == 1 && goal->timeout_ms == 10000;
     if (RawIndex(ref) || TourIndex(ref) || BatchIndex(ref, goal->id))
     {
         return goal->id != 0 && goal->timeout_ms == 30000;
@@ -359,6 +422,9 @@ int Exec_Goal(Exec *exec, const TrackGoal *goal, uint32_t now_ms)
     {
         return -1;
     }
+    if ((exec->config.version == 6 && !CalibrationMatch(&goal->reference)) ||
+        (exec->config.version != 6 && CalibrationMatch(&goal->reference)))
+        return -1;
     if (((exec->config.version == 3 || exec->config.version == 4 || exec->config.version == 5) && FrozenIndex(&goal->reference, exec->config.version, goal->id) == 0) ||
         ((exec->config.version != 3 && exec->config.version != 4 && exec->config.version != 5) && (RawIndex(&goal->reference) || TourIndex(&goal->reference) || BatchIndex(&goal->reference, goal->id))) ||
         (goal->reference.kind == 1 && goal->reference.x_m == 1.05f && exec->config.max_rpm > 6))
@@ -552,14 +618,15 @@ void Exec_Run(Exec *exec, uint32_t now_ms)
         int north = exec->last_goal.reference.kind == 1 &&
             exec->last_goal.reference.x_m == 1.05f && exec->last_goal.reference.y_m == -0.13f;
         unsigned raw = FrozenIndex(&exec->last_goal.reference, exec->config.version, exec->last_goal.id);
-        double distance_limit = raw ? 2.0 : north ? 1.10 : 0.20;
-        double yaw_limit = raw ? fabs(exec->last_goal.reference.yaw_rad) + 0.10 : north ? 0.05 : QuarterTurn(&exec->last_goal.reference) ? EXEC_PI / 2 + 0.10 : 0.22;
+        int calibration = exec->config.version == 6 && CalibrationMatch(&exec->last_goal.reference);
+        double distance_limit = raw ? 2.0 : north ? 1.10 : calibration ? 1.02 : 0.20;
+        double yaw_limit = raw ? fabs(exec->last_goal.reference.yaw_rad) + 0.10 : (north || calibration) ? 0.05 : QuarterTurn(&exec->last_goal.reference) ? EXEC_PI / 2 + 0.10 : 0.22;
         double dx = exec->observation.pose.x_m - exec->track.plan.origin[0];
         double dy = exec->observation.pose.y_m - exec->track.plan.origin[1];
         double heading = exec->track.plan.origin[2];
         double local_x = cos(heading) * dx + sin(heading) * dy;
         double local_y = -sin(heading) * dx + cos(heading) * dy;
-        if (raw)
+        if (raw || calibration)
         {
             RefPoint point;
             double seconds = (uint32_t)(now_ms - exec->track.start_ms) / 1000.0;
@@ -572,6 +639,11 @@ void Exec_Run(Exec *exec, uint32_t now_ms)
             }
         }
         /* 独立偏离走廊保护；不因延长目标距离而删除横向和航向限制。 */
+        if (calibration && (fabs(local_y) > .02 || local_x < -.01 || local_x > 1.02))
+        {
+            Exec_Stop(exec, 6, now_ms);
+            return;
+        }
         if (north && (fabs(0.13 * local_x + 1.05 * local_y) / 1.058017 > 0.02 ||
             local_x < -0.01 || local_x > 1.07))
         {

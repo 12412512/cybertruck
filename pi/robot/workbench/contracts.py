@@ -45,6 +45,16 @@ class Docking(Input):
     staging_m: float = Field(default=.05, ge=0, le=.25)
 
 
+class Dynamics(Input):
+    lag_ff_s: float = Field(default=0., ge=0., le=.15)
+    wheel_slew_rpm_s: float = Field(default=180., ge=60., le=800.)
+    staging_slowdown: bool = False
+    acceleration_m_s2: float = Field(default=.25, ge=.1, le=1.5)
+    jerk_m_s3: float = Field(default=.8, ge=.2, le=5.)
+    dock_m_s: float = Field(default=.025, ge=.015, le=.10)
+    turn_rate_rad_s: float = Field(default=1.2, ge=.3, le=2.)
+
+
 class PlanInput(Input):
     source: Literal['batch', 'tour', 'raw', 'custom'] = 'batch'
     start: Literal['start_1', 'start_2'] = 'start_1'
@@ -55,6 +65,7 @@ class PlanInput(Input):
     max_rpm: float = Field(default=100., ge=20., le=350.)
     docking: Docking = Field(default_factory=Docking)
     obstacles: list[Obstacle] = Field(default_factory=list, max_length=20)
+    dynamics: Dynamics = Field(default_factory=Dynamics)
 
     @model_validator(mode='after')
     def unique_obstacles(self):

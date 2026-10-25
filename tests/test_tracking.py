@@ -26,6 +26,19 @@ def clone(value):
 
 
 class TrackingTests(unittest.TestCase):
+    def test_lag_feedforward_is_opt_in_and_bounded(self):
+        baseline = ClosedLoop(self.library, auto_start=False)
+        self.assertEqual(baseline.config.lag_ff_s, 0.)
+        for value in (-.001, .151, float('nan')):
+            config = clone(baseline.config)
+            config.lag_ff_s = value
+            with self.assertRaises(ValueError):
+                ClosedLoop(self.library, config=config, auto_start=False)
+        config = clone(baseline.config)
+        config.lag_ff_s = .09
+        candidate = ClosedLoop(self.library, config=config, auto_start=False)
+        self.assertEqual(candidate.tracker.output()['state'], 0)
+
     @classmethod
     def setUpClass(cls):
         cls.library = ROOT / 'output/tests' / ('tracking.dll' if os.name == 'nt' else 'tracking.so')

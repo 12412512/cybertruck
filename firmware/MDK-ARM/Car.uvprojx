@@ -789,6 +789,11 @@
               <FilePath>../User/Config/bus_config.h</FilePath>
             </File>
             <File>
+              <FileName>calibration_route.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Config/calibration_route.h</FilePath>
+            </File>
+            <File>
               <FileName>mech_hw.h</FileName>
               <FileType>5</FileType>
               <FilePath>../User/Config/mech_hw.h</FilePath>
@@ -917,6 +922,16 @@
               <FileName>ref.h</FileName>
               <FileType>5</FileType>
               <FilePath>../User/Control/ref.h</FilePath>
+            </File>
+            <File>
+              <FileName>start.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Control/start.c</FilePath>
+            </File>
+            <File>
+              <FileName>start.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Control/start.h</FilePath>
             </File>
             <File>
               <FileName>track.c</FileName>

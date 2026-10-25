@@ -18,6 +18,15 @@ def put(parent, path, value):
 
 
 def sync():
+    # 一米标定冻结目标与Python正式协议同源，不手工维护第二份速度常量。
+    sys.path.insert(0, str(ROOT / 'pi'))
+    from robot.device.execution import trial
+    refs = [trial(name)[8:] for name in ('cal_slow', 'cal_medium', 'cal_fast')]
+    rows = ['    {' + ','.join(str(value) for value in raw) + '}' for raw in refs]
+    header = ('/* 由calibration_trials.json与正式trial协议生成；仅一米单次标定。 */\n'
+              '#ifndef CALIBRATION_ROUTE_H\n#define CALIBRATION_ROUTE_H\n'
+              'static const unsigned char CalibrationRefs[3][88] = {\n' + ',\n'.join(rows) + '\n};\n#endif\n')
+    (ROOT / 'firmware/User/Config/calibration_route.h').write_text(header, encoding='utf-8')
     profile = json.loads((ROOT / 'config/base_trials.json').read_text(encoding='utf-8'))
     addresses = profile['addresses']
     if (len(addresses) != 4 or len(set(addresses)) != 4

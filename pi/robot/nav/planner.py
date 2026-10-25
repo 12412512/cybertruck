@@ -30,7 +30,8 @@ class Segment:
 
 class Planner:
     def __init__(self, library, geometry, field=None, max_rpm=100, cruise_m_s=CRUISE_M_S,
-                 lookahead=True,turn_rate_rad_s=1.2, cancelled=None):
+                 lookahead=True,turn_rate_rad_s=1.2, cancelled=None,
+                 acceleration_m_s2=.25, jerk_m_s3=.8, dock_m_s=.025):
         self.library, self.geometry = library, geometry
         self.field = field or Field()
         self.data = self.field.data
@@ -44,6 +45,11 @@ class Planner:
         if not math.isfinite(turn_rate_rad_s) or not 0 < turn_rate_rad_s <= 2:
             raise ValueError('模拟转姿角速上限必须为(0,2]rad/s')
         self.turn_rate_rad_s = turn_rate_rad_s
+        if any(not math.isfinite(v) or v <= 0 for v in (acceleration_m_s2, jerk_m_s3, dock_m_s)):
+            raise ValueError('运动曲线参数必须为正有限数')
+        self.acceleration_m_s2 = acceleration_m_s2
+        self.jerk_m_s3 = jerk_m_s3
+        self.dock_m_s = dock_m_s
         if (geometry.layout != 1 or any(not math.isfinite(v) or v <= 0 for v in
                 (geometry.radius_m, geometry.half_length_m, geometry.half_width_m, max_rpm))):
             raise ValueError('规划器需要显式有效的合成轮参数')
@@ -77,9 +83,12 @@ class Planner:
             if kind in ('POSE','FLOW','WINDOW') or (terminal and kind in ('LINE','DIAGONAL')):
                 spec = flow_specification(self.library,kind,start,end,corner,radius,terminal,window_m,
                                           velocity=self.cruise_m_s,lookahead=self.lookahead,head_pad_m=head_pad_m,
-                                          turn_rate_rad_s=self.turn_rate_rad_s)
+                                          turn_rate_rad_s=self.turn_rate_rad_s,
+                                          acceleration_m_s2=self.acceleration_m_s2,
+                                          jerk_m_s3=self.jerk_m_s3, dock_m_s=self.dock_m_s)
             else:
-                spec = specification(kind,start,end,radius,reverse,self.cruise_m_s)
+                spec = specification(kind,start,end,radius,reverse,self.cruise_m_s,
+                                     self.acceleration_m_s2,self.jerk_m_s3)
             for attempt in range(4):
                 reference = NativeReference(self.library,start,spec)
                 wheel_bound = self.wheel_bound(reference)

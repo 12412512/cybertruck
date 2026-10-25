@@ -40,6 +40,7 @@ typedef struct
     uint32_t imu_epoch;
     uint32_t imu_source_epoch;
     uint32_t calibration;
+    double lag_ff_s; /* 实测动力滞后前馈，秒；0关闭，不改变停止/到位判定。 */
 } TrackConfig;
 
 typedef struct
@@ -108,6 +109,7 @@ typedef struct
  * 真实所有者还需在前后检查接收源代、总线故障和执行预算。 */
 ODOM_API size_t Track_Bytes(void);
 ODOM_API int Track_Init(Track *track, const TrackConfig *config);
+ODOM_API uint32_t Track_ConfigBytes(void);
 /* 1接受，0同ID同内容重复，-2同ID冲突，-3忙，-1非法/锁存异常。 */
 ODOM_API int Track_Start(Track *track, const TrackGoal *goal,
                          const TrackObservation *observation, uint32_t now_ms);

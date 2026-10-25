@@ -168,6 +168,107 @@ class ExecutionTests(unittest.TestCase):
         self.assertNotEqual(self.device.call(GOAL, trial('straight')).payload[0], p.OK)
         self.assertEqual(self.lib.Device_Value(1), 0)
 
+    def test_key_preparation_reads_fresh_feedback_before_any_arm(self):
+        self.device.open()
+        self.device.call(CONFIG, config_payload(profile()))
+        for _ in range(8):
+            self.device.step()
+        self.assertEqual(self.lib.Device_ObservationValid(), 0)
+        self.assertEqual(self.lib.Device_StartReady(self.device.tick), 1)
+        self.assertEqual(self.lib.Device_ObservationValid(), 1)
+        self.assertEqual(self.lib.Device_Value(0), 1)
+        self.assertEqual(self.lib.Device_Value(4), 0)
+        self.assertEqual(self.lib.Device_StartReady(self.device.tick + 251), 0)
+
+    def test_physical_start_event_precedes_arm_and_goal(self):
+        import struct
+        from robot.device.execution import START_PREPARE, START_STATE
+
+        class KeyTransport(SimTransport):
+            def __init__(self, library):
+                super().__init__(library)
+                self.key_replies = []
+                self.key_polls = 0
+                self.key_ticket = self.key_version = 0
+
+            def write(self, wire):
+                packet = p.Decoder().feed(wire)[0]
+                if packet.kind in (START_PREPARE, START_STATE):
+                    self.requests.append(packet)
+                    if packet.kind == START_PREPARE:
+                        self.key_ticket, self.key_version = struct.unpack('<II', packet.payload)
+                    else:
+                        self.key_polls += 1
+                    phase = 4 if self.key_polls >= 3 else 1
+                    data = bytes([p.OK]) + struct.pack('<6I', 1, phase, self.key_ticket,
+                                                       self.key_version, int(phase == 4), 0)
+                    self.key_replies.append(p.Packet(packet.kind | 0x80, packet.boot, packet.session,
+                                                     packet.request, 0, data).encode())
+                    return len(wire)
+                if packet.kind in (ARM, GOAL):
+                    assert self.key_polls >= 3, '按键完成前不得使能或提交目标'
+                return super().write(wire)
+
+            def read(self, size=4096):
+                return self.key_replies.pop(0) if self.key_replies else super().read(size)
+
+        transport = KeyTransport(self.lib)
+        with tempfile.TemporaryDirectory() as directory:
+            result = run_trial(transport, profile(), 'straight', directory, lambda *a, **k: None,
+                               clock=lambda: transport.now, sleep=transport.sleep,
+                               simulation=True, wait_start=True)
+        self.assertTrue(result['controller_complete'])
+        self.assertGreaterEqual(transport.key_polls, 3)
+
+    def test_start_cancel_record_schema_and_identity(self):
+        import struct
+        from robot.device.execution import START_STATE
+        link = MotionLink()
+        link.boot = 123
+        request = p.Packet(START_STATE, 123, link.session, 7, 250)
+        fields = [2, 5, 11, 6, 0, 0, 1, 3020, 516, 3020,
+                  2980, 3010, 2769, 2990, 2991, 2992, 2993, 3000, 3001, 3002, 3003]
+        reply = p.Packet(START_STATE | 0x80, 123, link.session, 7, 0,
+                         bytes([p.OK]) + struct.pack('<21I', *fields))
+        self.assertTrue(link.custom_reply(reply, request, 1.))
+        self.assertEqual(link.start_event['reason'], 1)
+        self.assertEqual(link.start_event['guard_mask'], 516)
+        self.assertEqual(link.start_event['gyro_ms'], 2769)
+        malformed = p.Packet(START_STATE | 0x80, 123, link.session, 7, 0,
+                             bytes([p.OK]) + struct.pack('<6I', 2, 5, 11, 6, 0, 0))
+        link.custom_reply(malformed, request, 2.)
+        self.assertTrue(link.failed)
+
+    def test_key_gate_keeps_250ms_gyro_freshness_without_arming(self):
+        self.device.open()
+        self.device.call(CONFIG, config_payload(profile()))
+        for _ in range(8):
+            self.device.step()
+        self.assertEqual(self.lib.Device_StartReady(self.device.tick), 1)
+        self.lib.Device_Drop(8)
+        for _ in range(24):
+            self.device.step()
+        self.assertEqual(self.lib.Device_StartReady(self.device.tick), 1)
+        self.device.step()
+        self.assertEqual(self.lib.Device_StartReady(self.device.tick), 0)
+        self.assertEqual(self.lib.Device_StartMask() & 512, 512)
+        self.assertEqual(self.lib.Device_Value(4), 0)
+        self.assertEqual(self.lib.Device_Value(3), 0)
+
+    def test_one_meter_calibration_profiles_are_isolated_and_close_loop(self):
+        value = json.loads((ROOT / 'config/calibration_trials.json').read_text(encoding='utf-8'))
+        for name in ('cal_slow', 'cal_medium', 'cal_fast'):
+            transport = SimTransport(self.lib)
+            with tempfile.TemporaryDirectory() as directory:
+                result = run_trial(transport, value, name, directory, lambda *a, **k: None,
+                                   clock=lambda: transport.now, sleep=transport.sleep, simulation=True)
+            self.assertTrue(result['controller_complete'], name)
+            self.assertAlmostEqual(transport.plant.x, 1., delta=.01)
+            self.assertEqual(sum(packet.kind == GOAL for packet in transport.requests), 1)
+        with self.assertRaises(ValueError):
+            run_trial(SimTransport(self.lib), profile(), 'cal_fast', '.', lambda *a, **k: None,
+                      simulation=True)
+
     def test_config_binds_current_imu_epoch_and_later_change_stops(self):
         self.lib.Device_Epoch(2)
         self.device.step()

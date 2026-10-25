@@ -57,6 +57,13 @@ typedef struct
     int64_t value, previous_value;
 } ExecFault;
 
+/* 准备检查失败证据；只读快照，不替代停止或动作结果。 */
+typedef struct
+{
+    uint32_t mask, now_ms, pose_ms, yaw_ms, gyro_ms;
+    uint32_t position_ms[4], speed_ms[4];
+} ExecGate;
+
 typedef struct
 {
     ExecConfig config;
@@ -70,11 +77,13 @@ typedef struct
     uint32_t mode, fault, tick_ms, arm_ms, stop_ms, control_ms;
     uint32_t have_goal, enabled_wheels, stop_confirmed;
     ExecFault first_fault; /* 只锁存首次里程计故障，普通查询/STOP不清除。 */
+    ExecGate gate;
 } Exec;
 
 void Exec_Init(Exec *exec, ExecIo io);
 int Exec_Config(Exec *exec, const ExecConfig *config, uint32_t now_ms);
 int Exec_Arm(Exec *exec, uint32_t now_ms);
+int Exec_Ready(Exec *exec, uint32_t now_ms);
 int Exec_Goal(Exec *exec, const TrackGoal *goal, uint32_t now_ms);
 void Exec_Motor(Exec *exec, const MotorSample *sample, uint32_t now_ms);
 void Exec_Imu(Exec *exec, const ImuSample *sample, uint32_t now_ms);

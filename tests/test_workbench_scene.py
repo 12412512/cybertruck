@@ -130,6 +130,24 @@ class SceneTests(unittest.TestCase):
         self.assertEqual(field.check(result[0].reference, allowed), [])
         self.assertLessEqual(planner.wheel_bound(result[0].reference), 100.)
 
+    def test_dynamics_are_frozen_per_reference_without_changing_defaults(self):
+        from robot.nav.reference import flow_specification
+        start, end = Pose(.3, .4, 0), Pose(1.3, .4, math.pi / 2)
+        lib = c.CDLL(str(self.library))
+        tuned = flow_specification(lib, 'WINDOW', start, end, Pose(.8, .4, 0),
+                                   window_m=.2, velocity=.45, lookahead=True,
+                                   acceleration_m_s2=.5, jerk_m_s3=1.5)
+        original = specification('LINE', start, end)
+        self.assertAlmostEqual(original.linear.acceleration, .25)
+        self.assertAlmostEqual(original.linear.jerk, .8)
+        self.assertAlmostEqual(tuned.linear.acceleration, .5)
+        self.assertAlmostEqual(tuned.linear.jerk, 1.5)
+        reference = NativeReference(lib, start, tuned)
+        for index in range(501):
+            point = reference.point(reference.duration_s * index / 500)
+            self.assertLessEqual(math.hypot(point.ax_m_s2, point.ay_m_s2), .5001)
+            self.assertLessEqual(math.hypot(point.jx_m_s3, point.jy_m_s3), 1.5001)
+
     def test_proven_clear_acceleration_matches_original_adaptive_checks(self):
         field = make_field(PlanInput(obstacles=[Obstacle(id='B1', x_m=.7, y_m=2.12)]))
         lib = c.CDLL(str(self.library))

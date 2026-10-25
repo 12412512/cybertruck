@@ -7,8 +7,10 @@ from . import protocol as p
 from .link import Link
 from .feedback import Feedback, FEEDBACK
 from .can_capture import CAN_CAPTURE, CaptureReader
+from .tracking import Spec
 
 CONFIG, ARM, GOAL, STATUS = range(32, 36)
+START_PREPARE, START_STATE = 59, 60
 CONFIG_DATA = struct.Struct('<I3fIfifff4B4b4b')
 STATUS_DATA = struct.Struct('<11I9f')
 SPEC_DATA = struct.Struct('<I3f4f2i6fI5f')
@@ -25,7 +27,8 @@ def config_payload(profile):
     if any(type(v) not in (int, float) or not math.isfinite(v) or not 0 < v <= .5 for v in geometry):
         raise ValueError('试验几何无效')
     counts, maximum = profile['counts_per_rev'], profile['max_rpm']
-    if counts != 65536 or type(maximum) is not int or not (maximum == 100 if profile['version'] in (3, 4, 5) else 1 <= maximum <= 10):
+    allowed = maximum == 150 if profile['version'] == 6 else maximum == 100 if profile['version'] in (3, 4, 5) else 1 <= maximum <= 10
+    if counts != 65536 or type(maximum) is not int or not allowed:
         raise ValueError('反馈单位或试验轮速不符合本阶段范围')
     addresses = profile['addresses']
     if (len(addresses) != 4 or len(set(addresses)) != 4
@@ -41,6 +44,20 @@ def config_payload(profile):
 
 def trial(name, action_id=1):
     """目标相对动作开始的车体，X前/Y左/逆时针正；不表示实测通过。"""
+    if name in ('cal_slow', 'cal_medium', 'cal_fast'):
+        from pathlib import Path
+        import json
+        profile = json.loads((Path(__file__).resolve().parents[3] / 'config/calibration_trials.json').read_text(encoding='utf-8'))
+        if action_id != 1:
+            raise ValueError('每次标定只允许单独一个动作')
+        speed = profile['calibration_speeds_m_s'][('cal_slow', 'cal_medium', 'cal_fast').index(name)]
+        ref = Spec()
+        ref.kind, ref.x_m = 1, 1.
+        ref.linear.velocity = speed
+        ref.linear.acceleration = profile['calibration_acceleration_m_s2']
+        ref.linear.jerk = profile['calibration_jerk_m_s3']
+        ref.angular.velocity, ref.angular.acceleration, ref.angular.jerk = .7, 2., 12.
+        return struct.pack('<II', 1, 10000) + bytes(ref)
     options = {'north': (1, 1.05, -.13, 0.), 'straight': (1, .10, 0., 0.), 'side': (1, 0., .08, 0.),
                'turn': (2, 0., 0., math.radians(10)),
                'diagonal': (1, .06, .06, 0.), 'arc': (4, 0., 0., 0.),
@@ -93,8 +110,10 @@ class MotionLink(Link):
         self.can_capture = CaptureReader()
         self.last_can_capture = -1.
         self.can_capture_error = None
+        self.start_event = None
 
     def reset(self, reason):
+        self.start_event = None
         # 重连只恢复观察。未决命令作未知，不排队重放，不自动使能。
         if (self.command is not None or self.execution is not None
                 or (self.pending and self.pending[0].kind in (CONFIG, ARM, GOAL))):
@@ -110,8 +129,8 @@ class MotionLink(Link):
 
     def submit(self, kind, payload=b''):
         if (not self.bound or self.failed or self.command is not None
-                or (self.pending and self.pending[0].kind in (CONFIG, ARM, GOAL))
-                or kind not in (CONFIG, ARM, GOAL)):
+                or (self.pending and self.pending[0].kind in (CONFIG, ARM, GOAL, START_PREPARE, START_STATE))
+                or kind not in (CONFIG, ARM, GOAL, START_PREPARE, START_STATE)):
             raise ValueError('会话未就绪、命令未决或执行已中断')
         self.command = (kind, payload)
         self.result = None
@@ -138,7 +157,7 @@ class MotionLink(Link):
         if now - self.last_execution >= .05:
             self.last_execution = now
             return STATUS, b''
-        if self.firmware in ('GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11', 'GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14') and now - self.last_fault_query >= .2:
+        if self.firmware in ('GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11', 'GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17') and now - self.last_fault_query >= .2:
             self.last_fault_query = now
             return 37, b''
         if now - self.last_sample >= .05:
@@ -146,7 +165,7 @@ class MotionLink(Link):
             self.sample_kind = 5 if self.sample_kind == 4 else 4
             return FEEDBACK, bytes([self.sample_kind, 0])
         # 仅新版本且执行器静止模式才读冻结页，不挤占运动期反馈；不扩大实车运动版本白名单。
-        if (self.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14') and self.execution
+        if (self.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17') and self.execution
                 and self.execution['mode'] in (0, 1, 6) and self.execution['can_errors']
                 and not self.can_capture.result and not self.can_capture_error
                 and now - self.last_can_capture >= .05):
@@ -184,13 +203,28 @@ class MotionLink(Link):
                 except ValueError:
                     self.samples.clear()
             return True
-        if request.kind not in (CONFIG, ARM, GOAL, STATUS, p.STOP):
+        if request.kind not in (CONFIG, ARM, GOAL, STATUS, p.STOP, START_PREPARE, START_STATE):
             return False
         if packet.boot != self.boot or not packet.payload or packet.payload[0] != p.OK:
             self.failed = True
             self.result = dict(kind=request.kind, accepted=False, outcome='rejected_or_unknown')
             return True
         if request.kind != STATUS:
+            if request.kind in (START_PREPARE, START_STATE):
+                if len(packet.payload) not in (25, 85):
+                    self.failed = True
+                    return True
+                values = struct.unpack('<6I', packet.payload[1:25])
+                if (values[0] not in (1, 2) or len(packet.payload) != (25 if values[0] == 1 else 85)
+                        or values[1] > 5 or values[4] != int(values[1] == 4)):
+                    self.failed = True
+                    return True
+                self.start_event = dict(zip(('schema', 'phase', 'ticket', 'version', 'fired', 'beep'), values))
+                if values[0] == 2:
+                    names = ('reason', 'aborted_ms', 'guard_mask', 'guard_ms', 'pose_ms', 'yaw_ms',
+                             'gyro_ms', 'position1_ms', 'position2_ms', 'position3_ms', 'position4_ms',
+                             'speed1_ms', 'speed2_ms', 'speed3_ms', 'speed4_ms')
+                    self.start_event.update(zip(names, struct.unpack('<15I', packet.payload[25:])))
             self.result = dict(kind=request.kind, accepted=True)
             return True
         if len(packet.payload) != 1 + STATUS_DATA.size:

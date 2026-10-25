@@ -7,11 +7,15 @@
 #include "addresses.h"
 #include "can.h"
 #include "mech_port.h"
+#include "start.h"
+#include "gpio.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 static Exec executor;
+static Start start_key;
+static ExecGate start_failure;
 static uint32_t diag_busy, query_index, query_ms, enable_sent;
 static uint32_t zero_sequence, zero_action, zero_id;
 static uint32_t stop_barrier, stable_tick;
@@ -155,6 +159,8 @@ static int Stopped(uint32_t since)
 
 static void StopCommand(uint32_t reason, uint32_t now)
 {
+    Start_Cancel(&start_key);
+    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
     MechPort_Stop(reason, now);
     Exec_Stop(&executor, reason, now);
 }
@@ -163,6 +169,43 @@ static uint8_t Command(uint8_t type, const uint8_t *data, uint16_t size, uint8_t
                        uint32_t now)
 {
     uint32_t configured = executor.config.version;
+    if (type == EXEC_ARM && (start_key.phase != START_FIRED ||
+        start_key.version != configured || start_key.boot != Comm_Boot() ||
+        start_key.session != Comm_Session()))
+        return COMM_READONLY;
+    if (type == 59 || type == 60)
+    {
+        if (type == 59)
+        {
+            uint32_t ticket = size == 8 ? (uint32_t)Frame_Get(data, 4) : 0;
+            uint32_t version = size == 8 ? (uint32_t)Frame_Get(data + 4, 4) : 0;
+            uint8_t ready = (uint8_t)(!startup_pending && !Fault() && !executor.fault &&
+                Exec_Ready(&executor, now) &&
+                !MechPort_Owned() && Ready(now, 0, 0));
+            if (!ticket || version != configured || !Start_Prepare(&start_key, Comm_Boot(), Comm_Session(),
+                ticket, version, now, HAL_GPIO_ReadPin(START_KEY_GPIO_Port, START_KEY_Pin) == GPIO_PIN_RESET, ready))
+                return COMM_READONLY;
+        }
+        else if (size)
+            return COMM_FORMAT;
+        Frame_Put(reply, 2, 4);
+        Frame_Put(reply + 4, start_key.phase, 4);
+        Frame_Put(reply + 8, start_key.ticket, 4);
+        Frame_Put(reply + 12, start_key.version, 4);
+        Frame_Put(reply + 16, start_key.phase == START_FIRED, 4);
+        Frame_Put(reply + 20, start_key.beep, 4);
+        Frame_Put(reply + 24, start_key.reason, 4);
+        Frame_Put(reply + 28, start_key.aborted_ms, 4);
+        Frame_Put(reply + 32, start_failure.mask, 4);
+        Frame_Put(reply + 36, start_failure.now_ms, 4);
+        Frame_Put(reply + 40, start_failure.pose_ms, 4);
+        Frame_Put(reply + 44, start_failure.yaw_ms, 4);
+        Frame_Put(reply + 48, start_failure.gyro_ms, 4);
+        memcpy(reply + 52, start_failure.position_ms, 16);
+        memcpy(reply + 68, start_failure.speed_ms, 16);
+        *reply_size = 84;
+        return COMM_OK;
+    }
     if (type >= 48 && type <= 58)
     {
         if (type != 58 && (startup_pending || executor.mode == EXEC_ACTIVE ||
@@ -204,6 +247,7 @@ void Base_Init(void)
     ExecIo io = {Ready, EnableWheel, Bus_Start, Send, Stop, Fault, Stopped, Rearm};
     CommHooks hooks = {StopCommand, Command};
     Exec_Init(&executor, io);
+    Start_Init(&start_key);
     MechPort_Init();
     Bus_Observe(MechPort_Feed);
     /* 启动接收不等于使能或动作；配置/使能/目标分别显式提交。 */
@@ -340,6 +384,16 @@ void Base_Run(void)
         Exec_Sent(&executor, zero_action, zero_id, bus_diag.sent_tick);
     }
     Exec_Run(&executor, now);
+    {
+        uint32_t phase = start_key.phase;
+        uint8_t ready = (uint8_t)Exec_Ready(&executor, now);
+        Start_Run(&start_key, Comm_Boot(), Comm_Session(), now,
+            HAL_GPIO_ReadPin(START_KEY_GPIO_Port, START_KEY_Pin) == GPIO_PIN_RESET,
+            (uint8_t)(!Fault() && ready && !MechPort_Owned()));
+        if (phase >= START_RELEASE && phase <= START_BEEP && start_key.phase == START_ABORTED)
+            start_failure = executor.gate;
+    }
+    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, start_key.beep ? GPIO_PIN_RESET : GPIO_PIN_SET);
     MechPort_Run(HAL_GetTick(), (uint8_t)(executor.stop_confirmed && Ready(HAL_GetTick(), 0, 0)),
                  Fault() | executor.fault);
     Query(now);

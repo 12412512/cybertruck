@@ -11,9 +11,10 @@ DOCK_M_S = .025
 SETTLE_ESTIMATE_S = 1.0
 
 
-def specification(kind, start, end, radius=.1, reverse=False, velocity=CRUISE_M_S):
+def specification(kind, start, end, radius=.1, reverse=False, velocity=CRUISE_M_S,
+                  acceleration_m_s2=.25, jerk_m_s3=.8):
     spec = Spec()
-    spec.linear = Limit(velocity, .25, .8)
+    spec.linear = Limit(velocity, acceleration_m_s2, jerk_m_s3)
     spec.angular = Limit(.7, 8, 300)
     if kind in ('LINE', 'DIAGONAL'):
         local = relative(start, end)
@@ -33,10 +34,12 @@ def specification(kind, start, end, radius=.1, reverse=False, velocity=CRUISE_M_
 
 def flow_specification(library, kind, start, end, corner=None, radius=.1, terminal=False,
                        window_m=.08, velocity=CRUISE_M_S, lookahead=False, head_pad_m=0,
-                       turn_rate_rad_s=.7):
+                       turn_rate_rad_s=.7, acceleration_m_s2=.25, jerk_m_s3=.8,
+                       dock_m_s=DOCK_M_S):
     """位置曲线与车身朝向解耦；内部低速区不创建第二个动作或停车状态。"""
     local = relative(start, end)
-    spec = specification('LINE', start, end, velocity=velocity)
+    spec = specification('LINE', start, end, velocity=velocity,
+                         acceleration_m_s2=acceleration_m_s2, jerk_m_s3=jerk_m_s3)
     spec.yaw_rad = angle(end.yaw_rad-start.yaw_rad)
     spec.kind = 5
     spec.angular = Limit(.7, 2.0, 12.0)
@@ -66,7 +69,7 @@ def flow_specification(library, kind, start, end, corner=None, radius=.1, termin
             spec.curve_velocity_m_s = speed
             spec.yaw_begin_m = max(0,lead-head_pad_m)
             spec.yaw_end_m = min(lead+core_length+tail,lead+core_length+head_pad_m)
-        spec.tail_velocity_m_s = min(DOCK_M_S,velocity) if terminal else velocity
+        spec.tail_velocity_m_s = min(dock_m_s,velocity) if terminal else velocity
     elif kind == 'WINDOW':
         if corner is None:
             raise ValueError('转姿段缺少安全窗口')
@@ -77,16 +80,16 @@ def flow_specification(library, kind, start, end, corner=None, radius=.1, termin
         spec.kind = 6
         spec.yaw_begin_m, spec.yaw_end_m = along-window_m, along+window_m
         spec.curve_velocity_m_s = velocity
-        spec.tail_velocity_m_s = min(DOCK_M_S,velocity) if terminal else velocity
+        spec.tail_velocity_m_s = min(dock_m_s,velocity) if terminal else velocity
     elif terminal:
         distance = math.hypot(local.x_m,local.y_m)
         if distance <= .07:
-            spec.linear.velocity = min(DOCK_M_S,velocity)
+            spec.linear.velocity = min(dock_m_s,velocity)
         else:
             spec.kind = 6
             spec.yaw_begin_m, spec.yaw_end_m = distance-.05, distance-.03
-            spec.curve_velocity_m_s = min(DOCK_M_S,velocity)
-            spec.tail_velocity_m_s = min(DOCK_M_S,velocity)
+            spec.curve_velocity_m_s = min(dock_m_s,velocity)
+            spec.tail_velocity_m_s = min(dock_m_s,velocity)
     if lookahead and kind in ('FLOW','WINDOW'):
         spec.angular.velocity = turn_rate_rad_s
     return spec

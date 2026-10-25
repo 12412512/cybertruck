@@ -17,11 +17,13 @@ class Simulation:
         self.library = library
         self.reset('start_1')
 
-    def reset(self, start, max_rpm=100.):
+    def reset(self, start, max_rpm=100., wheel_slew_rpm_s=180., lag_ff_s=0.):
         calibration = fixture()
         calibration.max_rpm = max(100., max_rpm * 1.2)
         config = settings(calibration)
         config.max_rpm = max_rpm
+        config.slew_rpm_s = wheel_slew_rpm_s
+        config.lag_ff_s = lag_ff_s
         config.position_tol_m, config.yaw_tol_rad = .003, .012
         self.model = ClosedLoop(self.library, config=config, auto_start=False, disturbance=False,
                                 calibration=calibration)
@@ -93,7 +95,9 @@ class Simulation:
 
     def run(self, plan):
         # 显式开始模拟建立独立运行原点，绝不冒充测得的地图配准。
-        self.reset(plan.view['parameters']['start'], plan.view['parameters']['max_rpm'])
+        self.reset(plan.view['parameters']['start'], plan.view['parameters']['max_rpm'],
+                   plan.view['parameters'].get('dynamics', {}).get('wheel_slew_rpm_s', 180.),
+                   plan.view['parameters'].get('dynamics', {}).get('lag_ff_s', 0.))
         self.field = Field(data=plan.view['field'])
         self.plan = plan
         self.run_ms = self.model.elapsed_ms

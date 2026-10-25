@@ -52,6 +52,9 @@ for ($taskTry = 0; $taskTry -lt 30; $taskTry++) {
     Start-Sleep -Milliseconds 100
 }
 if (-not $taskFree) { throw '旧离线服务尚未退出；保留备份，不结束其它进程' }
+# 先重建正式C主机库，避免Python配置结构更新后加载旧ABI；不包含硬件驱动。
+& $taskPython -B (Join-Path $PSScriptRoot 'build_odom.py') --output $taskLibrary
+if ($LASTEXITCODE -ne 0) { throw '新主机模型库构建失败；未启动服务，不连接实车' }
 $taskPreviousPythonPath = $env:PYTHONPATH
 try {
     $env:PYTHONPATH = Join-Path $taskRoot 'pi'

@@ -4,6 +4,11 @@
 
 #define TRACK_HALF 0x80000000UL
 
+uint32_t Track_ConfigBytes(void)
+{
+    return (uint32_t)sizeof(TrackConfig);
+}
+
 static void Publish(Track *track)
 {
     track->output.output_id = ++track->next_output;
@@ -45,6 +50,8 @@ static int Config(const TrackConfig *config)
     {
         return 0;
     }
+    if (!isfinite(config->lag_ff_s) || config->lag_ff_s < 0 || config->lag_ff_s > .15)
+        return 0;
     values[0] = config->kp_xy;
     values[1] = config->kp_yaw;
     values[2] = config->kd_gyro;
@@ -374,6 +381,17 @@ static int Command(Track *track, const TrackObservation *sample, uint32_t now, d
     body.vx_m_s = (float)(cosine * track->output.reference.vx_m_s + sine * track->output.reference.vy_m_s);
     body.vy_m_s = (float)(-sine * track->output.reference.vx_m_s + cosine * track->output.reference.vy_m_s);
     body.wz_rad_s = (float)track->output.reference.wz_rad_s;
+    if (track->config.lag_ff_s > 0)
+    {
+        /* 对车体系目标速度求导，包含旋转坐标的交叉项；不积分加速度定位。 */
+        double ax = cosine * track->output.reference.ax_m_s2 + sine * track->output.reference.ay_m_s2 +
+                    track->output.reference.wz_rad_s * body.vy_m_s;
+        double ay = -sine * track->output.reference.ax_m_s2 + cosine * track->output.reference.ay_m_s2 -
+                    track->output.reference.wz_rad_s * body.vx_m_s;
+        body.vx_m_s += (float)(track->config.lag_ff_s * ax);
+        body.vy_m_s += (float)(track->config.lag_ff_s * ay);
+        body.wz_rad_s += (float)(track->config.lag_ff_s * track->output.reference.angular_accel_rad_s2);
+    }
     if (!Kin_Inverse(track->config.geometry, body, ff) || Kin_Limit(ff, (float)track->config.max_rpm) < 1)
     {
         return TRACK_LIMIT;

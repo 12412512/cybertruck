@@ -7,8 +7,9 @@ import time
 from urllib.error import URLError
 from urllib.request import ProxyHandler, build_opener
 import uuid
+import struct
 
-from .device.execution import MotionLink, CONFIG, ARM, GOAL, config_payload, trial, trials
+from .device.execution import MotionLink, CONFIG, ARM, GOAL, START_PREPARE, START_STATE, config_payload, trial, trials
 from .device.observer import NoRedirect, OwnerClient
 from .main import open_transport
 from .runtime import ProcessLock, save_snapshot
@@ -26,8 +27,13 @@ def require_owner_stopped(origin):
     raise ValueError('旧串口所有者仍在运行；不得抢占或自动停止它')
 
 
-def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, sleep=time.sleep, route=None, simulation=False):
+def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, sleep=time.sleep, route=None, simulation=False,
+              wait_start=False):
     """同一会话执行冻结目标；异常停止，不重发或重连续跑。"""
+    if (case in ('cal_slow', 'cal_medium', 'cal_fast')) != (profile.get('version') == 6):
+        raise ValueError('一米标定必须使用独立version6配置，不能混入旧路线')
+    if profile.get('version') == 6 and route is not None:
+        raise ValueError('标定配置禁止整圈路线')
     if route is not None:
         from .nav.route import validate
         validate(route)
@@ -60,6 +66,8 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
     completed = False
     goal_accepted = False
     identity = uuid.uuid4().hex
+    start_ticket = int(identity[:8], 16) or 1
+    start_poll = -1.
     sequence = 0
     written_at = -1e9
     index = 0
@@ -108,6 +116,7 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
     try:
         while clock() < deadline:
             state = pump()
+            now = clock()
             if pinned_session is not None and (link.boot, link.session) != pinned_session:
                 raise ValueError('路线启动身份或会话变化，禁止自动续跑')
             if link.failed:
@@ -128,8 +137,9 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                     raise ValueError('估计车体包络接近场界，停止；不将里程计当成独立定位证明')
             if stage == 'connect' and link.bound and state and (state['mode'] != 0 or state['stop_confirmed']):
                 # 新候选仅在显式离线模式回归既有轨迹；实车版本入口仍待烧录/只读验收。
-                offline_candidate = simulation and link.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14')
-                if ((not offline_candidate and (link.firmware not in ('GC-BASE-0.3.6', 'GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11')
+                offline_candidate = simulation and link.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17')
+                keyed_firmware = link.firmware == 'GC-BASE-0.3.17'
+                if ((not offline_candidate and not keyed_firmware and (link.firmware not in ('GC-BASE-0.3.6', 'GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11')
                         or (raw_route and link.firmware not in ('GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11'))
                         or (case == 'north' and link.firmware not in ('GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11'))
                         or (tour_route and link.firmware not in ('GC-BASE-0.3.10','GC-BASE-0.3.11'))
@@ -151,10 +161,37 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                     north_origin = Pose(state['x_m'], state['y_m'], state['yaw_rad'])
                     record('map_binding', map_pose=[.15, 2.25, 0], odom=north_origin.values(),
                            boot_id=link.boot, session_id=link.session, source='本次人工摆放记录')
-                record('intent', operation='arm')
-                arm_attempted = True
-                link.submit(ARM)
-                stage = 'arm'
+                if wait_start or (not simulation and link.firmware == 'GC-BASE-0.3.17'):
+                    if link.firmware != 'GC-BASE-0.3.17':
+                        raise ValueError('当前固件未实现PC0启动协议')
+                    link.submit(START_PREPARE, struct.pack('<II', start_ticket, profile['version']))
+                    record('intent', operation='prepare_physical_key', ticket=start_ticket)
+                    deadline = now + 60 + (120 if batch_route else 110)
+                    stage = 'prepare_key'
+                else:
+                    record('intent', operation='arm')
+                    arm_attempted = True
+                    link.submit(ARM)
+                    stage = 'arm'
+            elif stage == 'prepare_key' and link.result == dict(kind=START_PREPARE, accepted=True):
+                record('waiting_physical_key', ticket=start_ticket, instruction='松开后按PC0，短鸣一声再启动')
+                stage = 'wait_key'
+            elif stage == 'wait_key':
+                event = link.start_event
+                if event and (event['ticket'] != start_ticket or event['version'] != profile['version']):
+                    raise ValueError('按键事件与本次路线/准备票据不匹配')
+                if event and event['phase'] == 5:
+                    record('physical_key_cancelled', event=event)
+                    raise ValueError('按键准备因故障、失联或超时取消')
+                if event and event['fired'] and not event['beep']:
+                    record('physical_key_started', event=event)
+                    arm_attempted = True
+                    link.submit(ARM)
+                    deadline = now + (120 if batch_route else 110)
+                    stage = 'arm'
+                elif now - start_poll >= .05 and not link.command and not link.pending:
+                    link.submit(START_STATE)
+                    start_poll = now
             elif stage == 'arm' and link.result == dict(kind=ARM, accepted=True):
                 record('accepted', operation='arm')
                 stage = 'ready'
@@ -168,7 +205,6 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                 action_id = state['action_id'] + 1
                 payload = None if raw_route else trial(cases[index], action_id)
                 if raw_route:
-                    import struct
                     payload = bytes.fromhex(route['goals'][index])
                     if tour_route:
                         from .device.tracking import Spec
@@ -261,7 +297,8 @@ def observe(transport, runtime, seconds, clock=time.monotonic, sleep=time.sleep)
 
 def main():
     parser = argparse.ArgumentParser(description='默认仅准备；显式执行单段或冻结短组合')
-    parser.add_argument('--case', choices=('straight', 'side', 'turn', 'turn90', 'diagonal', 'arc', 'pose', 'north'), default='straight')
+    parser.add_argument('--case', choices=('straight', 'side', 'turn', 'turn90', 'diagonal', 'arc', 'pose', 'north',
+                                          'cal_slow', 'cal_medium', 'cal_fast'), default='straight')
     parser.add_argument('--route', type=Path, help='仅接受已冻结的短组合路线；不接受场地整图')
     parser.add_argument('--profile', type=Path, default=Path('config/base_trials.json'))
     parser.add_argument('--runtime', type=Path, default=Path('output/base-trials'))
@@ -295,6 +332,8 @@ def main():
     if args.execute:
         try:
             config_payload(profile)  # 执行参数未齐全时，在任何连接之前退出。
+            if (args.case in ('cal_slow', 'cal_medium', 'cal_fast')) != (profile.get('version') == 6) or (args.route and profile.get('version') == 6):
+                raise ValueError('一米标定用例和独立配置必须匹配，且不接受路线')
         except ValueError as exc:
             parser.error(str(exc))
     require_owner_stopped(args.owner_url)

@@ -37,7 +37,7 @@ class Config(c.Structure):
         'position_tol_m', 'yaw_tol_rad', 'still_rpm', 'still_m_s', 'still_rad_s')]
         + [('count_drift', c.c_double * 4)] + [(key, c.c_uint32) for key in (
             'fresh_ms', 'feedback_gap_ms', 'control_gap_ms', 'stable_ms', 'can_epoch', 'imu_epoch',
-            'imu_source_epoch', 'calibration')])
+            'imu_source_epoch', 'calibration')] + [('lag_ff_s', c.c_double)])
 
 
 class Observation(c.Structure):
@@ -62,6 +62,12 @@ class Tracker:
     def __init__(self, odometry, config):
         self.odometry = odometry
         self.lib = odometry.lib
+        try:
+            self.lib.Track_ConfigBytes.restype = c.c_uint32
+            if self.lib.Track_ConfigBytes() != c.sizeof(Config):
+                raise ValueError('跟踪器配置ABI不匹配，请重建主机模型库')
+        except AttributeError as error:
+            raise ValueError('主机模型库版本过旧，请重建后再模拟') from error
         self.lib.Track_Bytes.restype = c.c_size_t
         self.lib.Track_Init.argtypes = [c.c_void_p, c.POINTER(Config)]
         self.lib.Track_Start.argtypes = [c.c_void_p, c.POINTER(Goal), c.POINTER(Observation), c.c_uint32]

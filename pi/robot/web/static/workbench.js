@@ -1,6 +1,6 @@
 // 界面只经网关调用独立核心；输入草稿、离线执行、实车状态分别表达。
 import {drawMap, drawSpeed} from './workbench-map.js';
-import {initScene, sceneValues, applyScene, overlayDraft} from './workbench-scene.js';
+import {initScene, sceneValues, applyScene, overlayDraft} from './workbench-scene.js?v=2';
 import {isEditing, motionDirection, matchesRelease} from './workbench-input.js';
 import {initMechanism, renderMechanism, cancelMechHeld, stopMechHeld} from './workbench-mechanism.js';
 

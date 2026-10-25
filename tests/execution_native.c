@@ -6,6 +6,20 @@
 
 #define API __declspec(dllexport)
 static Exec executor;
+
+API int Device_StartReady(uint32_t now_ms)
+{
+    return Exec_Ready(&executor, now_ms);
+}
+
+API uint32_t Device_ObservationValid(void)
+{
+    return executor.observation.pose.valid;
+}
+API uint32_t Device_StartMask(void)
+{
+    return executor.gate.mask;
+}
 static uint32_t now, sequence, error, starts, stops, sends, enabled;
 static int16_t target[4];
 static uint32_t pending_id, pending_zero, pending_tick;

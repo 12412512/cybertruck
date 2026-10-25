@@ -51,8 +51,15 @@ def make_plan(library, request, cancelled=None, progress=None):
     if any(node not in field.data['nodes'] for node in request.targets):
         raise ValueError('目标站点不存在')
     roads.update({key: 'BLOCKED' for key in request.blocked})
+    dynamics = request.dynamics.model_dump(exclude={'staging_slowdown', 'wheel_slew_rpm_s', 'lag_ff_s'})
     planner = Planner(lib, fixture().geometry, field, max_rpm=request.max_rpm,
-                      cruise_m_s=request.speed_m_s, cancelled=cancelled)
+                      cruise_m_s=request.speed_m_s, cancelled=cancelled,
+                      **dynamics)
+    staging = dict(dynamics, acceleration_m_s2=min(.45, dynamics['acceleration_m_s2']),
+                   jerk_m_s3=min(1.2, dynamics['jerk_m_s3']), dock_m_s=min(.025, dynamics['dock_m_s']),
+                   turn_rate_rad_s=min(1.2, dynamics['turn_rate_rad_s']))
+    staging_planner = Planner(lib, fixture().geometry, field, max_rpm=request.max_rpm,
+                             cruise_m_s=request.speed_m_s, cancelled=cancelled, **staging) if request.dynamics.staging_slowdown else planner
     references, legs, specs, rejected = [], [], [], {}
     node = request.start
     previous_pose = origin
@@ -62,7 +69,8 @@ def make_plan(library, request, cancelled=None, progress=None):
         if progress:
             progress(dict(completed=index, total=len(request.targets),
                           current=f'{NAMES.get(node,node)} → {NAMES.get(target,target)}'))
-        result = planner.plan(node, target, start_heading=heading, roads=roads,
+        active_planner = staging_planner if target == 'staging' else planner
+        result = active_planner.plan(node, target, start_heading=heading, roads=roads,
                               assigned_start=request.start, free_heading=target == request.start,
                               park_region=target == request.start, start_pose=previous_pose)
         if result['status'] != 'OK':
@@ -157,4 +165,8 @@ def restore_plan(value, library):
         if scene.check(ref, start_zones(parameters.model_dump())):
             raise ValueError('保存轨迹不能通过当前场景碰撞检查')
         current = ref.end
-    return Plan({key: item for key, item in value.items() if key not in ('specs', 'artifact_sha256')}, specs)
+    restored = {key: item for key, item in value.items() if key not in ('specs', 'artifact_sha256')}
+    # 老版本缺少独立动力参数时补同值默认，保留冻结Spec，不重新规划或改速度。
+    restored['parameters'] = parameters.model_dump()
+    restored['configuration_sha256'] = hashlib.sha256(json.dumps(restored['parameters'], sort_keys=True).encode()).hexdigest()
+    return Plan(restored, specs)
