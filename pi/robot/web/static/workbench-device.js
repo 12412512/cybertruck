@@ -1,119 +1,209 @@
-import {initGuide, canAct, stateName, targetError, samePose} from './workbench-mech-guide.js';
-/* 实车通道独立于离线模型：输入仅编辑，所有动作显式执行。 */
+import {stateName, samePose, rejectionText} from './workbench-mech-guide.js?v=2';
+import {actuators, freshDevice, blockedReasons, allowed, moveArgs} from './workbench-remote-state.js?v=1';
+
+/* 仅访问实车网关；页面初始化只读取，不自动取得控制权或恢复动作。 */
 export function initDevice(root) {
-    const card = document.createElement('article');
-    card.className = 'card mech-preparation physical-channel';
-    card.innerHTML = `<div class="card-head"><h2>实车机构执行</h2><span id="real-status">未连接</span></div>
-    <p>使用唯一设备核心。模拟零点和模拟示教不能驱动实车。本版先开放定距、舵机及逐步姿态；连续点动稍后实测。</p>
-    <p id="real-message">真实反馈显示在下方；准备草稿不会发动作</p><pre id="real-feedback"></pre>
-    <button id="real-claim">获取实车控制权</button><button id="real-attach">接入机构反馈（不使能）</button>
-    <button id="real-stop" class="danger">停止实车 · 保持夹爪</button>
-    <p><label><input id="real-confirm" type="checkbox">我已核对现场及人工基准，允许本次明确操作</label></p>
-    <button id="real-enable-lift">使能升降</button><button id="real-enable-reach">使能伸缩</button><button id="real-zero">确认最高/最近端并建零</button>
-    <div class="field-grid"><label>料盘当前参考/°<input id="real-seed-tray" type="number" value="0" min="0" max="270"></label>
-    <label>转臂当前参考/°<input id="real-seed-arm" type="number" value="180" min="83" max="180"></label>
-    <label>夹爪当前参考/°<input id="real-seed-gripper" type="number" value="98" min="0" max="98"></label></div>
-    <button id="real-anchor">记录人工核对的舵机参考（不输出）</button>
-    <div class="field-grid"><label>执行器<select id="real-axis"><option value="lift">升降</option><option value="reach">伸缩</option><option value="tray">料盘</option><option value="arm">转臂</option><option value="gripper">夹爪</option></select></label>
-    <label>绝对目标 / mm或°<input id="real-target" type="number" value="0"></label><label>单轴速度 / RPM<input id="real-rpm" type="number" value="5" min="1" max="30"></label></div>
-    <label><input type="checkbox" id="real-release">明确允许本次张爪释放</label>
-    <button id="real-move">执行实车目标</button><button id="real-evidence">人工确认当前舵机姿态</button>
-    <h3>实车姿态示教版本</h3><p>此处保存独立实车草稿。保存不运动；执行仍需当前实车零点、首次PWM逐通道验收和互锁通过。</p>
-    <label>编号<input id="real-pose-id" value="physical_pose_1" maxlength="48"></label>
-    <div class="field-grid">${['lift','reach','arm','tray','gripper'].map((name,i)=>`<label>${['升降/mm','伸缩/mm','转臂/°','料盘/°','夹爪/°'][i]}<input id="real-pose-${name}" type="number" value="${[0,0,180,0,98][i]}"></label>`).join('')}</div>
-    <button id="real-teach">保存实车草稿新版本</button><select id="real-poses"></select>
-    <button id="real-pose-load">读取选中版本到草稿（不动作）</button><p id="real-version-note"></p><button id="real-pose">执行选中版本（逐步确认）</button><button id="real-next">放行当前实车步骤</button>
-    <p>命令已接受不等于实物到位。舵机等待结束后仍须人工确认；故障和失联不自动恢复、不自动张爪。</p>`;
+    const card = document.createElement('div');
+    card.className = 'remote-mechanism';
+    card.innerHTML = `
+      <div class="section-intro remote-intro"><div><span class="eyebrow">LIVE / MECHANISM</span>
+        <h2>机械远程控制</h2><p>两轴 · 三舵机 · 实车姿态。执行请求统一交给设备核心。</p></div>
+        <span id="real-status" class="badge muted">读取设备状态</span></div>
+      <article class="card remote-status"><div class="remote-metrics">
+        <div><span>固件</span><strong id="real-firmware">—</strong></div>
+        <div><span>故障 · 底盘 / 机构</span><strong id="real-fault">未知</strong></div>
+        <div><span>停车状态</span><strong id="real-stopped">未知</strong></div>
+        <div><span>人工零点</span><strong id="real-zero-state">无有效反馈</strong></div>
+        <div><span>PWM通道</span><strong id="real-pwm">未知</strong></div></div>
+        <div class="remote-toolbar"><button id="real-claim">获取控制权</button><button id="real-attach">接入机构反馈</button>
+          <span id="real-owner">未持有控制权</span><button id="real-stop" class="danger">停止实车 · 保持夹爪</button></div>
+        <p id="real-blockers" class="remote-blockers"></p>
+        <p id="real-message" role="status" aria-live="polite">输入只修改目标；点击执行才发送实车请求。</p>
+        <label class="remote-confirm"><input id="real-confirm" type="checkbox">现场及目标已核对，允许下一项明确操作</label>
+      </article>
+      <div class="remote-control-grid"><article class="card"><div class="card-head"><h2>直线轴</h2><span class="badge muted">绝对位置 · mm</span></div>
+        ${actuators.slice(0,2).map(a=>`<div class="remote-actuator"><div class="remote-actuator-title"><b>${a.name}</b><small>${a.pin}</small><span id="real-value-${a.id}">位置未知</span></div>
+          <div class="remote-inputs"><label>目标 / mm<input id="real-target-${a.id}" type="number" min="${a.min}" max="${a.max}" step="0.5" value="0"></label>
+            <label>速度 / RPM<input id="real-rpm-${a.id}" type="number" min="1" max="30" step="1" value="5"></label>
+            <button id="real-enable-${a.id}">使能${a.name}</button><button id="real-move-${a.id}" class="primary">执行${a.name}</button></div></div>`).join('')}
+        <div class="remote-foot"><button id="real-zero">确认最高 / 最近端并建零</button><span>下降、伸出为正。初期限程49 / 50mm。</span></div>
+      </article><article class="card"><div class="card-head"><h2>舵机</h2><span class="badge muted">命令角度 · °</span></div>
+        ${actuators.slice(2).map(a=>`<div class="remote-actuator"><div class="remote-actuator-title"><b>${a.name}</b><small>${a.pin}</small><span id="real-value-${a.id}">实际角度未知</span></div>
+          <div class="remote-servo-row"><label>目标 / °<input id="real-target-${a.id}" type="number" min="${a.min}" max="${a.max}" step="1" value="${a.initial}"></label>
+            <button id="real-move-${a.id}" class="primary">执行${a.name}</button></div>
+          ${a.id==='tray'?`<div class="remote-presets">${[0,30,150,270].map(n=>`<button data-tray="${n}">${n}°${n===0?' 基准':''}</button>`).join('')}</div>`:''}</div>`).join('')}
+        <label class="remote-confirm"><input id="real-release" type="checkbox">明确允许本次夹爪张开 / 释放</label>
+        <div id="real-confirmation" class="remote-confirmation" hidden><p id="real-confirmation-text"></p><button id="real-evidence">人工确认当前舵机姿态</button></div>
+        <p class="hint">舵机没有角度反馈；命令完成后需及时人工确认。PE14本页不开放。</p>
+      </article></div>
+      <details class="card remote-setup"><summary>首次准备 · 记录当前舵机参考</summary>
+        <p class="hint">必须与当前实物相符；默认值不能当作实际角度。记录参考不输出PWM，首次执行从该参考开始。</p>
+        <div class="remote-reference-fields">${actuators.slice(2).map(a=>`<label>${a.name}当前参考 / °<input id="real-seed-${a.id}" type="number" min="${a.min}" max="${a.max}" step="1" value="${a.initial}"></label>`).join('')}</div>
+        <button id="real-anchor">记录已核对的参考角</button>
+      </details>
+      <details class="card remote-poses"><summary>实车姿态 · 保存与调用</summary>
+        <p class="hint">保存只记录目标版本，不运动。调用由板端执行安全过渡，逐步放行。</p>
+        <div class="remote-pose-heading"><label>姿态编号<input id="real-pose-id" value="physical_pose_1" maxlength="48"></label>
+          <label>已保存版本<select id="real-poses"><option value="">暂无保存版本</option></select></label><button id="real-pose-load">读取选中版本</button></div>
+        <div class="remote-pose-fields">${actuators.map(a=>`<label>${a.name} / ${a.unit}<input id="real-pose-${a.id}" type="number" min="${a.min}" max="${a.max}" step="0.1" value="${a.initial}"></label>`).join('')}</div>
+        <div class="remote-toolbar"><button id="real-teach">保存为新版本</button><button id="real-pose" class="primary">执行选中姿态</button><button id="real-next">放行当前步骤</button></div>
+        <p id="real-version-note" class="hint"></p>
+      </details>
+      <details class="card remote-diagnostics"><summary>实时反馈与本页请求记录</summary><pre id="real-feedback">等待设备</pre><div id="real-history"></div></details>`;
     root.append(card);
-    const el = id => card.querySelector(`#real-${id}`);
-    for (const button of card.querySelectorAll('button'))
-        if (!['real-claim','real-stop'].includes(button.id)) button.disabled = true;
-    const client = `physical_${crypto.randomUUID().replaceAll('-','')}`;
-    let token = '', state = {}, pending = '', polling = false, sending = false, poseKey = '';
-    const message = text => { el('message').textContent = text; };
-    const targets = ()=>Object.fromEntries(['lift','reach','arm','tray','gripper'].map(name=>[name,(el(`pose-${name}`).value.trim()===''?NaN:Number(el(`pose-${name}`).value))*(['lift','reach'].includes(name)?.001:Math.PI/180)]));
-    const selected = ()=>(state.poses||[]).find(p=>`${p.id}:${p.revision}`===el('poses').value);
-    const updateGuide=initGuide(card,()=>state,(axis,value)=>{el('axis').value=axis;el('target').value=value;message('已填入实车目标草稿，没有发送命令');},targets,selected,message,axis=>el(`seed-${axis}`)?.value.trim()===''?NaN:Number(el(`seed-${axis}`)?.value));
-    const checked = () => { if (!el('confirm').checked) throw Error('请先核对现场并勾选本次明确操作'); };
-    async function send(op,args={}) {
-        const response = await fetch('/api/device/command', {method:'POST',headers:{'Content-Type':'application/json','X-Workbench':'1'},
-            body:JSON.stringify({op,args,client,token,request_id:crypto.randomUUID().replaceAll('-','')})});
-        const value = await response.json();
-        if (!response.ok) throw Error(value.detail || '实车核心未连接');
-        if (value.token) token = value.token;
-        if (value.status === 'QUEUED') pending = value.request_id;
+    const el=id=>card.querySelector(`#real-${id}`);
+    const client=`physical_${crypto.randomUUID().replaceAll('-','')}`;
+    let token='', state={}, receivedAt=0, pending='', pendingAction='', pendingLabel='', pendingAxis='';
+    let polling=false, sending=false, poseKey='', identity='', heartbeatBusy=false;
+    const acceptedEnables=new Set(), entries=[];
+    const message=text=>{el('message').textContent=text;};
+    function log(text) {
+        entries.unshift(`${new Date().toLocaleTimeString('zh-CN',{hour12:false})} · ${text}`);
+        entries.length=Math.min(entries.length,30);
+        el('history').replaceChildren(...entries.map(text=>{const p=document.createElement('p');p.textContent=text;return p;}));
+    }
+    const current=()=>({...state,connected:freshDevice(state,receivedAt,performance.now())});
+    const targets=()=>Object.fromEntries(actuators.map(a=>[a.id,number(`pose-${a.id}`)*(a.unit==='mm'?.001:Math.PI/180)]));
+    const selected=()=>(state.poses||[]).find(p=>`${p.id}:${p.revision}`===el('poses').value);
+    function number(id) {
+        const input=el(id),value=input.valueAsNumber;
+        if(!input.value.trim() || !Number.isFinite(value) || !input.checkValidity())throw Error('请填写范围内的明确目标');
         return value;
     }
+    function label(action,args) {
+        const name=actuators.find(a=>a.id===args.axis)?.name||'';
+        return ({enable:`使能${name}`,move:`${name}目标`,zero:'人工建零',anchor:'记录舵机参考',attach:'接入反馈',
+            confirm:'人工确认舵机姿态',teach:'保存姿态',pose:'调用姿态',next:'放行步骤'})[action]||action;
+    }
+    async function send(op,args={}) {
+        const requestId=crypto.randomUUID().replaceAll('-',''),modifying=op==='mechanism';
+        if(modifying){pending=requestId;pendingAction=args.action;pendingLabel=label(args.action,args);pendingAxis=args.axis||'';}
+        let response;
+        try {
+            response=await fetch('/api/device/command',{method:'POST',headers:{'Content-Type':'application/json','X-Workbench':'1'},
+                body:JSON.stringify({op,args,client,token,request_id:requestId})});
+            const value=await response.json();
+            if(!response.ok){if(modifying)pending='';throw Error(value.detail||'设备核心拒绝请求');}
+            if(value.token)token=value.token;
+            if(modifying && value.status!=='QUEUED'){pending='';log(`${pendingLabel}：${value.status==='SAVED_DRAFT'?'已保存新版本，未执行':value.status}`);}
+            return value;
+        }catch(error){
+            if(!response && modifying)message(`${pendingLabel}结果未知，禁止重复发送；请核对反馈或停止`);
+            throw error;
+        }
+    }
     async function act(action,args={}) {
-        if (sending) return;
-        sending = true;
+        if(sending)return;
+        sending=true;
         try {
-            if (!['attach','invalidate','teach'].includes(action)) checked();
-            if (!['attach','invalidate','teach'].includes(action) && !canAct(state,!!token,pending,action)) throw Error('实时状态、现场许可、故障或互锁条件未满足');
-            const value = await send('mechanism',{action,zero_version:state.mechanism?.zero_version || 0,...args});
-            message(value.status === 'QUEUED' ? '请求已排队，尚未证明执行或到位' : value.status);
-            el('confirm').checked = false;
-        } catch(error) { message(error.message); }
-        finally { sending = false; }
+            if(!allowed(current(),!!token,pending,action))throw Error('实时反馈、控制权、故障或互锁条件未满足');
+            if(!['attach','teach'].includes(action) && !el('confirm').checked)throw Error('请勾选本次现场及目标确认');
+            const value=await send('mechanism',{action,zero_version:state.mechanism?.zero_version||0,...args});
+            message(value.status==='QUEUED'?`${label(action,args)}请求已排队，等待板端结果`:'姿态已保存，未发送动作');
+            el('confirm').checked=false;
+        }catch(error){message(error.message);log(error.message);}
+        finally{if(args.release_confirmed)el('release').checked=false;sending=false;draw();}
     }
-    el('claim').onclick = async()=>{try {await send('claim');message('已取得实车控制权；尚未使能或动作');}catch(e){message(e.message);}};
-    el('attach').onclick = ()=>act('attach');
-    el('stop').onclick = async()=>{try {await send('stop');token='';pending='';message('已请求故障停车；等待实车反馈');}catch(e){message(e.message);}};
-    for (const axis of ['lift','reach']) el(`enable-${axis}`).onclick=()=>act('enable',{axis,confirmed:true});
-    el('zero').onclick=()=>act('zero',{confirmed:true});
-    el('anchor').onclick=()=>act('anchor',{confirmed:true,targets:Object.fromEntries(['tray','arm','gripper'].map(name=>[name,Number(el(`seed-${name}`).value)*Math.PI/180]))});
-    el('move').onclick=()=>{
-        const axis=el('axis').value,linear=['lift','reach'].includes(axis), target=Number(el('target').value);
-        const error=el('target').value.trim()===''?'请填写明确目标':targetError(axis,target);if(error){message(error);return;}
-        act('move',{axis,[linear?'target_m':'target_rad']:target*(linear?.001:Math.PI/180),rpm:Number(el('rpm').value),release_confirmed:el('release').checked});
+    async function stop() {
+        token=''; // 停止请求等待期间不再续约；请求丢失仍由租约保护停车。
+        try{await send('stop');message('停止请求已发送；会话失效，不自动恢复或张爪');log('已请求停止实车');}
+        catch(error){message(`停止未确认：${error.message}；请核对实物状态`);}
+        finally{draw();}
+    }
+    const release=()=>{
+        if(!token)return;
+        const body={op:'stop',client,token,request_id:crypto.randomUUID().replaceAll('-','')};token='';
+        fetch('/api/device/command',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-Workbench':'1'},body:JSON.stringify(body)})
+            .catch(()=>message('退出时停止未确认，请核对车辆；主控保护继续生效'));
+        draw();
     };
-    el('evidence').onclick=()=>act('confirm',{confirmed:true});
-    el('teach').onclick=()=>act('teach',{pose_id:el('pose-id').value,targets:Object.fromEntries(['lift','reach','arm','tray','gripper'].map(name=>[name,(el(`pose-${name}`).value.trim()===''?NaN:Number(el(`pose-${name}`).value))*(['lift','reach'].includes(name)?.001:Math.PI/180)]))});
-    el('pose-load').onclick=()=>{const record=selected();if(!record)return;el('pose-id').value=record.id;for(const axis of ['lift','reach','arm','tray','gripper'])el(`pose-${axis}`).value=+(record.targets[axis]*(['lift','reach'].includes(axis)?1000:180/Math.PI)).toFixed(5);message('已读取冻结版本到草稿，没有发送实车命令');};
-    el('pose').onclick=()=>{const record=selected();if(!record)return;if(!samePose(targets(),record)){message('草稿与选中版本不同，请先读取或保存新版本');return;}act('pose',{pose_id:record.id,revision:record.revision,physical_taught:true,single_step:true,release_confirmed:el('release').checked});};
-    el('next').onclick=()=>act('next',{action_id:state.mechanism?.pose_id,revision:state.mechanism?.revision,step_index:state.mechanism?.step_index});
-    async function poll() {
-        if (polling || document.hidden) return;
-        polling=true;
-        try {
-            const response=await fetch('/api/device/state'); state=await response.json();
-            const m=state.mechanism;
-            el('status').textContent=state.connected?'实车状态实时':'未连接或状态过期';
-            el('feedback').textContent=m?`固件 ${state.firmware}\n故障 ${state.base?.fault}/${m.fault} · 底盘停车 ${state.base?.stopped?'已确认':'未确认'} · 机构反馈 ${m.attached?'已接入':'未接入'}\n零点 v${m.zero_version} / ${m.zero_valid?'有效':'无效'} · 配置 ${m.config_mask}/3\n轴状态 ${stateName('axis',m.axis_state)} / 原因 ${m.axis_reason} · 舵机 ${stateName('servo',m.servo_state)} / 原因 ${m.servo_reason}\n姿态 ${m.pose_id} v${m.revision} 步骤 ${m.step_index}/${m.step_count} · ${stateName('pose',m.pose_state)}\n升降 ${m.zero_valid?m.lift_um/1000:'未知'}mm · 伸缩 ${m.zero_valid?m.reach_um/1000:'未知'}mm\nPWM通道位图 ${m.pwm_mask} · 实际舵机角度：未知`:(state.reason||'没有实车状态');
-            const result=(state.results||[]).find(r=>r.request_id===pending);
-            if(result){pending='';message(result.result?`板端拒绝，原因 ${result.result}`:'板端已接受；完成状态另行确认');}
-            const busy=m&&((m.axis_state>=1&&m.axis_state<=5)||(m.servo_state>=1&&m.servo_state<=5)||(m.pose_state>=1&&m.pose_state<=5));
-            for(const button of card.querySelectorAll('button'))if(button.id.startsWith('real-')&&!['real-stop','real-claim'].includes(button.id))button.disabled=!token||!state.connected||!!pending||!!busy;
-            el('next').disabled=!token||!!pending||m?.pose_state!==4;
-            el('evidence').disabled=!token||!!pending||m?.servo_state!==5;
-            el('attach').disabled=!token||!state.connected||!!pending||!!m?.attached;
-            if (!state.site_ready) {
-                for (const name of ['enable-lift','enable-reach','zero','anchor','move','evidence','pose','next']) el(name).disabled=true;
-                el('status').textContent=state.connected?'实车只读 · 等待本次现场确认':'未连接';
-            }
-            for(const name of ['enable-lift','enable-reach','zero','anchor','move','pose']) el(name).disabled=!canAct(state,!!token,pending,name);
-            el('next').disabled=!canAct(state,!!token,pending,'next');
-            el('evidence').disabled=!canAct(state,!!token,pending,'confirm');
-            el('pose-load').disabled=!selected();
-            const record=selected();
-            el('version-note').textContent=record?`选中 ${record.id} v${record.revision} · ${record.sha256.slice(0,12)} · 待实测；${samePose(targets(),record)?'草稿一致':'草稿不同，禁止直接执行'}`:'暂无实车示教版本；离线示教不会自动迁入';
-            updateGuide(state,!!token,pending);
-            const key=JSON.stringify((state.poses||[]).map(p=>[p.id,p.revision]));
-            if(key!==poseKey){poseKey=key;el('poses').replaceChildren(...(state.poses||[]).map(p=>new Option(`${p.id} v${p.revision} · 待实测`,`${p.id}:${p.revision}`)));}
-        }catch(e){
-            state={connected:false};
-            el('status').textContent='实车状态未知';
-            el('feedback').textContent='状态读取失败；旧反馈已失效';
-            for(const button of card.querySelectorAll('button'))
-                if(button.id.startsWith('real-')&&!['real-stop','real-claim'].includes(button.id))button.disabled=true;
-            updateGuide(state,false,pending);
-            message('实车核心未连接，禁止动作');
-        }finally{polling=false;}
+    el('claim').onclick=async()=>{
+        if(sending)return;sending=true;
+        try{await send('claim');message('已取得控制权；尚未使能或动作');}catch(error){message(error.message);}
+        finally{sending=false;draw();}
+    };
+    el('attach').onclick=()=>act('attach');el('stop').onclick=stop;
+    for(const a of actuators){
+        el(`move-${a.id}`).onclick=()=>{try{act('move',moveArgs(a.id,el(`target-${a.id}`).value,a.unit==='mm'?number(`rpm-${a.id}`):5,el('release').checked));}catch(error){message(error.message);}};
+        if(a.unit==='mm')el(`enable-${a.id}`).onclick=()=>act('enable',{axis:a.id,confirmed:true});
     }
-    setInterval(poll,200); poll();
-    setInterval(async()=>{if(token&&!document.hidden)try{await send('renew');}catch(e){token='';message(e.message);}},400);
-    const release=()=>{if(token){fetch('/api/device/command',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-Workbench':'1'},body:JSON.stringify({op:'stop',client,token,request_id:crypto.randomUUID().replaceAll('-','')})}).catch(()=>{});token='';}};
-    window.addEventListener('pagehide',release);
-    window.addEventListener('offline',release);
+    for(const button of card.querySelectorAll('[data-tray]'))button.onclick=()=>{el('target-tray').value=button.dataset.tray;message(`料盘目标已填为${button.dataset.tray}°，尚未执行`);};
+    el('zero').onclick=()=>act('zero',{confirmed:true});
+    el('anchor').onclick=()=>{try{act('anchor',{confirmed:true,targets:Object.fromEntries(actuators.slice(2).map(a=>[a.id,number(`seed-${a.id}`)*Math.PI/180]))});}catch(error){message(error.message);}};
+    el('evidence').onclick=()=>act('confirm',{confirmed:true});
+    el('teach').onclick=()=>{try{act('teach',{pose_id:el('pose-id').value,targets:targets()});}catch(error){message(error.message);}};
+    el('pose-load').onclick=()=>{
+        const record=selected();if(!record)return;el('pose-id').value=record.id;
+        for(const a of actuators)el(`pose-${a.id}`).value=+(record.targets[a.id]*(a.unit==='mm'?1000:180/Math.PI)).toFixed(5);
+        message('已读取姿态目标，未发送动作');draw();
+    };
+    el('pose').onclick=()=>{
+        const record=selected();if(!record)return;
+        try{if(!samePose(targets(),record))throw Error('当前目标与选中版本不同，请先读取或保存新版本');
+            act('pose',{pose_id:record.id,revision:record.revision,physical_taught:true,single_step:true,release_confirmed:el('release').checked});}
+        catch(error){message(error.message);}
+    };
+    el('next').onclick=()=>act('next',{action_id:state.mechanism?.pose_id,revision:state.mechanism?.revision,step_index:state.mechanism?.step_index});
+    card.addEventListener('input',draw);el('poses').onchange=draw;
+    function draw(){
+        const value=current(),m=value.mechanism;
+        el('status').textContent=!value.connected?'状态未知 / 连接中断':value.base?.fault||m?.fault?'故障锁定':!value.site_ready?'实车只读':'实车在线';
+        el('firmware').textContent=value.firmware||'—';
+        el('fault').textContent=value.connected?`${value.base?.fault??'—'} / ${m?.fault??'—'}`:'未知';
+        el('stopped').textContent=value.connected?(value.base?.stopped?'已确认':'未确认'):'未知';
+        el('zero-state').textContent=!value.connected?'未知':m?.zero_valid?`有效 · v${m.zero_version}`:'无效 / 未建立';
+        el('pwm').textContent=value.connected&&m?actuators.slice(2).filter((a,i)=>m.pwm_mask&(1<<i)).map(a=>a.pin).join('、')||'全部关闭':'未知';
+        el('owner').textContent=token?'本页持有控制权':'未持有控制权';
+        el('blockers').textContent=blockedReasons(value,!!token,pending).join('；')||'接口就绪；每项动作仍由板端复核';
+        const permit=action=>!sending&&allowed(value,!!token,pending,action);
+        el('claim').disabled=!!token||!permit('claim');el('attach').disabled=!permit('attach');
+        el('zero').disabled=!permit('zero')||!!m?.zero_valid;el('anchor').disabled=!permit('anchor');
+        for(const a of actuators){
+            el(`move-${a.id}`).disabled=!permit('move');
+            if(a.unit==='mm'){
+                const accepted=acceptedEnables.has(a.id);el(`enable-${a.id}`).disabled=!permit('enable')||accepted;
+                el(`enable-${a.id}`).textContent=accepted?'使能请求已接受':`使能${a.name}`;
+                const position=m?.[a.id==='lift'?'lift_um':'reach_um'];
+                el(`value-${a.id}`).textContent=value.connected&&m?.zero_valid?`${(position/1000).toFixed(2)} mm`:'位置未知';
+            }else el(`value-${a.id}`).textContent=value.connected&&m?.channel===actuators.slice(2).indexOf(a)+1?`命令 ${(m.target_mdeg/1000).toFixed(1)}° · 实际未知`:'实际角度未知';
+        }
+        el('confirmation').hidden=!(value.connected&&m?.servo_state===5);
+        el('confirmation-text').textContent=m?`${actuators.slice(2)[m.channel-1]?.name||'舵机'}命令已完成。核对实物后勾选本次确认并点击下方按钮，板端超时保护仍生效。`:'';
+        el('evidence').disabled=!permit('confirm');el('teach').disabled=!permit('teach');el('next').disabled=!permit('next');
+        const record=selected();let matches=false;try{matches=!!record&&samePose(targets(),record);}catch{}
+        el('pose-load').disabled=!record;el('pose').disabled=!permit('pose')||!matches;
+        el('version-note').textContent=record?`${record.id} · v${record.revision} · ${record.sha256.slice(0,12)} · ${matches?'目标与版本一致':'当前目标不同，禁止调用'}`:'暂无实车姿态；保存不运动。';
+        el('feedback').textContent=value.connected&&m?`轴：${stateName('axis',m.axis_state)} / ${m.axis_reason}\n舵机：${stateName('servo',m.servo_state)} / ${m.servo_reason}\n姿态：${stateName('pose',m.pose_state)} · #${m.pose_id} v${m.revision} · ${m.step_index}/${m.step_count}\n反馈龄 ${value.state_age_ms}ms · 配置 ${m.config_mask}/3 · PWM位图 ${m.pwm_mask}\n启动 ${value.boot_id} · 会话 ${value.session_id}`:value.reason||'没有新鲜设备状态，不使用旧反馈授权动作';
+    }
+    async function poll(){
+        if(polling||document.hidden)return;polling=true;
+        try{
+            const response=await fetch('/api/device/state',{cache:'no-store'});if(!response.ok)throw Error('设备状态读取失败');
+            state=await response.json();receivedAt=performance.now();const nextIdentity=`${state.boot_id}:${state.session_id}`;
+            if(identity&&identity!==nextIdentity){token='';pending='';acceptedEnables.clear();message('设备身份已变化，旧控制权和参考无效；不自动恢复');}
+            identity=nextIdentity;const result=(state.results||[]).find(r=>r.request_id===pending);
+            if(result){
+                const text=result.result?`${pendingLabel}：${rejectionText(pendingAction,result.result,state)}`:`${pendingLabel}：板端已接受，完成以反馈为准`;
+                message(text);log(text);if(pendingAction==='enable'&&!result.result)acceptedEnables.add(pendingAxis);
+                pending='';pendingAction='';pendingAxis='';
+            }
+            const key=JSON.stringify((state.poses||[]).map(p=>[p.id,p.revision]));
+            if(key!==poseKey){
+                poseKey=key;const old=el('poses').value;
+                el('poses').replaceChildren(...(state.poses||[]).map(p=>new Option(`${p.id} · v${p.revision}`,`${p.id}:${p.revision}`)));
+                if(!(state.poses||[]).length)el('poses').append(new Option('暂无保存版本',''));
+                if((state.poses||[]).some(p=>`${p.id}:${p.revision}`===old))el('poses').value=old;
+            }
+        }catch(error){state={connected:false,reason:error.message};}
+        finally{polling=false;draw();}
+    }
+    setInterval(poll,200);setInterval(draw,100);
+    setInterval(async()=>{
+        if(!token||document.hidden||heartbeatBusy)return;heartbeatBusy=true;
+        try{await send('renew');}catch(error){token='';message('控制权失效，请先核对状态；不自动恢复');}
+        finally{heartbeatBusy=false;draw();}
+    },400);
+    window.addEventListener('pagehide',release);window.addEventListener('offline',release);
     document.addEventListener('visibilitychange',()=>{if(document.hidden)release();});
+    draw();poll();return{release,stop};
 }

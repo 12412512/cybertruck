@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
-import {blockers,canAct,targetError,samePose,procedure,stateName} from '../pi/robot/web/static/workbench-mech-guide.js';
+import {blockers,canAct,targetError,samePose,procedure,stateName,rejectionText} from '../pi/robot/web/static/workbench-mech-guide.js';
 const healthy=()=>({connected:true,site_ready:true,base:{fault:0,stopped:true},mechanism:{fault:0,attached:1,base_stopped:1,config_mask:3,zero_valid:1,pwm_mask:7,axis_state:0,servo_state:0,pose_state:0}});
 let checks=0;
 const check=(value)=>{assert.ok(value);checks++;};
 check(canAct(healthy(),true,'','move'));
+check(rejectionText('enable',5,healthy()).includes('拒绝重复请求'));
+check(rejectionText('zero',5,healthy()).includes('配置或使能条件不符'));
+check(!rejectionText('zero',5,healthy()).includes('拒绝重复请求'));
+check(rejectionText('zero',3,healthy()).includes('未稳定'));
 for(const action of ['move','next','confirm','pose','zero','enable']){
   for(const fault of ['board','mechanism','stale','site','owner','pending']){
     const state=healthy();state.mechanism.pose_state=4;state.mechanism.servo_state=5;

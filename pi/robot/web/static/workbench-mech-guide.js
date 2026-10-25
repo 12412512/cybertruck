@@ -6,6 +6,15 @@ const states = {
     pose:['空闲','已接受','执行中','等待舵机确认','等待单步放行','停止中','完成','失败','取消']
 };
 export function stateName(kind,value) { return states[kind]?.[value] ?? '未知'; }
+export function rejectionText(action, result, state={}) {
+    const reasons=['成功','未建立零点','反馈过期','机构未稳定或上一操作未结束',
+        '驱动器状态不符','配置或使能条件不符','缺少人工确认','会话不符',
+        '目标越限','底盘未停车','碰撞互锁','零点版本不符','报文不符','零点已建立','故障锁存'];
+    const detail=action==='enable' && result===5
+        ? `；同一轴已使能也会拒绝重复请求。当前配置${state.mechanism?.config_mask ?? '未知'}/3，底盘停车${state.base?.stopped?'已确认':'未确认'}。请勿连续重试使能`
+        : '';
+    return `板端拒绝：${reasons[result] || '未知原因'}（${result}）${detail}`;
+}
 export function blockers(state,owned,pending) {
     const m=state.mechanism, list=[];
     if (!state.connected || !m) list.push('实时反馈未就绪，旧状态不能授权动作');

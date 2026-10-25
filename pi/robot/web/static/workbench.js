@@ -4,7 +4,7 @@ import {initLidar, renderLidar} from './workbench-lidar.js?v=6';
 import {modelView} from './workbench-execution.js?v=1';
 import {initScene, sceneValues, applyScene, overlayDraft} from './workbench-scene.js?v=3';
 import {isEditing, motionDirection, matchesRelease} from './workbench-input.js';
-import {initMechanism, renderMechanism, cancelMechHeld, stopMechHeld} from './workbench-mechanism.js?v=3';
+import {initMechanism, renderMechanism, cancelMechHeld, stopMechHeld} from './workbench-mechanism.js?v=5';
 
 const $ = id => document.getElementById(id);
 const text = (id, value) => { $(id).textContent = value; };
@@ -99,6 +99,10 @@ function clearHeld() {
     heldButton = null;
 }
 async function stop(reason = '已请求停止模拟') {
+    if (document.body.dataset.page === 'mechanism') {
+        document.getElementById('real-stop')?.click();
+        return;
+    }
     generation++;
     clearHeld();
     cancelMechHeld();
@@ -311,10 +315,12 @@ $('reset').onclick = async () => {
 };
 for (const button of document.querySelectorAll('[data-page]')) button.onclick = () => {
     if (held) stopHeld('切换页面');
-    stopMechHeld();
+    if (document.body.dataset.page === 'mechanism' && button.dataset.page !== 'mechanism') stopMechHeld();
     document.querySelectorAll('.page').forEach(page => { page.hidden = page.id !== `page-${button.dataset.page}`; });
     document.querySelectorAll('[data-page]').forEach(item => item.classList.toggle('active', item === button));
-    document.querySelector('h1').textContent = {drive:'底盘与导航', mechanism:'机械调试', logs:'运行记录'}[button.dataset.page];
+    document.querySelector('h1').textContent = {drive:'底盘与导航', mechanism:'机械远程控制', logs:'运行记录'}[button.dataset.page];
+    document.body.dataset.page = button.dataset.page;
+    $('stop').innerHTML = button.dataset.page === 'mechanism' ? '■ 停止实车 <kbd>Space</kbd>' : '■ 停止模拟 <kbd>Space</kbd>';
     history.replaceState(null, '', `#${button.dataset.page}`);
 };
 function renderPlan(job) {
