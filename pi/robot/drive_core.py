@@ -37,11 +37,11 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
     if route is not None:
         from .nav.route import validate
         validate(route)
-    start2_route = route is not None and route['id'] == 'start2_workbench_v1'
+    start2_route = route is not None and route['id'] == 'start2_reverse_v1'
     batch_route = start2_route or (route is not None and route['id'] == 'start1_two_batch_v1')
     tour_route = start2_route or (route is not None and route['id'] in ('start1_tour_v1', 'start1_two_batch_v1'))
     raw_route = start2_route or (route is not None and route['id'] in ('start1_qr_raw_v1', 'start1_tour_v1', 'start1_two_batch_v1'))
-    if (raw_route and profile.get('version') != (7 if start2_route else 5 if batch_route else 4 if tour_route else 3)) or (not raw_route and profile.get('version') in (3, 4, 5, 7)):
+    if (raw_route and profile.get('version') != (8 if start2_route else 5 if batch_route else 4 if tour_route else 3)) or (not raw_route and profile.get('version') in (3, 4, 5, 8)):
         raise ValueError('高速配置只允许对应版本的冻结路线')
     if raw_route and profile.get('max_rpm') != 100:
         raise ValueError('冻结路线必须使用100RPM配置')
@@ -138,11 +138,11 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                 if box[0] <= 0 or box[1] <= 0 or box[2] >= 2.4 or box[3] >= 2.4:
                     raise ValueError('估计车体包络接近场界，停止；不将里程计当成独立定位证明')
             if stage == 'connect' and link.bound and state and (state['mode'] != 0 or state['stop_confirmed']):
-                if (wait_start and link.firmware not in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18')) or (start2_route and link.firmware != 'GC-BASE-0.3.18'):
+                if (wait_start and link.firmware not in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19')) or (start2_route and link.firmware != 'GC-BASE-0.3.19'):
                     raise ValueError('选定入口要求PC0协议，固件不匹配，禁止自动启动')
                 # 新候选仅在显式离线模式回归既有轨迹；实车版本入口仍待烧录/只读验收。
-                offline_candidate = simulation and link.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18')
-                keyed_firmware = link.firmware in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18')
+                offline_candidate = simulation and link.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19')
+                keyed_firmware = link.firmware in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19')
                 if ((not offline_candidate and not keyed_firmware and (link.firmware not in ('GC-BASE-0.3.6', 'GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11')
                         or (raw_route and link.firmware not in ('GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11'))
                         or (case == 'north' and link.firmware not in ('GC-BASE-0.3.7', 'GC-BASE-0.3.8', 'GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11'))
@@ -165,8 +165,8 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                     north_origin = Pose(state['x_m'], state['y_m'], state['yaw_rad'])
                     record('map_binding', map_pose=[.15, 2.25, 0], odom=north_origin.values(),
                            boot_id=link.boot, session_id=link.session, source='本次人工摆放记录')
-                if wait_start or (not simulation and link.firmware in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18')):
-                    if link.firmware not in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18'):
+                if wait_start or (not simulation and link.firmware in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19')):
+                    if link.firmware not in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19'):
                         raise ValueError('当前固件未实现PC0启动协议')
                     link.submit(START_PREPARE, struct.pack('<II', start_ticket, profile['version']))
                     record('intent', operation='prepare_physical_key', ticket=start_ticket)

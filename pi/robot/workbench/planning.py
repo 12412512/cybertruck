@@ -77,6 +77,18 @@ def make_plan(library, request, cancelled=None, progress=None):
             reasons = sorted({reason for values in result['rejected'].values() for reason in values})
             raise ValueError(f'{NAMES.get(node,node)}→{NAMES.get(target,target)}无可行路径：'
                              f'{result["status"]}；' + '、'.join(reasons[:10]))
+        if index == 0 and node == 'start_2' and target == 'qr' and heading == 0:
+            # 车头保持+X，倒车斜行至扫码；闭路或障碍不能被直连候选绕过。
+            direct_roads = ('start2_exit', 'north_east_road', 'qr_dock')
+            if all(result['road_states'].get(road) == 'OPEN' for road in direct_roads):
+                direct, errors = active_planner.make('DIAGONAL', previous_pose,
+                    Pose(*field.data['nodes']['qr'], 0), '+'.join(direct_roads),
+                    start_zones(request.model_dump()))
+                if direct is not None and not errors:
+                    result['segments'] = [direct]
+                    result['goal_heading'] = 0
+                else:
+                    result['rejected']['start2_direct'] = errors
         rejected.update(result['rejected'])
         for segment in result['segments']:
             if len(specs) >= 100:

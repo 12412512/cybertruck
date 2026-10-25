@@ -62,14 +62,14 @@ def short_route(library):
 
 def validate(plan):
     """先于打开串口校验；整场规划只能预览，不能借改标签绕过白名单。"""
-    if plan.get('id') == 'start2_workbench_v1':
-        if (plan.get('sha256') != 'f565c61af4576b3473fde21d95a542398ac18519d4b3e3d51c093d6c298c862b'
+    if plan.get('id') == 'start2_reverse_v1':
+        if (plan.get('sha256') != 'fce040d2b91e0eed46bf4fb7f862a793b07025591a3bde741938ce36074f76bf'
                 or digest(plan) != plan['sha256']
-                or plan.get('cases') != [f'start2_{i+1}' for i in range(10)]
-                or plan.get('map_origin') != [2.25, 2.25, math.pi]):
+                or plan.get('cases') != [f'start2_{i+1}' for i in range(9)]
+                or plan.get('map_origin') != [2.25, 2.25, 0.0]):
             raise ValueError('不是本次保存的启停区2冻结路线')
         encoded = b''.join(bytes.fromhex(value) for value in plan['goals'])
-        if hashlib.sha256(encoded).hexdigest() != '2029dea003aa80ae5091301106dcd1373beb227583de3ec644096db140432fa2':
+        if hashlib.sha256(encoded).hexdigest() != 'd32e127280cd9fdffb89a28b97e507095589ad17e203ca10690da51fea444076':
             raise ValueError('启停区2目标摘要不一致')
         return
     if plan.get('id') in ('start1_qr_raw_v1', 'start1_tour_v1', 'start1_two_batch_v1'):

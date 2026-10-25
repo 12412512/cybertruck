@@ -1,5 +1,5 @@
 {
-  "version": "nominal-map-3",
+  "version": "nominal-map-4",
   "frame_id": "map",
   "domain": "simulation",
   "measured": false,
@@ -55,7 +55,7 @@
     ["rough_approach", "center", "rough", "axial"],
     ["staging_approach", "center", "staging", "axial"]
   ],
-  "station_heading_quarters": {"start_1": 0, "start_2": 2, "qr": 0, "raw": 1, "rough": 3, "staging": 2},
+  "station_heading_quarters": {"start_1": 0, "start_2": 0, "qr": 0, "raw": 1, "rough": 3, "staging": 2},
   "shared_roads": [["center_east", "rough_approach"], ["center_south", "staging_approach"]],
   "unverified": [
     "完整车体及载物包络",

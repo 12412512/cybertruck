@@ -27,7 +27,8 @@ class Simulation:
         config.position_tol_m, config.yaw_tol_rad = .003, .012
         self.model = ClosedLoop(self.library, config=config, auto_start=False, disturbance=False,
                                 calibration=calibration)
-        self.origin = Pose(.15, 2.25, 0) if start == 'start_1' else Pose(2.25, 2.25, math.pi)
+        field = Field().data
+        self.origin = Pose(*field['nodes'][start], field['station_heading_quarters'][start]*math.pi/2)
         self.session = uuid.uuid4().hex
         self.mode, self.reason = 'IDLE', ''
         self.failure_reason = ''
@@ -99,6 +100,7 @@ class Simulation:
                    plan.view['parameters'].get('dynamics', {}).get('wheel_slew_rpm_s', 180.),
                    plan.view['parameters'].get('dynamics', {}).get('lag_ff_s', 0.))
         self.field = Field(data=plan.view['field'])
+        self.origin = Pose(*plan.view['origin'])
         self.plan = plan
         self.run_ms = self.model.elapsed_ms
         self._leg()

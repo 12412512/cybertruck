@@ -68,6 +68,7 @@ class GeometryTests(unittest.TestCase):
         self.assertNotEqual(adjusted.data['version'], field.data['version'])
 
 
+
 class SceneTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -100,6 +101,29 @@ class SceneTests(unittest.TestCase):
                 return self.core.plans[value['plan']['id']]
             time.sleep(.02)
         self.fail('规划未完成')
+
+    def test_start2_reverse_to_qr_is_one_checked_diagonal(self):
+        request = PlanInput(source='custom', start='start_2', targets=['qr'])
+        plan = make_plan(self.library, request)
+        self.assertEqual(plan.view['origin'], [2.25, 2.25, 0.])
+        self.assertEqual(len(plan.specs), 1)
+        from robot.device.tracking import Spec
+        spec = Spec.from_buffer_copy(plan.specs[0])
+        self.assertEqual(spec.kind, 1)
+        self.assertAlmostEqual(spec.x_m, -1.05, places=6)
+        self.assertAlmostEqual(spec.y_m, -.20, places=6)
+        self.assertEqual(spec.yaw_rad, 0)
+        ref = NativeReference(c.CDLL(str(self.library)), Pose(*plan.view['origin']), spec)
+        self.assertEqual(make_field(request).check(ref, ('start_2',)), [])
+        blocked = make_field(request.model_copy(update={'obstacles': [
+            Obstacle(id='direct', x_m=1.725, y_m=2.15)]}))
+        self.assertIn('obstacle:direct', blocked.check(ref, ('start_2',)))
+
+    def test_start2_direct_cannot_bypass_closed_exit(self):
+        with self.assertRaises(ValueError):
+            make_plan(self.library, PlanInput(source='custom', start='start_2',
+                targets=['qr'], blocked=['start2_exit']))
+
 
     def test_swept_body_hits_circle_even_when_centers_and_endpoints_do_not(self):
         request = PlanInput(obstacles=[Obstacle(id='B1', x_m=.7, y_m=2.30)])

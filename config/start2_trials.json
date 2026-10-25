@@ -1,6 +1,6 @@
 {
   "domain": "commissioning",
-  "version": 7,
+  "version": 8,
   "wheel_radius_m": 0.05,
   "half_length_m": 0.094,
   "half_width_m": 0.11,
@@ -29,5 +29,5 @@
   "gyro_scale_rad_s": 0.0010652644360316954,
   "max_rpm": 100,
   "hardware_verified": false,
-  "source": "仅启停区2保存路线10段；候选，尚待本版烧录后实测"
+  "source": "启停区2车头+X，首段倒车斜线；候选，待本版烧录后实测"
 }

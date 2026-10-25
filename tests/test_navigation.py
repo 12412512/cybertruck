@@ -165,10 +165,10 @@ class NavigationTests(unittest.TestCase):
                 for segment in plan['segments']:
                     self.assertFalse(set(segment.road.split('+'))&set(blocked))
 
-    def test_mirrored_start_is_separately_checked(self):
+    def test_start2_heading_is_positive_x_and_separately_checked(self):
         result=self.planner.plan('start_2','qr',assigned_start='start_2',roads=self.open_roads)
         self.assertEqual(result['status'],'OK')
-        self.assertAlmostEqual(result['segments'][0].reference.start.yaw_rad,math.pi)
+        self.assertAlmostEqual(result['segments'][0].reference.start.yaw_rad,0)
 
     def test_shared_road_names_cannot_bypass_blocked_or_unknown(self):
         for state in ('UNKNOWN','BLOCKED'):

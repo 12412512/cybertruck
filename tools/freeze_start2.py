@@ -30,8 +30,12 @@ def freeze(workspace, library):
             parameters.dynamics.lag_ff_s != 0 or parameters.dynamics.wheel_slew_rpm_s != 180):
         raise ValueError('仅接受启停区2两批0.30m/s、100RPM及已验证控制档')
     origin = Pose(*plan.view['origin'])
-    if origin != Pose(2.25, 2.25, math.pi) or len(plan.specs) != 10:
+    if origin != Pose(2.25, 2.25, 0) or not 1 <= len(plan.specs) <= 16:
         raise ValueError('起点、车头或段数与本次受限入口不匹配')
+    first = Spec.from_buffer_copy(plan.specs[0])
+    if (first.kind != 1 or abs(first.x_m + 1.05) > 1e-6 or abs(first.y_m + .20) > 1e-6
+            or first.yaw_rad != 0):
+        raise ValueError('启停区2至扫码必须为车头+X的一段倒车斜线')
     simulation = Simulation(library)
     simulation.run(plan)
     while simulation.mode == 'RUNNING' and simulation.model.elapsed_ms-simulation.run_ms < 180000:
@@ -43,7 +47,7 @@ def freeze(workspace, library):
     for raw in plan.specs:
         current = NativeReference(simulation.model.native.lib, current, Spec.from_buffer_copy(raw)).end
         boundaries.append(relative(origin, current).values())
-    value = dict(schema=1, id='start2_workbench_v1', domain='commissioning', frame_id='odom',
+    value = dict(schema=1, id='start2_reverse_v1', domain='commissioning', frame_id='odom',
         cases=[f'start2_{index+1}' for index in range(len(plan.specs))],
         goals=[(struct.pack('<II', index+1, 30000) + raw).hex() for index, raw in enumerate(plan.specs)],
         reference_trace=[relative(origin, Pose(*point)).values() for point in plan.view['reference']],
@@ -76,7 +80,7 @@ def main():
         validate(value)
         (ROOT/'config/start2_route.json').write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding='utf-8')
         profile = json.loads((ROOT/'config/batch_trials.json').read_text(encoding='utf-8'))
-        profile.update(version=7, source='仅启停区2保存路线10段；候选，尚待本版烧录后实测')
+        profile.update(version=8, source='启停区2车头+X，首段倒车斜线；候选，待本版烧录后实测')
         (ROOT/'config/start2_trials.json').write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding='utf-8')
     print(json.dumps(dict(status=result['mode'], seconds=result['elapsed_s'],
         route_sha256=value['sha256'], goals_sha256=hashlib.sha256(b''.join(bytes.fromhex(g) for g in value['goals'])).hexdigest()), indent=2))

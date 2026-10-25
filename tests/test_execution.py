@@ -24,7 +24,7 @@ from robot.track_sim import Plant
 from robot.web.app import create_app
 from robot.runtime import save_snapshot, load_snapshot
 from robot.device.feedback import Feedback, FEEDBACK
-from robot.device.tracking import Reference, Goal
+from robot.device.tracking import Reference, Goal, Spec
 
 
 def profile():
@@ -600,6 +600,11 @@ class ExecutionTests(unittest.TestCase):
         value = json.loads((ROOT/'config/start2_trials.json').read_text(encoding='utf-8'))
         field = Field(data=plan['field'])
         origin = Pose(*plan['map_origin'])
+        self.assertEqual(origin.yaw_rad, 0)
+        first_spec = Spec.from_buffer_copy(bytes.fromhex(plan['goals'][0])[8:])
+        self.assertAlmostEqual(first_spec.x_m, -1.05, places=6)
+        self.assertAlmostEqual(first_spec.y_m, -.20, places=6)
+        self.assertEqual(first_spec.yaw_rad, 0)
         transport = KeyTransport(self.lib)
         transport.plant = Plant(ideal=True, radius_m=value['wheel_radius_m'],
                                 k_m=value['half_length_m']+value['half_width_m'])
@@ -626,9 +631,9 @@ class ExecutionTests(unittest.TestCase):
                 lambda kind, **v: records.append(dict(kind=kind, **v)), clock=lambda: transport.now,
                 sleep=transport.sleep, route=plan, simulation=True, wait_start=True)
         self.assertTrue(result['controller_complete'])
-        self.assertEqual(len(result['completed_segments']), 10)
+        self.assertEqual(len(result['completed_segments']), 9)
         goals = [v for v in transport.requests if v.kind == GOAL]
-        self.assertEqual([int.from_bytes(v.payload[:4], 'little') for v in goals], list(range(1, 11)))
+        self.assertEqual([int.from_bytes(v.payload[:4], 'little') for v in goals], list(range(1, 10)))
         self.assertEqual(len({(v.boot, v.session) for v in goals}), 1)
         self.assertEqual(sum(v.kind == CONFIG for v in transport.requests), 1)
         self.assertEqual(sum(v.kind == ARM for v in transport.requests), 1)
@@ -646,7 +651,7 @@ class ExecutionTests(unittest.TestCase):
         from robot.device.tracking import Spec
         plan = json.loads((ROOT/'config/start2_route.json').read_text(encoding='utf-8'))
         value = profile()
-        value.update(version=7, max_rpm=100)
+        value.update(version=8, max_rpm=100)
         self.device.open()
         self.device.assert_ok(self.device.call(CONFIG, config_payload(value)))
         for _ in range(8):self.device.step()
@@ -667,31 +672,41 @@ class ExecutionTests(unittest.TestCase):
         self.device.assert_ok(self.device.call(ARM))
         for _ in range(8):self.device.step()
         self.assertNotEqual(self.device.call(GOAL, bytes.fromhex(plan['goals'][0])).payload[0], p.OK)
+        with self.assertRaises(ValueError):
+            config_payload(dict(value, version=7))
+        # 单独冷启动验证旧version7在固件侧被拒绝，避免通过改主机标记复活。
+        self.device = Device(self.lib)
+        self.device.open()
+        config = bytearray(config_payload(dict(value, version=8)))
+        config[:4] = (7).to_bytes(4, 'little')
+        self.assertNotEqual(self.device.call(CONFIG, bytes(config)).payload[0], p.OK)
 
     def test_start2_map_origin_tampering_is_rejected(self):
         from robot.nav.route import validate, digest
         plan = json.loads((ROOT/'config/start2_route.json').read_text(encoding='utf-8'))
         validate(plan)
-        plan['map_origin'][2] = 0
+        plan['map_origin'][2] = math.pi
         plan['sha256'] = digest(plan)
         with self.assertRaises(ValueError):
             validate(plan)
 
-    def test_start2_refuses_0317_before_any_configuration(self):
+    def test_start2_refuses_previous_firmware_before_any_configuration(self):
         class PreviousLink(MotionLink):
             def feed(self, wire, now):
                 super().feed(wire, now)
                 if self.firmware:
-                    self.firmware = 'GC-BASE-0.3.17'
+                    self.firmware = previous
         route = json.loads((ROOT/'config/start2_route.json').read_text(encoding='utf-8'))
         value = json.loads((ROOT/'config/start2_trials.json').read_text(encoding='utf-8'))
-        transport = SimTransport(self.lib)
-        with tempfile.TemporaryDirectory() as directory, patch('robot.drive_core.MotionLink', PreviousLink):
-            with self.assertRaisesRegex(ValueError, '要求PC0协议'):
-                run_trial(transport, value, 'straight', directory, lambda *a, **k: None,
-                    clock=lambda: transport.now, sleep=transport.sleep, route=route,
-                    simulation=True, wait_start=True)
-        self.assertFalse(any(v.kind in (CONFIG, ARM, GOAL) for v in transport.requests))
+        for previous in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18'):
+            transport = SimTransport(self.lib)
+            with self.subTest(firmware=previous), tempfile.TemporaryDirectory() as directory:
+                with patch('robot.drive_core.MotionLink', PreviousLink):
+                    with self.assertRaisesRegex(ValueError, '要求PC0协议'):
+                        run_trial(transport, value, 'straight', directory, lambda *a, **k: None,
+                            clock=lambda: transport.now, sleep=transport.sleep, route=route,
+                            simulation=True, wait_start=True)
+            self.assertFalse(any(v.kind in (CONFIG, ARM, GOAL) for v in transport.requests))
 
     def test_batch_repeated_geometry_cannot_skip_first_batch(self):
         plan=json.loads((ROOT/'config/batch_route.json').read_text())
