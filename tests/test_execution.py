@@ -577,6 +577,14 @@ class ExecutionTests(unittest.TestCase):
                     simulation=True, wait_start=True)
         self.assertFalse(any(v.kind in (CONFIG, ARM, GOAL) for v in transport.requests))
 
+    def test_can_candidate_does_not_open_physical_motion_entry(self):
+        transport = SimTransport(self.lib)
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, '固件或使能状态不符合'):
+                run_trial(transport, profile(), 'straight', directory, lambda *a, **k: None,
+                          clock=lambda: transport.now, sleep=transport.sleep, simulation=False)
+        self.assertFalse(any(v.kind in (CONFIG, ARM, GOAL, START_PREPARE) for v in transport.requests))
+
     def test_pc0_batch_cli_preview_never_opens_transport(self):
         import contextlib
         import io

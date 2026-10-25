@@ -16,20 +16,24 @@ def main():
     parser.add_argument('--manifest',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--seconds',type=float,default=30.)
+    parser.add_argument('--build-dir',type=Path,default=ROOT/'firmware/MDK-ARM/Objects',
+                        help='对应已烧录HEX与AXF的归档目录，不允许用新候选符号读取旧板端')
     args=parser.parse_args()
     manifest=json.loads(args.manifest.read_text(encoding='utf-8'))
     if not manifest.get('verified') or not manifest.get('resumed_after_verify'):
         raise ValueError('必须先完成本次烧录和完整读回')
-    if hashlib.sha256((ROOT/'firmware/MDK-ARM/Objects/Car.hex').read_bytes()).hexdigest()!=manifest['image_sha256']:
+    if hashlib.sha256((args.build_dir/'Car.hex').read_bytes()).hexdigest()!=manifest['image_sha256']:
         raise ValueError('当前HEX与已读回固件不一致')
     if args.output.exists():
         raise ValueError('不覆盖旧证据')
     args.output.parent.mkdir(parents=True,exist_ok=True)
     layouts={}
     names={'can_diag':'CanDiag','bus_diag':'BusDiag','executor':'Exec','guard':'MechGuard','axis':'Axis','servo':'Servo','pose':'Pose'}
-    with (ROOT/'firmware/MDK-ARM/Objects/Car.axf').open('rb') as stream:
+    with (args.build_dir/'Car.axf').open('rb') as stream:
         elf=ELFFile(stream)
         table=elf.get_section_by_name('.symtab')
+        if table.get_symbol_by_name('bus_timeout'):
+            names['bus_timeout']='BusTimeout'
         symbols={name:dict(address=max(table.get_symbol_by_name(name),key=lambda s:s['st_size'])['st_value']) for name in names}
         for cu in elf.get_dwarf_info().iter_CUs():
             for die in cu.iter_DIEs():
@@ -51,7 +55,8 @@ def main():
     options=dict(pack=manifest['pack'],target_override='stm32f407zg',frequency=100000,
                  connect_mode='attach',halt_on_connect=False,resume_on_disconnect=False,auto_unlock=False,config_file=None)
     session=ConnectHelper.session_with_chosen_probe(unique_id=manifest['probe'],blocking=False,options=options)
-    record=dict(source='running SWD; no UART',writes=0,halted=False,reset=False,manifest=str(args.manifest),symbols=symbols,layouts=layouts,samples=[])
+    record=dict(source='running SWD; no UART',writes=0,halted=False,reset=False,manifest=str(args.manifest),
+                build_dir=str(args.build_dir),symbols=symbols,layouts=layouts,samples=[])
     with session:
         target=session.target
         if target.get_state()!=Target.State.RUNNING:raise RuntimeError('CPU未运行，不自动恢复')

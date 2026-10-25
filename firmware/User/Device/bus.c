@@ -4,6 +4,7 @@
 #include "bus_config.h"
 #include <string.h>
 volatile BusDiag bus_diag;
+volatile BusTimeout bus_timeout;
 enum
 {
     JOB_NONE,
@@ -416,12 +417,12 @@ static void Receive(void)
     {
         if (observer)
             observer(&frame);
-        /* 复用旧axis的发送/匹配回复两阶段；本机RX序号不是设备事务号。
-         * TXOK之前、旧队列、错地址/命令、格式错误和期限外回包均不解锁。 */
+        /* RX时必须已有当前事务真实TXOK证据；不比较RX与延迟执行的TX回调时间。
+         * 实际发送前、无TXOK、旧事务、错地址/命令及期限外回包均不解锁。
+         * 匹配只记录回复，Complete仍等待正式HAL发送完成状态。 */
         if (reply_wait && !reply_matched && frame.rx_sequence != reply_barrier &&
             (uint32_t)(frame.rx_sequence - reply_barrier) < 0x80000000UL &&
-            can_diag.tx_done_sequence == bus_diag.query_tx_sequence &&
-            (uint32_t)(frame.tick - can_diag.tx_done_tick) < 0x80000000UL &&
+            frame.tx_sequence == bus_diag.query_tx_sequence &&
             (uint32_t)(frame.tick - reply_start) < BUS_REPLY_TIMEOUT_MS &&
             ((reply_code == 0x42 && Drive_Config(&query_config_rx, &frame, reply_address, &query_config) == 1) ||
              (Drive_Parse(&frame, reply_address, &reply) && reply.code == reply_code)))
@@ -557,6 +558,39 @@ static int Submit(uint8_t type, uint8_t wheel, const BusFrame *frames, uint8_t c
     }
     return 1;
 }
+static void TimeoutRecord(uint32_t now)
+{
+    uint32_t mask = __get_PRIMASK();
+    __disable_irq();
+    if (!bus_timeout.valid)
+    {
+        bus_timeout.version = 1;
+        bus_timeout.tick = now;
+        bus_timeout.address = reply_address;
+        bus_timeout.code = reply_code;
+        bus_timeout.start = reply_start;
+        bus_timeout.barrier = reply_barrier;
+        bus_timeout.tx_sequence = bus_diag.query_tx_sequence;
+        bus_timeout.tx_done_tick = can_diag.tx_done_tick;
+        bus_timeout.tx_done_sequence = can_diag.tx_done_sequence;
+        bus_timeout.rx_sequence = can_diag.rx_sequence;
+        bus_timeout.error = bus_diag.error;
+        bus_timeout.active = bus_diag.active;
+        bus_timeout.locked = bus_diag.locked;
+        bus_timeout.job = job;
+        bus_timeout.tx_state = (uint32_t)Can_Status();
+        bus_timeout.query_count = bus_diag.query_count;
+        bus_timeout.query_timeouts = bus_diag.query_timeouts;
+        bus_timeout.last_rx_id = can_diag.last_rx_id;
+        bus_timeout.last_rx_length = can_diag.last_rx_length;
+        bus_timeout.last_rx_data0 = can_diag.last_rx_data0;
+        bus_timeout.last_rx_data1 = can_diag.last_rx_data1;
+        bus_timeout.last_rx_tick = can_diag.last_rx_tick;
+        __DMB();
+        bus_timeout.valid = 1;
+    }
+    __set_PRIMASK(mask);
+}
 static void Complete(uint32_t now)
 {
     CanState state = Can_Status();
@@ -570,6 +604,7 @@ static void Complete(uint32_t now)
             if ((uint32_t)(now - reply_start) < BUS_REPLY_TIMEOUT_MS)
                 return;
             bus_diag.query_timeouts++;
+            TimeoutRecord(now);
             reply_wait = 0;
             bus_diag.query_waiting = 0;
             job = JOB_NONE;
@@ -638,14 +673,8 @@ static void Complete(uint32_t now)
         }
     }
 }
-void Bus_Poll(void)
+static void CheckErrors(void)
 {
-    BusFrame frames[2];
-    uint32_t now = HAL_GetTick();
-    uint16_t rpm;
-    uint8_t i, count, op;
-    uint16_t scan, address;
-    Can_Poll();
     if ((bus_diag.active || finite_owned || job) &&
         (can_diag.errors != seen_errors || can_diag.rx_overflow != seen_overflow))
     {
@@ -654,7 +683,21 @@ void Bus_Poll(void)
     }
     seen_errors = can_diag.errors;
     seen_overflow = can_diag.rx_overflow;
+}
+void Bus_Poll(void)
+{
+    BusFrame frames[2];
+    uint32_t now = HAL_GetTick();
+    uint16_t rpm;
+    uint8_t i, count, op;
+    uint16_t scan, address;
+    /* 已观察到的错误先取消旧事务，避免先推进下一帧再处理故障。 */
+    CheckErrors();
+    Can_Poll();
+    CheckErrors();
     Receive();
+    /* RX搬运/观察回调期间也可能进错误中断；本轮不得先报告完成。 */
+    CheckErrors();
     now = HAL_GetTick();
     if (cancelling)
     {

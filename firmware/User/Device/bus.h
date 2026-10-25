@@ -37,4 +37,15 @@ enum
 extern volatile BusDiag bus_diag;
 /* 主循环唯一CAN接收消费者；业务层不得调用私有Bus/Can运动原语。 */
 void Bus_Poll(void);
+
+/* 首次查询缺回包现场，独立于CAN硬件错误历史；仅复位清空，不改变保护。 */
+typedef struct
+{
+    uint32_t version, valid, tick, address, code;
+    uint32_t start, barrier, tx_sequence, tx_done_tick, tx_done_sequence, rx_sequence;
+    /* 记录Fault()之前的总线状态；query_timeouts已包含本次超时。 */
+    uint32_t error, active, locked, job, tx_state, query_count, query_timeouts;
+    uint32_t last_rx_id, last_rx_length, last_rx_data0, last_rx_data1, last_rx_tick;
+} BusTimeout;
+extern volatile BusTimeout bus_timeout;
 #endif

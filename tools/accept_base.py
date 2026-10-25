@@ -20,7 +20,7 @@ from robot.main import open_transport
 from robot.runtime import ProcessLock
 
 READONLY_KINDS = {p.HELLO,p.OPEN,p.HEART,p.STATE,p.DIAG,STATUS,FEEDBACK,36,37,38,58,60}
-MODERN = ('GC-BASE-0.3.20','GC-BASE-0.3.21')
+MODERN = ('GC-BASE-0.3.20','GC-BASE-0.3.21','GC-BASE-0.3.22')
 
 
 class Diagnostic(MotionLink):

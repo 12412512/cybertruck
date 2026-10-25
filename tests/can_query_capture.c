@@ -152,12 +152,71 @@ static void Active(int omit)
     else
         CHECK(bus_diag.active && !bus_diag.error && bus_diag.query_replies > 30 && bus_diag.speed_batches > 15);
 }
+static void TimeoutEvidence(unsigned which)
+{
+    BusTimeout first;
+    BusFrame frames[2];
+    uint32_t start;
+    CHECK(!bus_timeout.valid && !can_capture.valid);
+    if (which == 14)
+        tick = UINT32_MAX - 20U;
+    start = tick;
+    Query(1, 0x35);
+    tick++;
+    Done();
+    Bus_Poll();
+    if (which == 15)
+    {
+        tick += 8;
+        Reply(2, 0x36, 0);
+        Bus_Poll();
+    }
+    tick = start + BUS_REPLY_TIMEOUT_MS;
+    Bus_Poll();
+    CHECK(Bus_Status() == CAN_FAILED && bus_diag.query_timeouts == 1);
+    CHECK(bus_timeout.version == 1 && bus_timeout.valid == 1);
+    CHECK(bus_timeout.tick == tick && bus_timeout.start == start);
+    CHECK(bus_timeout.address == 1 && bus_timeout.code == 0x35);
+    CHECK(bus_timeout.tx_sequence == 1 && bus_timeout.tx_done_sequence == 1);
+    CHECK(bus_timeout.tx_done_tick == start + 1U && bus_timeout.tx_state == CAN_SENT);
+    CHECK(bus_timeout.barrier == 0 && bus_timeout.query_timeouts == 1);
+    CHECK(!bus_timeout.active && !bus_timeout.locked && !bus_timeout.error);
+    CHECK(bus_timeout.job != 0 && !can_capture.valid);
+    CHECK(bus_timeout.query_count == bus_diag.query_count);
+    if (which == 15)
+    {
+        CHECK(bus_timeout.rx_sequence == 1 && bus_timeout.last_rx_id == 0x200);
+        CHECK(bus_timeout.last_rx_length == 7 && bus_timeout.last_rx_data0 == 0x36);
+        CHECK(bus_timeout.last_rx_tick == start + 9U);
+    }
+    else
+        CHECK(!bus_timeout.rx_sequence && !bus_timeout.last_rx_id);
+    first = bus_timeout;
+    if (which == 13)
+    {
+        /* 后续只读查询再次超时，不覆盖首个现场，也不伪造CAN硬件错误。 */
+        Bus_Release();
+        tick++;
+        CHECK(Bus_Send(frames, Drive_Build(2, 0x36, 0, 0, 0, 0, 0, 0, frames)));
+        Bus_Poll();
+        Bus_Poll();
+        CHECK(occupied && sends == 2);
+        tick++;
+        Done();
+        Bus_Poll();
+        tick += BUS_REPLY_TIMEOUT_MS;
+        Bus_Poll();
+        CHECK(bus_diag.query_timeouts == 2 && !can_capture.valid);
+    }
+    CHECK(!memcmp(&first, (const void *)&bus_timeout, sizeof(first)));
+}
 int main(int argc, char **argv)
 {
     unsigned which = argc > 1 ? (unsigned)atoi(argv[1]) : 0;
     Can_Refresh(); Bus_Setup(addresses);
     if (which == 0) Capture();
     else if (which == 10 || which == 11) Active(which == 11);
+    else if (which >= 13 && which <= 15) TimeoutEvidence(which);
     else
     {
         if (which == 6) tick = UINT32_MAX - 2U;

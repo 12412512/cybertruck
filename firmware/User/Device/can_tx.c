@@ -207,16 +207,18 @@ static void CanRelease(uint32_t now)
 static void CanStep(void)
 {
     CAN_TxHeaderTypeDef h = {0};
-    uint32_t now = HAL_GetTick(), mailbox, mask;
+    uint32_t now, mailbox, mask;
     HAL_StatusTypeDef result;
     if (tx_hold)
     {
-        CanRelease(now);
+        CanRelease(HAL_GetTick());
         return;
     }
     /* 错误检查、分包推进和提交同段屏蔽，错误标志在事务内保持。 */
     mask = __get_PRIMASK();
     __disable_irq();
+    /* 取时必须晚于已完成的回调，避免跨毫秒后相减下溢绕过周转/退避。 */
+    now = HAL_GetTick();
     if (tx_state != CAN_BUSY)
     {
         __set_PRIMASK(mask);
@@ -273,6 +275,15 @@ static void CanStep(void)
     }
     /* 回复型命令后保留有界周转时间，等待仍计入原事务期限。 */
     if (turnaround_valid && (uint32_t)(now - turnaround_tick) < CAN_TX_TURNAROUND_MS)
+    {
+        __set_PRIMASK(mask);
+        return;
+    }
+    /* 查询可能收到多个回包；非STOP需等最近RX后的静默周转。
+     * 等待仍计入原50ms期限，故障STOP不受额外RX静默门槛阻塞。 */
+    if (tx[tx_index].data[0] != 0xFE &&
+        ((board_can.Instance->RF0R & 3U) ||
+         (can_diag.rx_sequence && (uint32_t)(now - can_diag.last_rx_tick) < CAN_TX_TURNAROUND_MS)))
     {
         __set_PRIMASK(mask);
         return;
@@ -347,6 +358,30 @@ uint8_t Can_Read(BusFrame *frame)
     rx_tail = (tail + 1) % CAN_RING_SIZE;
     return 1;
 }
+static uint32_t ReplyTransaction(void)
+{
+    uint32_t shift, result;
+    if (tx_state == CAN_SENT && !tx_hold && !tx_bad &&
+        can_diag.tx_done_sequence == tx_sequence)
+        return tx_sequence;
+    if (tx_state != CAN_BUSY || !tx_pending || tx_bad || tx_arbitration)
+        return 0;
+    if (tx_ok)
+        return tx_sequence;
+    /* RX中断可能先于TX完成中断；只读当前邮箱真实RQCP/TXOK，不能仅凭邮箱空闲。
+     * 每个邮箱结果占8位：RQCP=bit0、TXOK=bit1、ALST=bit2、TERR=bit3。
+     * 不清标志、不推进事务；最终完成仍必须经过正式HAL回调。 */
+    if (tx_mailbox == CAN_TX_MAILBOX0)
+        shift = 0;
+    else if (tx_mailbox == CAN_TX_MAILBOX1)
+        shift = 8;
+    else if (tx_mailbox == CAN_TX_MAILBOX2)
+        shift = 16;
+    else
+        return 0;
+    result = (board_can.Instance->TSR >> shift) & 15U;
+    return result == 3U ? tx_sequence : 0;
+}
 void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *h)
 {
     CAN_RxHeaderTypeDef header;
@@ -369,6 +404,7 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *h)
     f.id = header.ExtId;
     f.len = (uint8_t)header.DLC;
     f.tick = HAL_GetTick();
+    f.tx_sequence = ReplyTransaction();
     can_diag.last_rx_id = f.id;
     can_diag.last_rx_length = f.len;
     can_diag.last_rx_data0 = Packed(f.data);

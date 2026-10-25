@@ -21,6 +21,12 @@ uint32_t HAL_GetTick(void) { return now; }
 uint8_t BoardButton(void) { return 0; }
 void Can_Poll(void) { polls++; }
 CanState Can_Status(void) { return state; }
+/* 接收生成时即冻结TXOK证据；消费队列时不得替旧帧补当前事务标记。 */
+static uint32_t ReplyTransaction(void)
+{
+    return state == CAN_SENT && can_diag.tx_done_sequence == can_diag.tx_sequence ?
+        can_diag.tx_sequence : 0;
+}
 uint8_t Can_Send(const BusFrame *frames,uint8_t count)
 {
     if (!available || state==CAN_BUSY || state==CAN_CANCELLING) return 0;
@@ -48,7 +54,8 @@ static void Finish(void)
     if(auto_reply && (op==0x33 || op==0x35 || op==0x36 || op==0x3A)) {
         unsigned n; int queued=0; int64_t value=0; uint64_t magnitude;
         for(n=output;n<input;n++)
-            if(receive[n].id==((uint32_t)addr<<8) && receive[n].data[0]==op) queued=1;
+            if(receive[n].id==((uint32_t)addr<<8) && receive[n].data[0]==op &&
+               receive[n].tx_sequence==can_diag.tx_done_sequence) queued=1;
         if(!queued) {
             if(addr>=1 && addr<=4) {
                 const BusWheel *w=Bus_Wheels()+addr-1;
@@ -56,6 +63,7 @@ static void Finish(void)
             }
             assert(input<256); f=&receive[input++]; memset(f,0,sizeof(*f));
             f->id=(uint32_t)addr<<8; f->tick=now; f->rx_sequence=++can_diag.rx_sequence;
+            f->tx_sequence=ReplyTransaction();
             f->data[0]=op; f->data[1]=(uint8_t)(value<0); magnitude=(uint64_t)(value<0?-value:value);
             if(op==0x35) { f->len=5; f->data[2]=(uint8_t)(magnitude>>8); f->data[3]=(uint8_t)magnitude; }
             else if(op==0x3A) { f->len=3; f->data[1]=(uint8_t)value; }
@@ -109,6 +117,7 @@ static void Reply(uint8_t addr,uint8_t code,uint8_t result)
     assert(input<=256); memset(f,0,sizeof(*f));
     f->id=(uint32_t)addr<<8; f->tick=now; f->len=3;
     f->rx_sequence=++can_diag.rx_sequence;
+    f->tx_sequence=ReplyTransaction();
     f->data[0]=code; f->data[1]=result; f->data[2]=MOTOR_CHECK_BYTE;
 }
 static uint8_t Build(uint8_t addr,uint8_t op,BusFrame f[2])
@@ -124,6 +133,7 @@ static void Config(uint8_t addr)
         BusFrame *f=&receive[input++]; uint8_t n=packet==4?3:7;
         memset(f,0,sizeof(*f)); f->id=((uint32_t)addr<<8)|packet; f->tick=now;
         f->rx_sequence=++can_diag.rx_sequence;
+        f->tx_sequence=ReplyTransaction();
         f->len=(uint8_t)(n+1); f->data[0]=0x42;
         memcpy(&f->data[1],&raw[1+packet*7],n);
     }

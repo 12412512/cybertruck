@@ -2,11 +2,14 @@
 #ifndef PROTOCOL_H
 #define PROTOCOL_H
 #include <stdint.h>
-/* rx_sequence是本机有效RX中断序号，非设备事务号；TX构帧时为0，不上总线。 */
+/* rx_sequence是本机有效RX中断序号，非设备事务号；TX构帧时为0，不上总线。
+ * tx_sequence仅为接收时已观察到本机当前事务TXOK的证据，0表示未确认。
+ * 不发送该字段，不把软件回调执行时刻当作总线发送完成时刻。 */
 typedef struct
 {
     uint32_t id, tick, rx_sequence;
     uint8_t len, data[8];
+    uint32_t tx_sequence;
 } BusFrame;
 typedef struct
 {

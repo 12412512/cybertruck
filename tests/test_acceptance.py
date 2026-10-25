@@ -120,6 +120,13 @@ class ModernAcceptanceTests(unittest.TestCase):
             self.assertFalse(self.result()['passed'])
             self.requests.pop()
 
+    def test_can_candidate_readonly_checks_still_require_clean_fault_record(self):
+        for row in self.states:
+            row['firmware'] = 'GC-BASE-0.3.22'
+        self.assertTrue(summarize(self.link,self.states,self.requests,'GC-BASE-0.3.22')['passed'])
+        self.states[-1]['execution']['can_errors'] = 1
+        self.assertFalse(summarize(self.link,self.states,self.requests,'GC-BASE-0.3.22')['passed'])
+
     def test_identity_ticket_pwm_and_missing_first_error_rejected(self):
         self.states[-1]['session_id']='other'
         self.assertFalse(self.result()['passed'])

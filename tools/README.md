@@ -10,6 +10,10 @@
 
 ## 工具职责
 
+CAN时序候选及对照规律见`docs/can_timing_fix.md`。`inspect_mech.py`仅SWD不停核读取；
+`--build-dir <对应HEX/AXF目录>`可选已烧录版本的符号归档，必须与manifest的HEX哈希一致。
+新候选自动读取`bus_timeout`首次查询超时记录；旧版本无该记录时不填模拟值。
+
 | 工具 | 输入与行为 | 输出与副作用 |
 | --- | --- | --- |
 | `generate.ps1` | CubeMX CLI 加载 `firmware/Car.ioc`，执行 `project generate`；随后同步工程并检查 | 更新生成代码与 Keil 配置，日志写入 `output/cubemx/` |

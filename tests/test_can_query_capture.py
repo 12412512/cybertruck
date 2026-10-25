@@ -31,6 +31,9 @@ class CanQueryCaptureTests(unittest.TestCase):
     def test_on_time_reply_can_finish_turnaround_after_deadline(self): self.run_case(9)
     def test_delayed_replies_keep_both_motion_and_wheel_feedback_live(self): self.run_case(10)
     def test_missing_active_reply_retains_four_stops(self): self.run_case(11)
+    def test_first_query_timeout_is_frozen_independently(self): self.run_case(13)
+    def test_timeout_record_preserves_millisecond_wrap(self): self.run_case(14)
+    def test_timeout_record_includes_last_unmatched_reply(self): self.run_case(15)
 
     def test_negative_control_txok_only_handoff_is_detected(self):
         device = ROOT / 'firmware/User/Device'
