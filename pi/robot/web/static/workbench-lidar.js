@@ -1,4 +1,7 @@
 // 雷达回放与实时设备隔离；外部报文未配准时仅显示，不进入自动规划。
+import {initLiveLidar} from './workbench-lidar-live.js?v=3';
+import {initReview} from './workbench-lidar-review.js?v=1';
+import {initCalibration} from './workbench-lidar-calibration.js?v=2';
 const $ = id => document.getElementById(id);
 let current = null, options, upload = '';
 
@@ -12,6 +15,8 @@ export function scanMap(state) {
 
 export function initLidar(value) {
     options = value;
+    initLiveLidar(initCalibration());
+    initReview();
     $('lidar-file').onchange = async () => {
         upload = '';
         try {
@@ -54,7 +59,7 @@ async function plan(scan_id) {
 export function renderLidar(state, enabled, busy) {
     current = state.lidar;
     const scan = current || {};
-    $('lidar-state').textContent = `${scan.status || '等待核心'} · ${scan.synthetic ? '合成报文' : '未配准诊断'} · 实车未连接`;
+    $('lidar-state').textContent = `PC回放：${scan.status || '等待核心'} · ${scan.synthetic ? '合成报文' : '未配准诊断'} · 不驱动实车`;
     $('lidar-details').textContent = scan.id ? `区${scan.start === 'start_1' ? 1 : 2} / 厂家区${scan.vendor_zone} · 完整点云${scan.cloud_frames}帧 / 结果${scan.result_frames}帧 · CRC等错误${scan.decode_bad} · ${scan.stop_confirmed ? '扫描STOP已确认' : 'STOP未确认'} · ${scan.calibration_version || '无标定'}` : '本轮使用厂家v6格式的合成夹具；不连接雷达、树莓派或串口。';
     $('lidar-reason').textContent = scan.reason || (scan.usable ? '模拟标定及覆盖有效；零障碍只有完整覆盖时才可作为空场。黑圈按50mm名义直径，另计位置不确定度。' : '历史/未知观测不能成为当前路线依据。');
     $('lidar-reason').classList.toggle('error',scan.status === 'REJECTED');

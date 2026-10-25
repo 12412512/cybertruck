@@ -230,7 +230,33 @@
                             </details>
                         </section>
                         <section class="card scene-card" id="lidar-panel">
-                            <div class="card-head"><div><h2>雷达扫描与自动绕障</h2><p>厂家v6报文离线回放 → 障碍识别 → 同一规划器 → 执行链模型</p></div><span class="badge lab">仅PC离线</span></div>
+                            <div class="card-head"><div><h2>雷达扫描与自动绕障</h2><p>实机通信状态与PC扫描回放；规划和执行联调仍为离线模型</p></div><span class="badge lab">通信实机 / 规划离线</span></div>
+                            <details open><summary>实机雷达通信 · 只读接入</summary>
+                                <p id="lidar-live-state" role="status">等待读取实机雷达</p>
+                                <p id="lidar-live-details" class="help"></p>
+                                <p id="lidar-live-saved" class="help"></p>
+                                <p id="lidar-live-reason" class="help">等待读取状态；历史静扫与地图配准核对分开展示。</p>
+                                <p id="lidar-live-scan" class="help">本次尚未进行实机扫描</p>
+                                <details><summary>实机最近静扫点云 · 厂家坐标/mm（非地图）</summary><svg id="lidar-live-cloud" viewBox="-500 -2800 3500 3500" width="100%" height="180" aria-label="实机雷达静扫点云" style="background:#edf4f5;border-radius:8px"></svg></details>
+                            </details>
+                            <details open><summary>安装与坐标核对 · 已结束样本</summary>
+                                <p id="lidar-review-install" class="help">正在读取本地核对摘要</p>
+                                <p id="lidar-review-error" class="help"></p>
+                                <svg id="lidar-review-map" viewBox="-80 -2470 1250 1100" width="100%" height="280" aria-label="启停区1雷达与四点核对示意" style="background:#edf4f5;border-radius:8px"></svg>
+                                <p class="help">启停区1邻域：黑点为尺量标记，橙圈为未通过验收的独立点预测；O及雷达是安装参数推算的名义位置。此图不测量照片、不自动封路。</p>
+                                <ul id="lidar-review-checks" class="help"></ul>
+                                <p id="lidar-review-contract" class="help"></p>
+                                <p id="lidar-review-source" class="help"></p>
+                                <button id="lidar-review-refresh" class="text-button">刷新核对记录</button>
+                            </details>
+                            <details open><summary>厂家两点校准 · 分步受控</summary>
+                                <p id="lidar-cal-state" class="help">等待读取校准能力</p><p id="lidar-cal-backup" class="help"></p>
+                                <label class="check-label help"><input id="lidar-cal-fixed" type="checkbox"> 本轮雷达已人工展开固定，两柱按所选区摆放；不输出PE14 PWM</label>
+                                <button id="lidar-cal-prepare" class="secondary" disabled>只读准备：重新备份旧位姿</button>
+                                <label class="check-label help"><input id="lidar-cal-save" type="checkbox"> 确认启动两点校准并保存当前区位姿</label>
+                                <div class="button-row"><button id="lidar-cal-commit" class="secondary" disabled>校准并保存当前区</button><button id="lidar-cal-cancel" class="text-button" disabled>取消校准事务</button></div>
+                                <p id="lidar-cal-gateway" class="help"></p><p id="lidar-cal-message" class="help"></p>
+                            </details>
                             <p id="lidar-state" role="status">尚未回放</p>
                             <div class="plan-inputs">
                                 <label>合成扫描案例<select id="lidar-case">
@@ -634,7 +660,7 @@
                 </span>
             </footer>
         </main>
-        <script type="module" src="/static/workbench.js?v=10">
+        <script type="module" src="/static/workbench.js?v=15">
         </script>
         <script type="module" src="/static/workbench-vision.js?v=1"></script>
     </body>

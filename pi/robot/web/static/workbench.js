@@ -1,6 +1,6 @@
 // 界面只经网关调用独立核心；输入草稿、离线执行、实车状态分别表达。
 import {drawMap, drawSpeed} from './workbench-map.js?v=3';
-import {initLidar, renderLidar} from './workbench-lidar.js?v=1';
+import {initLidar, renderLidar} from './workbench-lidar.js?v=6';
 import {modelView} from './workbench-execution.js?v=1';
 import {initScene, sceneValues, applyScene, overlayDraft} from './workbench-scene.js?v=3';
 import {isEditing, motionDirection, matchesRelease} from './workbench-input.js';

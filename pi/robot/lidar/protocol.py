@@ -1,6 +1,7 @@
 """复用旧工程CYQM v6纯协议；坐标毫米，无ROS、串口或设备访问。"""
 import binascii
 import struct
+from collections import deque
 
 EVENTS = {0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
           0x88, 0x89, 0x8A, 0x8D, 0x8E, 0x8F}
@@ -42,7 +43,20 @@ def cobs_decode(data):
 
 
 def frame(node, command, sequence, payload=b''):
-    if command not in COMMANDS or not 1 <= node <= 254 or len(payload) > 224:
+    if command not in COMMANDS:
+        raise ValueError('unsupported command/node/payload')
+    return _frame(node, command, sequence, payload)
+
+
+def calibration_frame(node, sequence, zone):
+    """仅受控校准事务使用；不扩展默认frame白名单，也不代表获得写入许可。"""
+    if type(zone) is not int or zone not in (1, 2):
+        raise ValueError('calibration zone')
+    return _frame(node, 9, sequence, bytes([zone]))
+
+
+def _frame(node, command, sequence, payload):
+    if not 1 <= node <= 254 or not 0 <= sequence <= 65535 or len(payload) > 224:
         raise ValueError('unsupported command/node/payload')
     raw = struct.pack('<2sBBBHH', b'LR', 6, node, command, sequence, len(payload)) + payload
     return cobs_encode(raw + struct.pack('<H', binascii.crc_hqx(raw, 0xFFFF))) + b'\0'
@@ -53,6 +67,8 @@ class Decoder:
         self.partial = bytearray()
         self.discarding = False
         self.good = self.bad = self.unknown = 0
+        self.last_unknown = None
+        self.unknown_frames = deque(maxlen=16)
 
     def feed(self, data):
         events = []
@@ -86,6 +102,9 @@ class Decoder:
                 self.good += 1
                 if typ not in EVENTS:
                     self.unknown += 1
+                    # 仅保留有界诊断，不将扩展事件接纳为扫描或标定结果。
+                    self.last_unknown = dict(node=node, type=typ, sequence=seq, payload_hex=raw[9:-2].hex())
+                    self.unknown_frames.append(self.last_unknown)
                     continue
                 events.append((node, typ, seq, raw[9:-2]))
             except ValueError:
@@ -119,6 +138,53 @@ def persisted(payload):
                 record_sequence=struct.unpack_from('<I', payload, 2)[0],
                 source_zone=payload[6], grid_result_valid=bool(payload[9]),
                 grid_ids=ids, zone1_pose=pose(11, 1), zone2_pose=pose(18, 2))
+
+
+def scan_status(payload):
+    if len(payload) != 5:
+        raise ValueError('STATUS size')
+    status, mode, running, count, overflow = payload
+    if running not in (0, 1) or overflow:
+        raise ValueError('STATUS flags/overflow')
+    return dict(status=status, mode=mode, running=running, frame_count=count)
+
+
+def isolated_extensions(decoder, before, information, node):
+    """仅隔离实测1.37的0x90附加参数，绝不解释为扫描或几何数据。"""
+    count = decoder.unknown-before
+    values = list(decoder.unknown_frames)[-count:] if count else []
+    if count > 16 or any(item['node'] != node or item['type'] != 0x90 or
+            len(item['payload_hex']) != 8 or not information or
+            information['firmware'] != '1.37' for item in values):
+        raise ValueError('未知协议事件：'+str(decoder.last_unknown))
+    return values
+
+
+def scan_grid(payload):
+    if len(payload) < 5:
+        raise ValueError('GRID size')
+    sequence, count = struct.unpack_from('<IB', payload)
+    ids = list(payload[5:])
+    if count > 25 or len(ids) != count or any(v > 24 and v != 255 for v in ids):
+        raise ValueError('GRID count/ids')
+    return sequence, ids
+
+
+def scan_result(payload, sequence, ids):
+    if len(payload) < 8:
+        raise ValueError('RESULT size')
+    current, count, locked, overflow, number = struct.unpack_from('<IBBBB', payload)
+    if (current != sequence or number > 25 or len(payload) != 8+number*8 or
+            locked not in (0, 1) or overflow or not 1 <= count <= 14 or len(ids) != number):
+        raise ValueError('RESULT sequence/count/overflow')
+    objects = []
+    for index, grid_id in enumerate(ids):
+        x, y, hits, confidence, points = struct.unpack_from('<hhBBH', payload, 8+index*8)
+        if hits > 14 or confidence > 100:
+            raise ValueError('RESULT quality')
+        objects.append(dict(x_mm=x, y_mm=y, frame_hits=hits, confidence_percent=confidence,
+                            point_count=points, grid_id=grid_id))
+    return dict(scan_sequence=current, frame_count=count, locked=locked, objects=objects)
 
 
 class CloudAssembler:

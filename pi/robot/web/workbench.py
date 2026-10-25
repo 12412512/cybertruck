@@ -12,17 +12,18 @@ from ..workbench.contracts import Command
 
 
 class CoreClient:
-    def __init__(self, url='http://127.0.0.1:8090'):
+    def __init__(self, url='http://127.0.0.1:8090', headers=None):
         parsed = urlsplit(url)
         if parsed.scheme != 'http' or parsed.hostname != '127.0.0.1' or parsed.path not in ('', '/'):
             raise ValueError('控制核心必须是本机回环HTTP服务')
         self.url = url.rstrip('/')
         self.opener = build_opener(ProxyHandler({}))
+        self.headers = {'Content-Type': 'application/json', **(headers or {})}
 
     def request(self, path, body=None):
         data = None if body is None else json.dumps(body, allow_nan=False).encode()
         request = HttpRequest(self.url + path, data=data,
-                              headers={'Content-Type': 'application/json'})
+                              headers=self.headers)
         try:
             with self.opener.open(request, timeout=.6) as response:
                 return json.load(response)
@@ -94,5 +95,53 @@ def device_router(client=None):
         if request.headers.get('x-workbench') != '1' or (origin and origin != str(request.base_url).rstrip('/')):
             raise HTTPException(403, '仅接受同源实车调试请求')
         return client.request('/command', value.model_dump())
+
+    return api
+
+
+def lidar_router(client=None):
+    """固定雷达代理；网页不持有串口，校准提交仍受核心的默认关闭和票据约束。"""
+    from ..lidar.contracts import CalibrationPrepare, CalibrationCommit
+    client = client or CoreClient('http://127.0.0.1:8093', headers={'X-Lidar-Workbench':'1'})
+    api = APIRouter(prefix='/api/lidar')
+
+    @api.get('/state')
+    def state():
+        try:
+            value = client.request('/state')
+            if value.get('domain') != 'physical_lidar':
+                raise HTTPException(503, '雷达状态来源不符')
+            return dict(value, authorizes_motion=False, scan_allowed=False, real_map_registered=False,
+                gateway_calibration=True)
+        except HTTPException:
+            return dict(available=False, connected=False, domain='physical_lidar',
+                authorizes_motion=False, scan_allowed=False, real_map_registered=False,
+                reason='雷达只读核心未连接；网页没有打开设备')
+
+    @api.get('/calibration/capabilities')
+    def calibration_capabilities():
+        return dict(gateway=True, authorizes_motion=False)
+
+    def calibration_header(request):
+        origin = request.headers.get('origin')
+        if request.headers.get('x-workbench') != '1' or (origin and origin != str(request.base_url).rstrip('/')):
+            raise HTTPException(403, '只接受同源雷达校准工作台请求')
+
+    @api.post('/calibration/prepare')
+    def calibration_prepare(value:CalibrationPrepare, request:Request):
+        calibration_header(request)
+        return client.request('/calibration/prepare', value.model_dump())
+
+    @api.post('/calibration/commit')
+    def calibration_commit(value:CalibrationCommit, request:Request):
+        calibration_header(request)
+        return client.request('/calibration/commit', value.model_dump())
+
+    @api.post('/calibration/{identity}/cancel')
+    def calibration_cancel(identity:str, request:Request):
+        calibration_header(request)
+        if len(identity) != 32 or any(char not in '0123456789abcdef' for char in identity):
+            raise HTTPException(422, '校准票据格式不符')
+        return client.request('/calibration/'+identity+'/cancel', {})
 
     return api
