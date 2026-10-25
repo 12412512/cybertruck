@@ -57,6 +57,10 @@ void Exec_Init(Exec *exec, ExecIo io)
 /* 仅首次启动前选区；保留同一odom历史，不用重新配置/清零掩盖位置变化。 */
 int Exec_Select(Exec *exec, uint32_t zone)
 {
+#ifdef EXEC_PREVIEW
+    if (exec->preview_count && exec->preview_zone != zone)
+        return 0;
+#endif
     if (exec->config.version != 9 || exec->mode != EXEC_OBSERVING ||
         exec->have_goal || exec->last_goal.id || exec->enabled_wheels || exec->arm_ms ||
         exec->fault || (zone != 1 && zone != 2))
@@ -359,6 +363,47 @@ static unsigned FrozenIndex(const RefSpec *ref, uint32_t version, uint32_t actio
         version == 4 ? TourIndex(ref) : version == 3 ? RawIndex(ref) : 0;
 }
 
+#ifdef EXEC_PREVIEW
+int Exec_Preview(Exec *exec, uint32_t zone, const TrackGoal *goals, uint32_t count)
+{
+    RefPlan plan;
+    uint32_t index;
+    if (!exec || !goals || !count || count > 64 || (zone != 1 && zone != 2) ||
+        exec->mode != EXEC_DISABLED || exec->config.version || exec->fault || exec->preview_count)
+        return 0;
+    for (index = 0; index < count; index++)
+    {
+        const RefSpec *ref = &goals[index].reference;
+        if (goals[index].id != index + 1 || goals[index].timeout_ms != 30000 ||
+            ref->kind < 1 || ref->kind > 6 ||
+            !isfinite(ref->linear.velocity) || ref->linear.velocity > 0.30001f ||
+            !isfinite(ref->linear.acceleration) || ref->linear.acceleration > 0.25001f ||
+            !isfinite(ref->linear.jerk) || ref->linear.jerk > 0.80001f ||
+            !isfinite(ref->angular.velocity) || ref->angular.velocity > 1.20001f ||
+            !isfinite(ref->angular.acceleration) || ref->angular.acceleration > (ref->kind == 1 ? 8.00001f : 2.00001f) ||
+            !isfinite(ref->angular.jerk) || ref->angular.jerk > (ref->kind == 1 ? 300.00001f : 12.00001f) ||
+            !Ref_Make(&plan, ref, 0, 0, 0) || plan.duration_s > 25)
+            return 0;
+    }
+    /* 完整验证后一次冻结，失败不留下半份计划。 */
+    for (index = 0; index < count; index++)
+        memcpy(exec->preview_refs[index], &goals[index].reference, 88);
+    exec->preview_zone = zone;
+    exec->preview_count = count;
+    return 1;
+}
+
+static unsigned RouteIndex(const Exec *exec, const RefSpec *ref, uint32_t action)
+{
+    if (exec->preview_count)
+        return exec->config.version == 9 && exec->route_zone == exec->preview_zone ?
+            SavedIndex(ref, action, exec->preview_refs, exec->preview_count) : 0;
+    return FrozenIndex(ref, exec->config.version, action, exec->route_zone);
+}
+#else
+#define RouteIndex(exec, ref, action) FrozenIndex((ref), (exec)->config.version, (action), (exec)->route_zone)
+#endif
+
 static int CalibrationMatch(const RefSpec *ref)
 {
     unsigned index;
@@ -437,14 +482,19 @@ static int GoalValid(const TrackGoal *goal)
 int Exec_Goal(Exec *exec, const TrackGoal *goal, uint32_t now_ms)
 {
     int result;
+#ifdef EXEC_PREVIEW
+    if (!goal || (exec->preview_count ?
+        (goal->timeout_ms != 30000 || !RouteIndex(exec, &goal->reference, goal->id)) : !GoalValid(goal)))
+#else
     if (!goal || !GoalValid(goal))
+#endif
     {
         return -1;
     }
     if ((exec->config.version == 6 && !CalibrationMatch(&goal->reference)) ||
         (exec->config.version != 6 && CalibrationMatch(&goal->reference)))
         return -1;
-    if (((exec->config.version == 3 || exec->config.version == 4 || exec->config.version == 5 || exec->config.version == 8 || exec->config.version == 9) && FrozenIndex(&goal->reference, exec->config.version, goal->id, exec->route_zone) == 0) ||
+    if (((exec->config.version == 3 || exec->config.version == 4 || exec->config.version == 5 || exec->config.version == 8 || exec->config.version == 9) && RouteIndex(exec, &goal->reference, goal->id) == 0) ||
         ((exec->config.version != 3 && exec->config.version != 4 && exec->config.version != 5 && exec->config.version != 8 && exec->config.version != 9) && (RawIndex(&goal->reference) || TourIndex(&goal->reference) || SavedIndex(&goal->reference, goal->id, BatchRefs, BATCH_COUNT) || SavedIndex(&goal->reference, goal->id, Start2Refs, START2_COUNT) || SavedIndex(&goal->reference, goal->id, Start1Refs, START1_COUNT))) ||
         (goal->reference.kind == 1 && goal->reference.x_m == 1.05f && goal->reference.y_m == -0.13f && exec->config.max_rpm > 6))
     {
@@ -455,10 +505,10 @@ int Exec_Goal(Exec *exec, const TrackGoal *goal, uint32_t now_ms)
         return memcmp(goal, &exec->last_goal, sizeof(*goal)) == 0 ? 0 : -2;
     }
     if ((exec->config.version == 3 || exec->config.version == 4 || exec->config.version == 5 || exec->config.version == 8 || exec->config.version == 9) &&
-        (goal->id != FrozenIndex(&goal->reference, exec->config.version, goal->id, exec->route_zone) ||
+        (goal->id != RouteIndex(exec, &goal->reference, goal->id) ||
          (goal->id == 1 && exec->have_goal) ||
          (goal->id > 1 && (!exec->have_goal || exec->last_goal.id != goal->id - 1 ||
-          FrozenIndex(&exec->last_goal.reference, exec->config.version, exec->last_goal.id, exec->route_zone) != goal->id - 1))))
+          RouteIndex(exec, &exec->last_goal.reference, exec->last_goal.id) != goal->id - 1))))
     {
         return -2;
     }
@@ -636,7 +686,7 @@ void Exec_Run(Exec *exec, uint32_t now_ms)
     {
         int north = exec->last_goal.reference.kind == 1 &&
             exec->last_goal.reference.x_m == 1.05f && exec->last_goal.reference.y_m == -0.13f;
-        unsigned raw = FrozenIndex(&exec->last_goal.reference, exec->config.version, exec->last_goal.id, exec->route_zone);
+        unsigned raw = RouteIndex(exec, &exec->last_goal.reference, exec->last_goal.id);
         int calibration = exec->config.version == 6 && CalibrationMatch(&exec->last_goal.reference);
         double distance_limit = raw ? 2.0 : north ? 1.10 : calibration ? 1.02 : 0.20;
         double yaw_limit = raw ? fabs(exec->last_goal.reference.yaw_rad) + 0.10 : (north || calibration) ? 0.05 : QuarterTurn(&exec->last_goal.reference) ? EXEC_PI / 2 + 0.10 : 0.22;

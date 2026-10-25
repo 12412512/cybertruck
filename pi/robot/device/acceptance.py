@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 
-READONLY_KINDS = {1, 2, 3, 4, 5, 16, 35, 36, 37, 38}
+READONLY_KINDS = {1, 2, 3, 4, 5, 16, 35, 36, 37, 38, 58, 60}
 
 
 def build_report(source, observed_at_s, ram=None, swd=None):

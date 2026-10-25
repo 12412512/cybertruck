@@ -20,11 +20,13 @@ def main():
     library = args.output.resolve()
     library.parent.mkdir(parents=True, exist_ok=True)
     command = [sys.executable, '-m', 'ziglang', 'cc', '-shared', '-std=c99', '-O2',
-               '-Wall', '-Wextra', '-Werror', '-DODOM_HOST', '-I', str(control),
+               '-Wall', '-Wextra', '-Werror', '-DODOM_HOST', '-DEXEC_PREVIEW', '-I', str(control),
                '-I', str(device), '-I', str(comm),
+               '-I', str(ROOT / 'firmware/User/Config'),
                *(str(control / name) for name in ('odom.c', 'kin.c', 'yaw.c', 'curve.c',
-                                                  'line.c', 'path.c', 'ref.c', 'track.c')),
-               str(device / 'stamp.c'), str(comm / 'feedback.c'), '-o', str(library)]
+                                                  'line.c', 'path.c', 'ref.c', 'track.c', 'exec.c', 'start.c', 'preview.c')),
+               str(device / 'stamp.c'), *(str(comm / name) for name in ('feedback.c', 'frame.c', 'comm.c', 'execute.c')),
+               '-o', str(library)]
     if os.name != 'nt':
         command += ['-fPIC', '-lm']
     subprocess.run(command, check=True)

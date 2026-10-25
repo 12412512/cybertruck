@@ -77,6 +77,11 @@ typedef struct
     uint32_t mode, fault, tick_ms, arm_ms, stop_ms, control_ms;
     uint32_t have_goal, enabled_wheels, stop_confirmed;
     uint32_t route_zone; /* version9在PC0准备前绑定，启动后不可修改。 */
+#ifdef EXEC_PREVIEW
+    /* 仅主机模型拥有此缓冲；板端编译和串口协议没有动态装载入口。 */
+    uint32_t preview_count, preview_zone;
+    uint8_t preview_refs[64][88];
+#endif
     ExecFault first_fault; /* 只锁存首次里程计故障，普通查询/STOP不清除。 */
     ExecGate gate;
 } Exec;
@@ -84,6 +89,9 @@ typedef struct
 void Exec_Init(Exec *exec, ExecIo io);
 int Exec_Config(Exec *exec, const ExecConfig *config, uint32_t now_ms);
 int Exec_Select(Exec *exec, uint32_t zone);
+#ifdef EXEC_PREVIEW
+int Exec_Preview(Exec *exec, uint32_t zone, const TrackGoal *goals, uint32_t count);
+#endif
 int Exec_Arm(Exec *exec, uint32_t now_ms);
 int Exec_Ready(Exec *exec, uint32_t now_ms);
 int Exec_Goal(Exec *exec, const TrackGoal *goal, uint32_t now_ms);

@@ -23,6 +23,7 @@ USER_FILES = {FW / 'User' / name for name in (
 USER_FILES.update(FW / 'User' / name for name in (
     'Control/mech_guard.c', 'Control/mech_guard.h', 'Control/mech_axis.c', 'Control/mech_axis.h', 'Config/mech_hw.h',
     'Control/mech_servo.c', 'Control/mech_servo.h', 'Control/start.c', 'Control/start.h', 'Control/mech_pose.c', 'Control/mech_pose.h',
+    'Control/preview.c', 'Control/preview.h',
     'Board/mech_port.c', 'Board/mech_port.h',
     'Control/exec.c', 'Control/exec.h', 'Comm/execute.c', 'Comm/execute.h', 'Board/base_port.c', 'Board/base_port.h',
     'Device/can_tx.c', 'Device/can_tx.h', 'Device/can_internal.h',

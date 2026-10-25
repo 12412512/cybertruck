@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 from pathlib import Path
 import time
 from urllib.error import URLError
@@ -28,25 +29,38 @@ def require_owner_stopped(origin):
 
 
 def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, sleep=time.sleep, route=None, simulation=False,
-              wait_start=False, switch_routes=None):
+              wait_start=False, switch_routes=None, planned_route=None, cancel=None):
     """同一会话执行冻结目标；异常停止，不重发或重连续跑。"""
     if (case in ('cal_slow', 'cal_medium', 'cal_fast')) != (profile.get('version') == 6):
         raise ValueError('一米标定必须使用独立version6配置，不能混入旧路线')
     if profile.get('version') == 6 and route is not None:
         raise ValueError('标定配置禁止整圈路线')
+    dynamic = planned_route is not None
+    if dynamic:
+        from .device.preview import PreviewTransport
+        from .nav.bridge import validate as validate_preview
+        if (not simulation or not isinstance(transport, PreviewTransport) or route is not None or switch_routes is not None):
+            raise ValueError('动态联调仅允许主机模型；禁止串口或实车入口')
+        validate_preview(planned_route)
+        if transport.bundle_sha256 != planned_route['sha256']:
+            raise ValueError('主机C模型装载的计划与执行包不一致')
+        zone = 1 if planned_route['parameters']['start'] == 'start_1' else 2
+        switch_routes = {zone: planned_route}
     switching = switch_routes is not None
     if switching:
         from .nav.route import validate
-        if (set(switch_routes) != {1, 2} or profile.get('version') != 9 or not wait_start or route is not None
-                or switch_routes[1].get('id') != 'start1_dock_v1'
-                or switch_routes[2].get('id') != 'start2_reverse_v1'):
+        if (profile.get('version') != 9 or not wait_start or route is not None or
+                (not dynamic and (set(switch_routes) != {1, 2}
+                 or switch_routes[1].get('id') != 'start1_dock_v1'
+                 or switch_routes[2].get('id') != 'start2_reverse_v1'))):
             raise ValueError('PC1入口仅接受version9、两条冻结路线及PC0启动')
-        for value in switch_routes.values():
-            validate(value)
-        route = switch_routes[1]  # 仅占位供预览；实际选区必须来自新鲜PC1应答。
+        if not dynamic:
+            for value in switch_routes.values():
+                validate(value)
+        route = next(iter(switch_routes.values()))  # 仅占位；实际选区必须来自新鲜PC1应答。
     elif profile.get('version') == 9:
         raise ValueError('version9只允许PC1选区入口')
-    if route is not None:
+    if route is not None and not dynamic:
         from .nav.route import validate
         validate(route)
     start2_route = route is not None and route['id'] == 'start2_reverse_v1'
@@ -91,6 +105,7 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
     route_reference = route['reference_trace'] if route else None
     north_origin = None
     selected_zone = selected_epoch = 0
+    run_seconds = max(120, math.ceil(route['estimated_s'] * 1.4 + 15)) if dynamic else 120 if batch_route else 110
 
     def pump(force=False):
         nonlocal sequence, written_at
@@ -134,6 +149,8 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
 
     try:
         while clock() < deadline:
+            if cancel is not None and cancel():
+                raise InterruptedError('离线执行链已取消，不自动续跑')
             state = pump()
             now = clock()
             if pinned_session is not None and (link.boot, link.session) != pinned_session:
@@ -206,13 +223,15 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                 selected = choice(event, None if link.start_event_at is None else now-link.start_event_at)
                 if selected and not link.command and not (link.pending and link.pending[0].kind == START_STATE):
                     selected_zone, selected_epoch = selected
+                    if selected_zone not in switch_routes:
+                        raise ValueError('模型PC1选区与Web计划起点不一致')
                     route = switch_routes[selected_zone]
                     cases, route_reference = tuple(route['cases']), route['reference_trace']
                     start_ticket = int(uuid.uuid4().hex[:8], 16) or 1
                     record('route_selected', zone=selected_zone, epoch=selected_epoch,
                            id=route['id'], sha256=route['sha256'], map_origin=route['map_origin'])
                     link.submit(START_PREPARE, struct.pack('<4I', start_ticket, 9, selected_zone, selected_epoch))
-                    deadline = now + 180
+                    deadline = now + 60 + run_seconds
                     stage = 'prepare_key'
                 elif now-start_poll >= .05 and not link.command and not link.pending:
                     link.submit(START_STATE)
@@ -237,7 +256,7 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                     record('physical_key_started', event=event)
                     arm_attempted = True
                     link.submit(ARM)
-                    deadline = now + (120 if batch_route else 110)
+                    deadline = now + run_seconds
                     stage = 'arm'
                 elif now - start_poll >= .05 and not link.command and not link.pending:
                     link.submit(START_STATE)

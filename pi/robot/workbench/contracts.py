@@ -11,7 +11,7 @@ class Input(BaseModel):
 
 class Command(Input):
     op: Literal['claim', 'renew', 'release', 'stop', 'manual_stop', 'manual', 'move', 'reset',
-                'plan', 'run', 'save', 'load', 'defaults', 'mechanism', 'transfer']
+                'plan', 'run', 'save', 'load', 'defaults', 'mechanism', 'transfer', 'verify', 'verify_cancel']
     client: str = Field(min_length=1, max_length=64, pattern=r'^[a-zA-Z0-9_-]+$')
     token: str = Field(default='', max_length=64)
     request_id: str = Field(min_length=1, max_length=64, pattern=r'^[a-zA-Z0-9_-]+$')
@@ -137,4 +137,5 @@ class TransferGoal(Input):
 
 ARGUMENTS = dict(claim=Empty, renew=Empty, release=Empty, stop=Empty, manual_stop=Empty,
                  manual=Manual, move=Move, reset=Reset, plan=PlanInput, run=Run, save=Run,
-                 load=Run, defaults=Empty, mechanism=MechGoal, transfer=TransferGoal)
+                 load=Run, defaults=Empty, mechanism=MechGoal, transfer=TransferGoal,
+                 verify=Run, verify_cancel=Empty)

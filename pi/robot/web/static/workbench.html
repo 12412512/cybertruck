@@ -371,6 +371,15 @@
                                 <label>已保存的路线配置<select id="saved-version"><option value="">尚无当前格式版本</option></select></label>
                                 <button id="load-version" class="secondary controlled">读取配置</button>
                             </div>
+                            <div class="limit-note">
+                                <b>正式执行链 · 仅离线</b>
+                                <p id="execution-check-state">等待联调：复用通信、PC0门控、执行器及STOP，不连接设备。</p>
+                                <div class="button-row">
+                                    <button id="verify-execution" class="secondary controlled" disabled>执行链联调（合成PC0）</button>
+                                    <button id="cancel-execution" class="secondary controlled" disabled>取消联调</button>
+                                </div>
+                                <small>限0.30m/s、100RPM基线；紫色为执行链模型轨迹。通过也不授权实车动作。</small>
+                            </div>
                             <p class="help">设置与最新路线保存在本机工作区；读取只恢复配置和模型待命，不自动运行。</p>
                             <details id="segments">
                                 <summary>
@@ -606,7 +615,7 @@
                 </span>
             </footer>
         </main>
-        <script type="module" src="/static/workbench.js?v=5">
+        <script type="module" src="/static/workbench.js?v=6">
         </script>
         <script type="module" src="/static/workbench-vision.js?v=1"></script>
     </body>

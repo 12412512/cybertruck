@@ -90,5 +90,68 @@ class StartupTests(unittest.TestCase):
         device.write.assert_not_called()
 
 
+class ModernAcceptanceTests(unittest.TestCase):
+    def setUp(self):
+        AcceptanceTests.setUp(self)
+        self.requests += [37,38,58,60]
+        self.link.mech_state=dict(pwm_mask=0,axis_state=0,servo_state=0,pose_state=0,motion_uncertain=0)
+        for row in self.states:
+            row.update(firmware='GC-BASE-0.3.21',session_id='one',physical_start=dict(ticket=0,fired=0,beep=0,
+                select_zone=1,select_valid=1),can_capture_status=dict(valid=0),can_capture_error=None,
+                odom_fault_record=dict(valid=0),board=dict(flags=0))
+        self.states[-1]['physical_start']['select_zone']=2
+        self.states[-1]['board']['flags']=8
+
+    def result(self):
+        return summarize(self.link,self.states,self.requests,'GC-BASE-0.3.21')
+
+    def test_modern_readonly_inputs_and_pwm_pass(self):
+        from accept_board import analyze
+        summary=self.result()
+        self.assertTrue(summary['passed'])
+        report=analyze(dict(summary=summary,states=self.states))
+        self.assertTrue(report['passed'])
+        self.assertFalse(report['full_hardware_accepted'])
+        self.assertFalse(report['authorizes_motion'])
+
+    def test_prepare_or_attach_command_is_never_readonly(self):
+        for kind in (32,33,34,48,49,50,51,53,55,59):
+            self.requests.append(kind)
+            self.assertFalse(self.result()['passed'])
+            self.requests.pop()
+
+    def test_identity_ticket_pwm_and_missing_first_error_rejected(self):
+        self.states[-1]['session_id']='other'
+        self.assertFalse(self.result()['passed'])
+        self.states[-1]['session_id']='one'
+        self.states[-1]['physical_start']['ticket']=1
+        self.assertFalse(self.result()['passed'])
+        self.states[-1]['physical_start']['ticket']=0
+        self.link.mech_state['pwm_mask']=1
+        self.assertFalse(self.result()['passed'])
+        self.link.mech_state['pwm_mask']=0
+        self.states[-1]['can_capture_status']=None
+        self.assertFalse(self.result()['passed'])
+
+    def test_default_board_tool_does_not_collect(self):
+        import contextlib,io
+        from accept_board import main
+        output=io.StringIO()
+        with patch('sys.argv',['accept_board','--port','not-a-device']),patch('accept_board.subprocess.run') as run:
+            with contextlib.redirect_stdout(output):main()
+        import json
+        self.assertFalse(json.loads(output.getvalue())['device_access'])
+        run.assert_not_called()
+
+    def test_board_analysis_does_not_trust_old_pass_after_fault_or_action(self):
+        from accept_board import analyze
+        data = dict(summary=self.result(), states=self.states)
+        self.states[-1]['execution']['fault'] = 2048
+        self.assertFalse(analyze(data)['passed'])
+        self.states[-1]['execution']['fault'] = 0
+        data['summary']['requests']['59'] = 1
+        self.assertFalse(analyze(data)['passed'])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -908,6 +908,16 @@
               <FilePath>../User/Control/path.h</FilePath>
             </File>
             <File>
+              <FileName>preview.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Control/preview.c</FilePath>
+            </File>
+            <File>
+              <FileName>preview.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Control/preview.h</FilePath>
+            </File>
+            <File>
               <FileName>ref.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/Control/ref.c</FilePath>

@@ -1,4 +1,5 @@
 // 只绘制带明确数据域的模型；画布Y翻转不进入控制坐标。
+import {modelView} from './workbench-execution.js?v=1';
 const ns = 'http://www.w3.org/2000/svg';
 function node(kind, attrs = {}, text = '') {
     const item = document.createElementNS(ns, kind);
@@ -107,9 +108,11 @@ export function drawMap(state) {
         path.setAttribute('points', (plan?.reference || []).map(point).join(' '));
         plannedId = plan?.id || '';
     }
-    actual.setAttribute('points', (state.simulation.trace || []).map(point).join(' '));
+    const model = modelView(state);
+    actual.setAttribute('points', (model.trace || []).map(point).join(' '));
+    actual.setAttribute('stroke', model === state.simulation ? '#078c86' : '#7c3aed');
     drawObstacles(field.obstacles || []);
-    const pose = state.simulation.pose;
+    const pose = model.pose;
     body.setAttribute('visibility', 'visible');
     body.setAttribute('transform', `translate(${point(pose).replace(',', ' ')}) rotate(${-pose[2] * 180 / Math.PI})`);
 }

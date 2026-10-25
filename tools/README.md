@@ -1,5 +1,9 @@
 # 开发工具
 
+自主规划离线接入见`docs/planned_link.md`：重建主机库后，原8000的“执行链联调（合成PC0）”复用正式Comm/Start/Exec与独立Plant，不打开设备。动态包仅在主机`EXEC_PREVIEW`编译分支有效，不能加载到真实串口。
+
+换板集中验收准备工具`accept_board.py`默认只打印计划；`--analyze`只读旧记录，只有现场另获授权后的显式`--collect`才可能打开串口。方法及未覆盖项见`docs/board_acceptance.md`，本轮没有执行采集。
+
 本目录提供 CubeMX 生成、Keil同步、检查、重编译和诊断工具；没有下载或调试启动命令。`bench_wheel.py`仅用于明确确认现场条件后的单次架空实测，必须显式`--execute`；不会随服务、编译或测试自动运行。当前用户已要求跳过逐轮重复测试。
 
 ## 工具职责

@@ -3,6 +3,7 @@
 from collections import OrderedDict, deque
 from concurrent.futures import ThreadPoolExecutor
 import copy
+import ctypes as c
 import json
 from pathlib import Path
 import secrets
@@ -41,6 +42,19 @@ class Workbench:
         self.plans = OrderedDict()
         self.job = dict(status='IDLE')
         self.planning_cancel = threading.Event()
+        self.execution_cancel = threading.Event()
+        self.execution_check = dict(schema=1,domain='simulation',status='IDLE',
+            authorizes_motion=False,physical_validated=False,trace=[])
+        self.preview_available = hasattr(c.CDLL(str(self.library)), 'Preview_Load')
+        try:
+            old = json.loads((self.runtime/'execution_check.json').read_text(encoding='utf-8'))
+            if old.get('schema') == 1 and old.get('domain') == 'simulation':
+                self.execution_check.update(old,authorizes_motion=False,physical_validated=False)
+                self.execution_check['visible'] = False
+                if old.get('status') == 'RUNNING':
+                    self.execution_check.update(status='INTERRUPTED',reason='核心重启；不自动重跑或续跑')
+        except (OSError,ValueError,TypeError):
+            pass
         self.draft = normalize(PlanInput())
         self.draft_revision = 0
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='route-plan')
@@ -107,12 +121,15 @@ class Workbench:
             self.sim.halt('点动续约超时，已请求模型停车')
             self.record('自动停车', '点动帧超过350ms或控制权过期')
         if self.token and now >= self.lease_until:
+            self.execution_cancel.set()
             self.transfer.cancel('离线控制权过期，不自动续跑')
             if self.mech.busy:
                 self.mech.stop('控制权过期，机构调试已停止')
             self.owner, self.token = '', ''
 
     def _idle(self):
+        if self.execution_check['status'] == 'RUNNING':
+            raise Rejected('执行链离线联调未结束，请先取消并等待模型停车')
         if self.transfer.busy:
             raise Rejected('转存流程未结束，底盘模型不能运动')
         if self.mech.busy:
@@ -130,6 +147,7 @@ class Workbench:
         with self.lock:
             self._expire()
             if command.op == 'stop':
+                self.execution_cancel.set()
                 self.transfer.cancel('工作台停止')
                 self.sim.halt('工作台停止')
                 self.mech.stop('工作台停止，保持夹爪估计')
@@ -164,6 +182,30 @@ class Workbench:
             return copy.deepcopy(result)
 
     def _apply(self, op, arguments):
+        if self.execution_check['status'] == 'RUNNING' and op not in ('renew','release','verify_cancel'):
+            raise Rejected('执行链联调持有底盘模型，不能插入动作或修改路线')
+        if op == 'verify_cancel':
+            self.execution_cancel.set()
+            return dict(ok=True,domain='simulation')
+        if op in ('plan','run','reset','move','manual','defaults','load'):
+            self.execution_check['visible'] = False
+        if op == 'verify':
+            self._idle()
+            if not self.preview_available:
+                raise Rejected('需要重建并重载PC离线核心，未打开任何设备')
+            plan = self.plans.get(arguments.plan_id)
+            if (plan is None or self.job.get('status') != 'READY' or self.job['plan']['id'] != arguments.plan_id
+                    or plan.view['parameters'] != self.draft.model_dump()):
+                raise Rejected('计划版本或草稿不一致，请先重新规划')
+            job_id = uuid.uuid4().hex
+            self.execution_cancel = threading.Event()
+            self.execution_check = dict(schema=1,domain='simulation',status='RUNNING',stage='validating',
+                id=job_id,source_plan_id=plan.view['id'],total=len(plan.specs),segment=0,elapsed_s=0.,trace=[],
+                authorizes_motion=False,physical_validated=False,stop_confirmed=False,visible=True)
+            write_json(self.runtime/'execution_check.json',self.execution_check)
+            self.executor.submit(self._verify,job_id,plan,self.execution_cancel)
+            self.record('执行链离线联调','合成PC1/PC0；正式Comm/Start/Exec；不接设备')
+            return dict(ok=True,job_id=job_id,domain='simulation')
         if self.transfer.busy and op not in ('transfer','mechanism','renew','release'):
             raise Rejected('离线转存尚未结束，禁止修改或启动其他动作')
         if op == 'transfer':
@@ -193,6 +235,7 @@ class Workbench:
                 self.record('机构离线请求', f'{arguments.action} / {result.get("action_id", "配置")}')
             return result
         if op == 'release':
+            self.execution_cancel.set()
             self.transfer.cancel('释放离线控制权')
             if self.mech.busy:
                 self.mech.stop('释放控制权，机构调试已停止')
@@ -315,6 +358,32 @@ class Workbench:
                 self.job = dict(id=job_id, status='FAILED', reason=str(exc))
                 self.record('规划失败', str(exc))
 
+    def _verify(self, job_id, plan, cancel):
+        from ..nav.bridge import prepare
+        from ..device.preview import execute
+        def progress(value):
+            with self.lock:
+                if self.execution_check.get('id') == job_id:
+                    self.execution_check.update(value)
+        try:
+            bundle = prepare(plan,self.library)
+            folder = self.runtime/'execution_checks'/job_id
+            folder.mkdir(parents=True,exist_ok=True)
+            write_json(folder/'bundle.json',bundle)
+            report = execute(self.library,bundle,folder,progress=progress,cancel=cancel.is_set)
+            result = dict(status=report['status'],reason=report['reason'],elapsed_s=report['elapsed_s'],
+                stop_confirmed=report['stop_confirmed'],trace=report['trace'],
+                rpm=report['rpm'],execution=report['execution'],
+                completed=len(report['result']['completed_segments']) if report['result'] else 0,
+                bundle_sha256=bundle['sha256'],sweep_samples=report['sweep_samples'])
+        except Exception as exc:
+            result = dict(status='FAILED',reason=str(exc),stop_confirmed=False)
+        with self.lock:
+            if self.execution_check.get('id') == job_id:
+                self.execution_check.update(result,authorizes_motion=False,physical_validated=False)
+                write_json(self.runtime/'execution_check.json',self.execution_check)
+                self.record('执行链离线结果',f'{result["status"]} / {result.get("reason", "")}')
+
     def tick(self, gap_s=.01):
         with self.lock:
             before = self.sim.mode
@@ -353,12 +422,14 @@ class Workbench:
                         events=list(self.events), log_error=self.log_error,
                         mechanism=self.mech.view(), transfer=self.transfer.view(),
                         integration=copy.deepcopy(self.preparation),
+                        execution_check=dict(copy.deepcopy(self.execution_check),available=self.preview_available),
                         capabilities=dict(manual=True, move=True, planning=True,
                                           real_motion=False, mechanism=True))
 
     def close(self):
         with self.lock:
             self.closed = True
+            self.execution_cancel.set()
             self.planning_cancel.set()
             self.sim.halt('离线核心退出')
             self.transfer.cancel('离线核心退出')

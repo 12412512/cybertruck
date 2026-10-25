@@ -1,5 +1,6 @@
 // 界面只经网关调用独立核心；输入草稿、离线执行、实车状态分别表达。
-import {drawMap, drawSpeed} from './workbench-map.js';
+import {drawMap, drawSpeed} from './workbench-map.js?v=2';
+import {modelView} from './workbench-execution.js?v=1';
 import {initScene, sceneValues, applyScene, overlayDraft} from './workbench-scene.js?v=2';
 import {isEditing, motionDirection, matchesRelease} from './workbench-input.js';
 import {initMechanism, renderMechanism, cancelMechHeld, stopMechHeld} from './workbench-mechanism.js';
@@ -21,7 +22,7 @@ let hydrated = false, localEdited = false, autoTimer = null, autoPending = false
 let submitted = '', versionsKey = '';
 let preferredVersion = '';
 
-function moving() { return ['RUNNING','MANUAL','STOPPING'].includes(current?.simulation?.mode); }
+function moving() { return current?.execution_check?.status === 'RUNNING' || ['RUNNING','MANUAL','STOPPING'].includes(current?.simulation?.mode); }
 function canonical(value) {
     if (Array.isArray(value)) return value.map(canonical);
     if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]));
@@ -183,7 +184,8 @@ $('release').onclick = async () => {
 function updateButtons() {
     const enabled = !!token && online();
     const mode = current?.simulation?.mode;
-    const mechBusy = !!current?.mechanism?.busy || ['RUNNING','WAIT_OBSERVATION'].includes(current?.transfer?.mode);
+    const checkBusy = current?.execution_check?.status === 'RUNNING';
+    const mechBusy = checkBusy || !!current?.mechanism?.busy || ['RUNNING','WAIT_OBSERVATION'].includes(current?.transfer?.mode);
     const mechReady = !mechBusy && (!current?.mechanism?.zero_version || current?.mechanism?.transport_ready);
     const idle = current?.simulation?.stopped && mode !== 'FAILED' && mechReady;
     for (const button of document.querySelectorAll('.controlled')) button.disabled = !enabled;
@@ -193,6 +195,8 @@ function updateButtons() {
     $('plan').disabled = !enabled || moving() || mechBusy;
     $('run').disabled = !enabled || !idle || dirty || !planId;
     $('save').disabled = !enabled || dirty || !planId || mechBusy;
+    $('verify-execution').disabled = !enabled || !idle || dirty || !planId || !current?.execution_check?.available;
+    $('cancel-execution').disabled = !enabled || !checkBusy;
     $('claim').disabled = !online() || (!!current?.owner?.client && current.owner.client !== client);
     $('claim').hidden = !!token;
     $('release').hidden = !token;
@@ -246,6 +250,14 @@ for (const [from, to] of [['route-speed', 'speed-range'], ['speed-range', 'route
     $(from).addEventListener('input', () => { $(to).value = $(from).value; draftChanged(); });
 }
 $('plan').onclick = submitPlan;
+$('verify-execution').onclick = async () => {
+    try { await command('verify', {plan_id:planId}); notify('开始正式执行链离线联调，PC0由合成夹具产生，不连接实车。'); }
+    catch (error) { notify(error.message, true); }
+};
+$('cancel-execution').onclick = async () => {
+    try { await command('verify_cancel'); notify('已请求取消，等待模型STOP结果。'); }
+    catch (error) { notify(error.message, true); }
+};
 $('auto-plan').onchange = () => { if ($('auto-plan').checked && dirty) submitPlan(); };
 $('saved-version').onchange = updateButtons;
 for (const [id, op] of [['defaults','defaults'], ['load-version','load']]) $(id).onclick = async () => {
@@ -354,16 +366,18 @@ function render(state) {
         notify('离线核心已连接；原控制区只作用于模型。实车状态与命令见独立实车区。');
     }
     if (token && state.owner.client !== client && performance.now() - tokenSince > 300) { token = ''; clearHeld(); }
-    const sim = state.simulation;
+    const sim = modelView(state);
+    const check = state.execution_check;
+    text('execution-check-state', check ? `${check.status} · ${check.completed ?? check.segment ?? 0}/${check.total ?? '—'}段 · ${(check.elapsed_s || 0).toFixed(2)}s · ${check.stop_confirmed ? '模型STOP已确认' : '尚无最终STOP确认'}${check.reason ? ' · '+check.reason : ''}` : '需重载本机离线核心；不连接设备');
     text('mode', modes[sim.mode] || sim.mode);
     text('stop-state', sim.stopped ? '模型轮速已稳定' : '模型运动 / 等待停稳');
     text('pose', `${sim.pose[0].toFixed(3)} / ${sim.pose[1].toFixed(3)}`);
     text('yaw', `航向 ${(Math.atan2(Math.sin(sim.pose[2]), Math.cos(sim.pose[2])) * 180 / Math.PI).toFixed(1)}° · 模拟`);
     text('progress', `${sim.completed} / ${sim.total || '—'}`);
     text('elapsed', `模型运行 ${sim.elapsed_s.toFixed(2)} s`);
-    text('rpm', Math.max(...sim.rpm.map(Math.abs)).toFixed(1));
-    text('session', sim.session.slice(0, 8)); text('error-xy', `${(sim.position_error_m * 1000).toFixed(2)} mm`);
-    text('error-yaw', `${(sim.yaw_error_rad * 180 / Math.PI).toFixed(2)}°`);
+    text('rpm', sim.rpm.length ? Math.max(...sim.rpm.map(Math.abs)).toFixed(1) : '未知');
+    text('session', sim.session.slice(0, 8)); text('error-xy', Number.isFinite(sim.position_error_m) ? `${(sim.position_error_m * 1000).toFixed(2)} mm` : '未知');
+    text('error-yaw', Number.isFinite(sim.yaw_error_rad) ? `${(sim.yaw_error_rad * 180 / Math.PI).toFixed(2)}°` : '未知');
     text('fault', sim.mode === 'FAILED' ? sim.reason : sim.fault ? `模型故障 ${sim.fault}` : '0 / 无'); text('odom', `${sim.odom_origin_ms} ms · 连续`);
     text('owner', state.owner.client === client ? '本页持有控制权' : state.owner.client ? '其他浏览器正在控制' : '当前无人控制');
     if (!$('roads').children.length) {
@@ -395,7 +409,7 @@ function render(state) {
         } else if (state.saved_versions.some(item => item.id === old && item.schema === 2)) $('saved-version').value = old;
     }
     renderPlan(state.planning); drawMap(state); overlayDraft(); updateButtons();
-    renderMechanism(state, !!token && online());
+    renderMechanism(state, !!token && online() && check?.status !== 'RUNNING');
     const visiblePlan = sim.mode === 'RUNNING' && state.active_plan ? state.active_plan : state.planning.plan;
     if (visiblePlan) {
         const executed = visiblePlan.id === sim.active_plan_id;
