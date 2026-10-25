@@ -65,7 +65,7 @@ try {
     for ($taskTry = 0; $taskTry -lt 60; $taskTry++) {
         try {
             $taskNew = Invoke-RestMethod 'http://127.0.0.1:8090/state' -TimeoutSec 1
-            if ($taskNew.available -and $taskNew.mechanism.execution_schema -eq 2 -and $taskNew.execution_check.available) { $taskReady=$true; break }
+            if ($taskNew.available -and $taskNew.mechanism.execution_schema -eq 2 -and $taskNew.execution_check.available -and $taskNew.lidar.domain -eq 'simulation') { $taskReady=$true; break }
         } catch { Start-Sleep -Milliseconds 200 }
     }
     if (-not $taskReady) { throw "新离线核心未就绪，检查$taskBackup/core.err；不会连接实车" }

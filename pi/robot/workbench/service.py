@@ -45,6 +45,8 @@ class Workbench:
         self.execution_cancel = threading.Event()
         self.execution_check = dict(schema=1,domain='simulation',status='IDLE',
             authorizes_motion=False,physical_validated=False,trace=[])
+        self.lidar = dict(status='IDLE', domain='simulation', live=False, usable=False,
+                          authorizes_motion=False, reason='尚未回放；历史扫描不自动恢复为当前观测')
         self.preview_available = hasattr(c.CDLL(str(self.library)), 'Preview_Load')
         try:
             old = json.loads((self.runtime/'execution_check.json').read_text(encoding='utf-8'))
@@ -141,6 +143,81 @@ class Workbench:
         if self.sim.mode == 'FAILED':
             raise Rejected('模型故障仍保留，请显式重置离线场景')
 
+    def _scan_matches(self, plan):
+        observation = plan.view.get('lidar_source')
+        if observation and (not self.lidar.get('usable') or observation['scan_id'] != self.lidar.get('id') or
+                            observation['scan_sha256'] != self.lidar.get('sha256')):
+            raise Rejected('雷达计划的扫描已替换、清空或失效；请回放并重新规划')
+
+    def _lidar(self, arguments):
+        from ..lidar.fixtures import fixture
+        from ..lidar.replay import replay
+        from ..lidar.planning import parameters, source
+        self._idle()
+        if arguments.action == 'clear':
+            self.planning_cancel.set()
+            if self.job['status'] == 'PLANNING':
+                self.job = dict(status='IDLE',reason='扫描已清空，取消待完成规划')
+            self.lidar = dict(status='IDLE',domain='simulation',live=False,usable=False,
+                              authorizes_motion=False,reason='已清空回放；旧雷达计划不可继续执行')
+            values = self.draft.model_dump()
+            values['obstacles'] = [item for item in values['obstacles'] if not item['id'].startswith('lidar_')]
+            self.draft = PlanInput.model_validate(values)
+            self.draft_revision += 1
+            self.field = make_field(self.draft).data
+            self._persist()
+            return dict(ok=True,domain='simulation',draft=self.draft.model_dump(),draft_revision=self.draft_revision)
+        if arguments.action == 'replay':
+            request = arguments.parameters or self.draft
+            wire, profile = fixture(arguments.case,request.start,[edge[0] for edge in make_field(request).data['edges']])
+            if arguments.wire_hex:
+                wire = bytes.fromhex(arguments.wire_hex)
+                profile.update(source='external_unregistered',synthetic=False,map_transform=None,
+                               coverage=[],coverage_kind='unknown',empty_coverage_valid=False)
+            self.planning_cancel.set()
+            if self.job['status'] == 'PLANNING':
+                self.job = dict(status='IDLE',reason='新扫描取代未完成规划')
+            self.execution_check['visible'] = False
+            self.lidar = replay(wire,profile,request.start)
+            self.lidar['case'] = 'external' if arguments.wire_hex else arguments.case
+            folder = self.runtime/'lidar'
+            folder.mkdir(exist_ok=True)
+            write_json(folder/f'{self.lidar["id"]}.json',dict(scan=self.lidar,wire_hex=wire.hex(),profile=profile))
+            self.record('雷达离线回放',f'{self.lidar["status"]} / {self.lidar["reason"]}')
+            return dict(ok=True,domain='simulation',scan_id=self.lidar['id'],
+                        usable=self.lidar['usable'],reason=self.lidar['reason'])
+        if arguments.scan_id != self.lidar.get('id'):
+            raise Rejected('扫描ID已过期，不能拿旧观测覆盖当前场景')
+        try:
+            request, roads = parameters(self.lidar,arguments.parameters)
+        except ValueError as exc:
+            raise Rejected(str(exc)) from exc
+        self.lidar['road_states'] = roads
+        self.lidar['binding'] = True
+        return self._queue_plan(request, source(self.lidar,roads))
+
+    def _queue_plan(self, arguments, observation=None):
+        if observation is None and self.lidar.get('binding'):
+            from ..lidar.planning import parameters, source
+            try:
+                arguments, roads = parameters(self.lidar,arguments)
+            except ValueError as exc:
+                raise Rejected('当前雷达场景仍绑定：'+str(exc)+'；需改区时先清空回放') from exc
+            self.lidar['road_states'] = roads
+            observation = source(self.lidar,roads)
+        self.planning_cancel.set()
+        self.planning_cancel = threading.Event()
+        self.execution_check['visible'] = False
+        self.draft = normalize(arguments)
+        self.draft_revision += 1
+        self.field = make_field(self.draft).data
+        job_id = uuid.uuid4().hex
+        self.job = dict(id=job_id,status='PLANNING',reason='正式规划器后台计算中')
+        self._persist()
+        self.executor.submit(self._plan,job_id,self.draft,self.planning_cancel,observation)
+        self.record('雷达规划提交' if observation else '规划提交',f'{arguments.source} / {arguments.speed_m_s:.2f}m/s')
+        return dict(ok=True,domain='simulation',job_id=job_id,draft=self.draft.model_dump(),draft_revision=self.draft_revision)
+
     def command(self, value):
         command = Command.model_validate(value)
         arguments = ARGUMENTS[command.op].model_validate(command.args)
@@ -189,6 +266,8 @@ class Workbench:
             return dict(ok=True,domain='simulation')
         if op in ('plan','run','reset','move','manual','defaults','load'):
             self.execution_check['visible'] = False
+        if op == 'lidar':
+            return self._lidar(arguments)
         if op == 'verify':
             self._idle()
             if not self.preview_available:
@@ -197,6 +276,7 @@ class Workbench:
             if (plan is None or self.job.get('status') != 'READY' or self.job['plan']['id'] != arguments.plan_id
                     or plan.view['parameters'] != self.draft.model_dump()):
                 raise Rejected('计划版本或草稿不一致，请先重新规划')
+            self._scan_matches(plan)
             job_id = uuid.uuid4().hex
             self.execution_cancel = threading.Event()
             self.execution_check = dict(schema=1,domain='simulation',status='RUNNING',stage='validating',
@@ -265,17 +345,7 @@ class Workbench:
             self.sim.reset(arguments.start)
             self.record('重置离线场景', arguments.start)
         elif op == 'plan':
-            self.planning_cancel.set()
-            self.planning_cancel = threading.Event()
-            self.draft = normalize(arguments)
-            self.draft_revision += 1
-            self.field = make_field(self.draft).data
-            job_id = uuid.uuid4().hex
-            self.job = dict(id=job_id, status='PLANNING', reason='正式规划器后台计算中')
-            self._persist()
-            self.executor.submit(self._plan, job_id, self.draft, self.planning_cancel)
-            self.record('规划提交', f'{arguments.source} / {arguments.speed_m_s:.2f}m/s')
-            return dict(ok=True, job_id=job_id)
+            return self._queue_plan(arguments)
         elif op == 'defaults':
             if self.mech.busy:
                 raise Rejected('机构运行中不能恢复初始场景')
@@ -286,6 +356,8 @@ class Workbench:
             self.draft_revision += 1
             self.field = make_field(self.draft).data
             self.job = dict(status='IDLE')
+            self.lidar = dict(status='IDLE',domain='simulation',live=False,usable=False,
+                              authorizes_motion=False,reason='已恢复初始场景，旧扫描不再生效')
             self.sim.reset('start_1')
             self._persist()
             self.record('恢复初始设置', '起点1、0.30m/s、100RPM、工位间隙50mm、清空障碍；保留历史版本')
@@ -316,6 +388,7 @@ class Workbench:
                 raise Rejected('路线版本不存在或已过期，请重新规划')
             if op == 'run':
                 self._idle()
+                self._scan_matches(plan)
                 if (self.job['status'] != 'READY' or self.job['plan']['id'] != arguments.plan_id
                         or plan.view['parameters'] != self.draft.model_dump()):
                     raise Rejected('当前草稿与目标版本不一致，请重新规划或读取该版本')
@@ -335,13 +408,15 @@ class Workbench:
             result.update(draft=self.draft.model_dump(), draft_revision=self.draft_revision)
         return result
 
-    def _plan(self, job_id, arguments, cancel):
+    def _plan(self, job_id, arguments, cancel, observation=None):
         def progress(value):
             with self.lock:
                 if self.job.get('id') == job_id and not cancel.is_set():
                     self.job['progress'] = value
         try:
             plan = make_plan(self.library, arguments, cancelled=cancel.is_set, progress=progress)
+            if observation:
+                plan.view['lidar_source'] = copy.deepcopy(observation)
             with self.lock:
                 if self.closed or cancel.is_set() or self.job.get('id') != job_id:
                     return
@@ -423,6 +498,7 @@ class Workbench:
                         mechanism=self.mech.view(), transfer=self.transfer.view(),
                         integration=copy.deepcopy(self.preparation),
                         execution_check=dict(copy.deepcopy(self.execution_check),available=self.preview_available),
+                        lidar=copy.deepcopy(self.lidar),
                         capabilities=dict(manual=True, move=True, planning=True,
                                           real_motion=False, mechanism=True))
 

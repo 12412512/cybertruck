@@ -1,5 +1,7 @@
 # 开发工具
 
+`replay_lidar.py --case detour --start start_1 --execute-model --output <新目录>`生成厂家格式合成报文、检查扫描、自动规划并运行内存协议模型；没有真实设备选项。依赖已有`output/workbench/native.dll`，可由`build_odom.py`构建；案例及验收见`docs/lidar_offline.md`。
+
 自主规划离线接入见`docs/planned_link.md`：重建主机库后，原8000的“执行链联调（合成PC0）”复用正式Comm/Start/Exec与独立Plant，不打开设备。动态包仅在主机`EXEC_PREVIEW`编译分支有效，不能加载到真实串口。
 
 换板集中验收准备工具`accept_board.py`默认只打印计划；`--analyze`只读旧记录，只有现场另获授权后的显式`--collect`才可能打开串口。方法及未覆盖项见`docs/board_acceptance.md`，本轮没有执行采集。

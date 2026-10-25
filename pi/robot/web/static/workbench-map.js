@@ -1,5 +1,6 @@
 // 只绘制带明确数据域的模型；画布Y翻转不进入控制坐标。
 import {modelView} from './workbench-execution.js?v=1';
+import {scanMap} from './workbench-lidar.js?v=1';
 const ns = 'http://www.w3.org/2000/svg';
 function node(kind, attrs = {}, text = '') {
     const item = document.createElementNS(ns, kind);
@@ -12,7 +13,7 @@ const names = {start_1:'启停区 1', start_2:'启停区 2', qr:'扫码', raw:'�
 let fieldKey = '';
 let plannedId = '';
 let path, actual, body, labels;
-let obstaclesLayer;
+let obstaclesLayer, lidarLayer;
 let mapObserver = null;
 
 export function onMapPoint(handler) {
@@ -90,6 +91,8 @@ export function drawMap(state) {
         svg.append(labels);
         obstaclesLayer = node('g');
         svg.append(obstaclesLayer);
+        lidarLayer = node('g', {'pointer-events':'none'});
+        svg.append(lidarLayer);
         body = node('g');
         body.append(node('rect', {x:-145, y:-135, width:290, height:270, rx:16,
             fill:'#b9dfda', stroke:'#077e7c', 'stroke-width':8}));
@@ -112,6 +115,27 @@ export function drawMap(state) {
     actual.setAttribute('points', (model.trace || []).map(point).join(' '));
     actual.setAttribute('stroke', model === state.simulation ? '#078c86' : '#7c3aed');
     drawObstacles(field.obstacles || []);
+    lidarLayer.replaceChildren();
+    const scan = scanMap(state);
+    if (scan) {
+        for (const [road, a, b] of field.edges) {
+            const status = scan.road_states?.[road];
+            if (status === 'UNKNOWN' || status === 'OBSTACLE') lidarLayer.append(node('line',{
+                x1:field.nodes[a][0]*1000, y1:(2.4-field.nodes[a][1])*1000,
+                x2:field.nodes[b][0]*1000, y2:(2.4-field.nodes[b][1])*1000,
+                stroke:status === 'UNKNOWN' ? '#d69b30' : '#df5e55', 'stroke-width':8,
+                'stroke-dasharray':'12 12', opacity:.7}));
+        }
+        for (const [x,y] of scan.points || []) lidarLayer.append(node('circle',{
+            cx:x*1000, cy:(2.4-y)*1000, r:8, fill:scan.usable ? '#087f8c' : '#d65749'}));
+        for (const item of scan.obstacles || []) {
+            lidarLayer.append(node('circle',{cx:item.x_m*1000,cy:(2.4-item.y_m)*1000,
+                r:item.diameter_m*500,fill:'none',stroke:scan.usable ? '#e8a337' : '#d65749',
+                'stroke-width':5,'stroke-dasharray':'9 7'}));
+            lidarLayer.append(node('circle',{cx:item.x_m*1000,cy:(2.4-item.y_m)*1000,
+                r:scan.diameter_m*500,fill:'#141c23'}));
+        }
+    }
     const pose = model.pose;
     body.setAttribute('visibility', 'visible');
     body.setAttribute('transform', `translate(${point(pose).replace(',', ' ')}) rotate(${-pose[2] * 180 / Math.PI})`);

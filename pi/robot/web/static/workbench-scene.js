@@ -1,5 +1,5 @@
 // 场景编辑只修改草稿。坐标按map米，直径与间隙在输入边界换成毫米。
-import {onMapPoint, drawObstacles} from './workbench-map.js';
+import {onMapPoint, drawObstacles} from './workbench-map.js?v=3';
 
 const $ = id => document.getElementById(id);
 let obstacles = [];

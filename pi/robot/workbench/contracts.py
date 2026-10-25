@@ -11,7 +11,7 @@ class Input(BaseModel):
 
 class Command(Input):
     op: Literal['claim', 'renew', 'release', 'stop', 'manual_stop', 'manual', 'move', 'reset',
-                'plan', 'run', 'save', 'load', 'defaults', 'mechanism', 'transfer', 'verify', 'verify_cancel']
+                'plan', 'run', 'save', 'load', 'defaults', 'mechanism', 'transfer', 'verify', 'verify_cancel', 'lidar']
     client: str = Field(min_length=1, max_length=64, pattern=r'^[a-zA-Z0-9_-]+$')
     token: str = Field(default='', max_length=64)
     request_id: str = Field(min_length=1, max_length=64, pattern=r'^[a-zA-Z0-9_-]+$')
@@ -86,6 +86,23 @@ class Empty(Input):
     pass
 
 
+class LidarGoal(Input):
+    action: Literal['replay', 'plan', 'clear']
+    case: Literal['detour', 'clear', 'blocked', 'partial', 'bad_crc', 'missing',
+                  'low_quality', 'unregistered', 'wrong_zone'] = 'detour'
+    wire_hex: str = Field(default='', max_length=131072, pattern=r'^[a-fA-F0-9]*$')
+    scan_id: str | None = Field(default=None, pattern=r'^[a-f0-9]{32}$')
+    parameters: PlanInput | None = None
+
+    @model_validator(mode='after')
+    def bound_request(self):
+        if self.action == 'plan' and (self.scan_id is None or self.parameters is None):
+            raise ValueError('雷达规划必须绑定当前扫描ID及明确的路线参数')
+        if self.wire_hex and (self.action != 'replay' or len(self.wire_hex) % 2):
+            raise ValueError('外部报文只允许偶数长度的回放十六进制字节')
+        return self
+
+
 class MechGoal(Input):
     """机构离线接口；草稿、明确执行与实物验收分别表示。"""
     action: Literal['jog', 'move', 'teach', 'preview', 'pose', 'next', 'zero', 'anchor', 'invalidate', 'reset_model', 'stop']
@@ -138,4 +155,4 @@ class TransferGoal(Input):
 ARGUMENTS = dict(claim=Empty, renew=Empty, release=Empty, stop=Empty, manual_stop=Empty,
                  manual=Manual, move=Move, reset=Reset, plan=PlanInput, run=Run, save=Run,
                  load=Run, defaults=Empty, mechanism=MechGoal, transfer=TransferGoal,
-                 verify=Run, verify_cancel=Empty)
+                 verify=Run, verify_cancel=Empty, lidar=LidarGoal)

@@ -45,6 +45,7 @@ def prepare(plan, library):
         reference_trace=[relative(origin,Pose(*p)).values() for p in checked.view['reference']],
         boundaries=boundaries, map_origin=origin.values(), parameters=parameters,
         field=checked.view['field'], estimated_s=seconds,
+        observation=checked.view.get('lidar_source'),
         anchor_policy='measured_segment_start', segment_handoff='stopped_and_settled')
     route['sha256'] = digest(route)
     validate(route)

@@ -1,7 +1,8 @@
 // 界面只经网关调用独立核心；输入草稿、离线执行、实车状态分别表达。
-import {drawMap, drawSpeed} from './workbench-map.js?v=2';
+import {drawMap, drawSpeed} from './workbench-map.js?v=3';
+import {initLidar, renderLidar} from './workbench-lidar.js?v=1';
 import {modelView} from './workbench-execution.js?v=1';
-import {initScene, sceneValues, applyScene, overlayDraft} from './workbench-scene.js?v=2';
+import {initScene, sceneValues, applyScene, overlayDraft} from './workbench-scene.js?v=3';
 import {isEditing, motionDirection, matchesRelease} from './workbench-input.js';
 import {initMechanism, renderMechanism, cancelMechHeld, stopMechHeld} from './workbench-mechanism.js';
 
@@ -58,7 +59,8 @@ async function submitPlan() {
         submitted = fingerprint(args);
         localEdited = false;
         autoPending = false;
-        await command('plan', args);
+        const result = await command('plan', args);
+        if (result.draft) applySettings(result.draft);
         dirty = true;
         notify('按当前障碍物、停靠点和限速后台规划；不会自动启动模型。');
         updateButtons();
@@ -89,6 +91,8 @@ function command(op, args = {}) {
     queue = next.catch(() => {});
     return next;
 }
+initLidar({command, settings:readSettings, notify,
+    acceptDraft:result => { applySettings(result.draft); dirty = true; autoPending = false; }});
 function clearHeld() {
     held = null;
     heldButton?.classList.remove('pressed');
@@ -203,6 +207,7 @@ function updateButtons() {
     $('defaults').disabled = !enabled || !current?.simulation?.stopped || mechBusy;
     $('load-version').disabled = !enabled || !current?.simulation?.stopped || mechBusy || !$('saved-version').value;
     for (const item of document.querySelectorAll('.scene-input, #start, #source, #route-speed, #speed-range, #add-target')) item.disabled = moving();
+    renderLidar(current || {}, enabled, moving() || mechBusy);
 }
 function draftChanged() {
     dirty = true;
@@ -368,7 +373,7 @@ function render(state) {
     if (token && state.owner.client !== client && performance.now() - tokenSince > 300) { token = ''; clearHeld(); }
     const sim = modelView(state);
     const check = state.execution_check;
-    text('execution-check-state', check ? `${check.status} · ${check.completed ?? check.segment ?? 0}/${check.total ?? '—'}段 · ${(check.elapsed_s || 0).toFixed(2)}s · ${check.stop_confirmed ? '模型STOP已确认' : '尚无最终STOP确认'}${check.reason ? ' · '+check.reason : ''}` : '需重载本机离线核心；不连接设备');
+    text('execution-check-state', check?.visible ? `${check.status} · ${check.completed ?? check.segment ?? 0}/${check.total ?? '—'}段 · ${(check.elapsed_s || 0).toFixed(2)}s · ${check.stop_confirmed ? '模型STOP已确认' : '尚无最终STOP确认'}${check.reason ? ' · '+check.reason : ''}` : '当前路线尚未联调；历史完成记录不代表本路线已执行');
     text('mode', modes[sim.mode] || sim.mode);
     text('stop-state', sim.stopped ? '模型轮速已稳定' : '模型运动 / 等待停稳');
     text('pose', `${sim.pose[0].toFixed(3)} / ${sim.pose[1].toFixed(3)}`);
