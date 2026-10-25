@@ -308,6 +308,7 @@ function renderPlan(job) {
     if (job.status === 'PLANNING' && job.progress) text('plan-status', `${job.progress.completed}/${job.progress.total} 工位 · ${job.progress.current}`);
     if (job.status === 'FAILED') { notify(job.reason, true); planId = ''; dirty = true; text('limit-reason', job.reason); }
     if (job.status === 'IDLE' || job.status === 'PLANNING') {
+        text('nav-budget', '导航预算待本次规划完成后计算。');
         planId = '';
         dirty = true;
         text('plan-time', '— s'); text('plan-count', '—'); text('plan-hash', '未生成');
@@ -330,6 +331,9 @@ function renderPlan(job) {
     text('draft-state', same ? '当前草稿已生成独立离线版本；实车参数保持原配置。' : '显示核心最新版本；与当前草稿不同，运行前请重新规划。');
     if (same && $('notice').textContent.includes('后台规划')) notify('当前场景规划已完成；点击运行才启动离线模型。');
     const limits = plan.limits;
+    const referenceSeconds = plan.legs.reduce((total, leg) => total + leg.seconds, 0);
+    const reserveSeconds = plan.seconds - referenceSeconds;
+    text('nav-budget', `两批导航目标60秒；当前${plan.seconds.toFixed(2)}秒估计 = 参考运动${referenceSeconds.toFixed(2)}秒 + 分段停稳预留${reserveSeconds.toFixed(2)}秒。共${plan.legs.length}段；预留不是实测停车时间。${params.source === 'batch' ? `距预算还差${Math.max(0, plan.seconds-60).toFixed(2)}秒。` : '本路线仅为局部/巡回对照，不代表两批预算验收。'}`);
     text('limit-reason', `请求上限 ${limits.requested_m_s.toFixed(2)} m/s；参考采样峰值 ${limits.sampled_peak_m_s.toFixed(3)} m/s；保守轮速界 ${limits.wheel_bound_rpm.toFixed(1)} / ${limits.max_rpm.toFixed(0)} RPM。${limits.reasons.join('；')}。按预计时间在道路朝向候选中择优。`);
     $('leg-list').replaceChildren();
     for (const [index, leg] of plan.legs.entries()) {

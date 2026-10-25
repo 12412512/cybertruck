@@ -20,6 +20,8 @@ sys.path.insert(0, str(ROOT / 'pi'))
 from robot.nav.frames import Pose
 from robot.nav.geometry import bounds, footprint, hull, intersects, circle_intersects, rectangle
 from robot.nav.reference import NativeReference, specification
+from robot.nav.planner import Planner
+from robot.odom_sim import fixture
 from robot.workbench.contracts import PlanInput, Docking, Obstacle, Move
 from robot.workbench.scene import make_field
 from robot.workbench.planning import make_plan, restore_plan
@@ -107,6 +109,26 @@ class SceneTests(unittest.TestCase):
         self.assertEqual(field.errors(start), [])
         self.assertEqual(field.errors(end), [])
         self.assertIn('obstacle:B1', field.check(ref))
+
+    def test_dock_exit_merges_into_verified_center_turn_window(self):
+        request = PlanInput(start='start_2')
+        field = make_field(request)
+        planner = Planner(c.CDLL(str(self.library)), fixture().geometry, field, cruise_m_s=.3)
+        start = Pose(field.data['nodes']['raw'][0], field.data['nodes']['raw'][1] - 1.01e-7, math.pi / 2)
+        middle = Pose(*field.data['nodes']['raw_road'], math.pi / 2)
+        end = Pose(*field.data['nodes']['rough'], 3 * math.pi / 2)
+        corner = Pose(*field.data['nodes']['center'], math.pi / 2)
+        allowed = ('start_2',)
+        lead, errors = planner.make('DIAGONAL', start, middle, 'raw_dock', allowed)
+        self.assertEqual(errors, [])
+        window, errors = planner.make('WINDOW', middle, end, 'center_west+center_east', allowed,
+                                      corner=corner, window_m=.08)
+        self.assertEqual(errors, [])
+        result = planner.shortcut([lead, window], allowed)
+        self.assertEqual(len(result), 1)
+        self.assertLess(result[0].cost_s, lead.cost_s + window.cost_s)
+        self.assertEqual(field.check(result[0].reference, allowed), [])
+        self.assertLessEqual(planner.wheel_bound(result[0].reference), 100.)
 
     def test_proven_clear_acceleration_matches_original_adaptive_checks(self):
         field = make_field(PlanInput(obstacles=[Obstacle(id='B1', x_m=.7, y_m=2.12)]))

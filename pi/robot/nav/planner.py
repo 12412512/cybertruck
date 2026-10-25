@@ -285,16 +285,40 @@ class Planner:
                     road_states=roads)
 
     def shortcut(self,chain,allowed):
-        """只消除同一工位间的非必要中间点；真实任务停靠点不跨越。"""
-        result=[]
-        index=0
-        while index<len(chain):
-            selected=None
+        """在同一工位间按总耗时选择连续段组合；不跨越任务停靠点。"""
+        # 保留原段作为每个边界的候选，优化失败也不删除已验证路线。
+        # 从后向前计算剩余最短时间，避免局部最大收益堵住后续更好的合并。
+        count = len(chain)
+        costs = [0.] * (count + 1)
+        choices = [None] * count
+        for index in range(count - 1, -1, -1):
+            if self.cancelled():
+                raise InterruptedError('规划已被更新的草稿取代')
+            costs[index] = chain[index].cost_s + costs[index + 1]
+            choices[index] = index + 1, chain[index]
             for last in range(index+1,len(chain)):
                 group=chain[index:last+1]
                 roads='+'.join(dict.fromkeys('+'.join(s.road for s in group).split('+')))
                 move,_=self.make('POSE',group[0].reference.start,group[-1].reference.end,roads,allowed)
                 start,end=group[0].reference.start,group[-1].reference.end
+                # 将出站短直线并入同一直线上的转姿窗口；保持路口窗口的位置与宽度。
+                # 原窗口不能平移到禁行区，合并后仍重新检查完整车体扫掠和轮速。
+                windows = [part for part in group if part.kind == 'WINDOW' and part.corner is not None]
+                if len(windows) == 1 and all(part.kind in ('LINE', 'DIAGONAL', 'WINDOW') for part in group):
+                    window = windows[0]
+                    dx, dy = end.x_m - start.x_m, end.y_m - start.y_m
+                    points = [part.reference.start for part in group] + [window.corner]
+                    # C参考使用float，跨工位累计约0.1微米的舍入不能阻止候选生成；
+                    # 此处只筛选候选，实际净空仍由field.check原精度判断。
+                    aligned = all(abs((point.x_m-start.x_m)*dy - (point.y_m-start.y_m)*dx) < 1e-6
+                                  for point in points)
+                    if aligned:
+                        original = window.reference.spec
+                        width = (original.yaw_end_m - original.yaw_begin_m) / 2
+                        combined, _ = self.make('WINDOW', start, end, roads, allowed,
+                                                corner=window.corner, window_m=width)
+                        if combined and (move is None or combined.cost_s < move.cost_s):
+                            move = combined
                 if abs(start.x_m-end.x_m)>.08 and abs(start.y_m-end.y_m)>.08:
                     for corner in (Pose(start.x_m,end.y_m,start.yaw_rad),Pose(end.x_m,start.y_m,start.yaw_rad)):
                         for radius in (.04,.08,.12,.16,.20):
@@ -302,15 +326,15 @@ class Planner:
                                 curve,_=self.make('FLOW',start,end,roads,allowed,corner=corner,radius=radius,head_pad_m=pad)
                                 if curve and (move is None or curve.cost_s<move.cost_s):
                                     move=curve
-                gain=sum(s.cost_s for s in group)-move.cost_s if move else 0
-                if gain>1e-6 and (selected is None or gain>selected[0]):
-                    selected=gain,last,move
-            if selected:
-                result.append(selected[2])
-                index=selected[1]+1
-            else:
-                result.append(chain[index])
-                index+=1
+                total = move.cost_s + costs[last + 1] if move else math.inf
+                if total + 1e-6 < costs[index]:
+                    costs[index] = total
+                    choices[index] = last + 1, move
+        result = []
+        index = 0
+        while index < count:
+            index, segment = choices[index]
+            result.append(segment)
         return result
 
     def merge(self, chain, allowed):
