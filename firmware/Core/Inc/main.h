@@ -61,14 +61,16 @@ void Error_Handler(void);
 #define START_KEY_GPIO_Port GPIOC
 #define ZONE_SWITCH_Pin GPIO_PIN_1
 #define ZONE_SWITCH_GPIO_Port GPIOC
-#define BUZZER_Pin GPIO_PIN_0
-#define BUZZER_GPIO_Port GPIOB
 #define TRAY_PWM_Pin GPIO_PIN_9
 #define TRAY_PWM_GPIO_Port GPIOE
 #define ARM_PWM_Pin GPIO_PIN_11
 #define ARM_PWM_GPIO_Port GPIOE
 #define GRIP_PWM_Pin GPIO_PIN_13
 #define GRIP_PWM_GPIO_Port GPIOE
+#define AUX_PWM_Pin GPIO_PIN_14
+#define AUX_PWM_GPIO_Port GPIOE
+#define BUZZER_Pin GPIO_PIN_11
+#define BUZZER_GPIO_Port GPIOG
 
 /* USER CODE BEGIN Private defines */
 

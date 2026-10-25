@@ -115,8 +115,9 @@ def verify_ioc(data):
         "PC0.Signal": "GPIO_Input", "PC0.GPIO_PuPd": "GPIO_PULLUP",
         "PC1.Signal": "GPIO_Input", "PC1.GPIO_PuPd": "GPIO_PULLUP",
         "PC1.GPIO_Label": "ZONE_SWITCH",
-        "PB0.Signal": "GPIO_Output", "PB0.PinState": "GPIO_PIN_SET",
-        "PB0.GPIO_ModeDefaultOutputPP": "GPIO_MODE_OUTPUT_PP",
+        "PG11.Signal": "GPIO_Output", "PG11.PinState": "GPIO_PIN_SET",
+        "PG11.GPIO_ModeDefaultOutputPP": "GPIO_MODE_OUTPUT_PP",
+        "PE14.GPIO_Label": "AUX_PWM",
         "PA13.Signal": "SYS_JTMS-SWDIO", "PA14.Signal": "SYS_JTCK-SWCLK",
         "ProjectManager.ProjectName": "Car", "ProjectManager.ProjectFileName": "Car.ioc",
         "ProjectManager.StackSize": "0x1000", "ProjectManager.KeepUserCode": "true",
@@ -124,15 +125,15 @@ def verify_ioc(data):
     pins = {
         "PA9": "USART1_TX", "PA10": "USART1_RX", "PA2": "USART2_TX",
         "PA3": "USART2_RX", "PC6": "USART6_TX", "PC7": "USART6_RX",
-        "PA11": "CAN1_RX", "PA12": "CAN1_TX", "PE9": "S_TIM1_CH1",
-        "PE11": "S_TIM1_CH2", "PE13": "S_TIM1_CH3",
+        "PD0": "CAN1_RX", "PD1": "CAN1_TX", "PE9": "S_TIM1_CH1",
+        "PE11": "S_TIM1_CH2", "PE13": "S_TIM1_CH3", "PE14": "S_TIM1_CH4",
     }
     expected.update({f"{pin}.Signal": signal for pin, signal in pins.items()})
     for number in (1, 2, 6):
         for field, value in {"BaudRate": "115200", "WordLength": "WORDLENGTH_8B",
                              "StopBits": "STOPBITS_1", "Parity": "PARITY_NONE"}.items():
             expected[f"USART{number}.{field}"] = value
-    for channel in (1, 2, 3):
+    for channel in (1, 2, 3, 4):
         expected[f"TIM1.Channel-PWM Generation{channel} CH{channel}"] = f"TIM_CHANNEL_{channel}"
         expected[f"TIM1.Pulse-PWM Generation{channel} CH{channel}"] = "0"
     for key, value in expected.items():
@@ -143,8 +144,8 @@ def verify_ioc(data):
     check(active_ips == {"CAN1", "NVIC", "RCC", "RNG", "SYS", "TIM1", "USART1", "USART2", "USART6"},
           f"IOC 启用外设不符：{sorted(active_ips)}")
     check(data.get("PC1.Signal") == "GPIO_Input", "PC1仅作启停区只读开关输入")
-    check(not any("CH4" in k or (k.endswith(".Signal") and "CH4" in v)
-                  for k, v in data.items()), "IOC 不得配置 TIM1 CH4")
+    check(not any(k.startswith(("PB0.", "PA11.", "PA12.")) for k in data),
+          "旧CAN和蜂鸣器引脚必须释放，不自动分配其他功能")
     try:
         rate = int(data["RCC.APB1Freq_Value"]) / int(data["CAN1.Prescaler"]) / 15
         check(rate == 500000, f"IOC CAN 计算波特率错误：{rate}")
@@ -203,9 +204,8 @@ def verify_sources(data):
     assignment(tim, "htim1.Init.Prescaler", data.get("TIM1.Prescaler", "119"), "生成 PWM")
     assignment(tim, "htim1.Init.Period", data.get("TIM1.Period", "19999"), "生成 PWM")
     assignment(tim, "sConfigOC.Pulse", "0", "生成 PWM")
-    for channel in (1, 2, 3):
+    for channel in (1, 2, 3, 4):
         call(tim, "HAL_TIM_PWM_ConfigChannel", f"&htim1,&sConfigOC,TIM_CHANNEL_{channel}", "生成 PWM")
-    check(not re.search(r"\bTIM_CHANNEL_4\b", sources["tim"]), "生成 PWM 不得配置 CH4")
     for number in (1, 2, 6):
         uart = body(sources["usart"], f"MX_USART{number}_UART_Init")
         for field, value in {"BaudRate": "115200", "WordLength": "UART_WORDLENGTH_8B",
@@ -220,10 +220,10 @@ def verify_sources(data):
         ("GPIOA", {"GPIO_PIN_9", "GPIO_PIN_10"}, "GPIO_MODE_AF_PP", "GPIO_AF7_USART1"),
         ("GPIOA", {"GPIO_PIN_2", "GPIO_PIN_3"}, "GPIO_MODE_AF_PP", "GPIO_AF7_USART2"),
         ("GPIOC", {"GPIO_PIN_6", "GPIO_PIN_7"}, "GPIO_MODE_AF_PP", "GPIO_AF8_USART6"),
-        ("GPIOA", {"GPIO_PIN_11", "GPIO_PIN_12"}, "GPIO_MODE_AF_PP", "GPIO_AF9_CAN1"),
-        ("GPIOE", {"GPIO_PIN_9", "GPIO_PIN_11", "GPIO_PIN_13"}, "GPIO_MODE_AF_PP", "GPIO_AF1_TIM1"),
+        ("GPIOD", {"GPIO_PIN_0", "GPIO_PIN_1"}, "GPIO_MODE_AF_PP", "GPIO_AF9_CAN1"),
+        ("GPIOE", {"GPIO_PIN_9", "GPIO_PIN_11", "GPIO_PIN_13", "GPIO_PIN_14"}, "GPIO_MODE_AF_PP", "GPIO_AF1_TIM1"),
         ("GPIOC", {"GPIO_PIN_0", "GPIO_PIN_1"}, "GPIO_MODE_INPUT", None),
-        ("GPIOB", {"GPIO_PIN_0"}, "GPIO_MODE_OUTPUT_PP", None),
+        ("GPIOG", {"GPIO_PIN_11"}, "GPIO_MODE_OUTPUT_PP", None),
     ]
     check(len(configs) == len(expected_gpio), "生成 GPIO 初始化组数量不符，检查额外引脚")
     for port, pins, mode, alternate in expected_gpio:
@@ -238,11 +238,16 @@ def verify_sources(data):
                 check(state.get("Pull") == "GPIO_PULLUP", "生成 PC0/PC1 必须上拉")
     gpio = body(sources["gpio"], "MX_GPIO_Init")
     call(gpio, "HAL_GPIO_WritePin", "BUZZER_GPIO_Port,BUZZER_Pin,GPIO_PIN_SET", "蜂鸣器默认电平")
-    check(defines.get("BUZZER_Pin") == "GPIO_PIN_0" and defines.get("BUZZER_GPIO_Port") == "GPIOB",
-          "蜂鸣器标签必须对应 PB0")
+    check(defines.get("BUZZER_Pin") == "GPIO_PIN_11" and defines.get("BUZZER_GPIO_Port") == "GPIOG",
+          "蜂鸣器标签必须对应 PG11")
+    check(defines.get("AUX_PWM_Pin") == "GPIO_PIN_14" and defines.get("AUX_PWM_GPIO_Port") == "GPIOE",
+          "新增舵机标签必须对应 PE14")
+    call(gpio, "__HAL_RCC_GPIOG_CLK_ENABLE", "", "新蜂鸣器GPIO时钟")
+    call(body(sources["can"], "HAL_CAN_MspInit"), "__HAL_RCC_GPIOD_CLK_ENABLE", "", "新CAN引脚时钟")
+    call(body(sources["can"], "HAL_CAN_MspDeInit"), "HAL_GPIO_DeInit", "GPIOD,GPIO_PIN_0|GPIO_PIN_1", "CAN引脚释放")
     write_at = gpio.find("HAL_GPIO_WritePin")
-    buzzer = [item for item in gpio_configs(gpio, defines) if item[0] == "GPIOB"]
-    check(bool(buzzer) and 0 <= write_at < buzzer[0][3], "PB0 必须先置高，再配置输出")
+    buzzer = [item for item in gpio_configs(gpio, defines) if item[0] == "GPIOG"]
+    check(bool(buzzer) and 0 <= write_at < buzzer[0][3], "PG11 必须先置高，再配置输出")
     irq_defs = [("CAN1_TX", "can", "HAL_CAN_IRQHandler", "&hcan1", 2),
                 ("CAN1_RX0", "can", "HAL_CAN_IRQHandler", "&hcan1", 2),
                 ("CAN1_SCE", "can", "HAL_CAN_IRQHandler", "&hcan1", 2),
@@ -311,6 +316,7 @@ def verify_readonly_app(data):
                         body(mechanism_port, 'MechPort_Init')), '机构初始化禁止发送/使能/PWM')
     check('Servo_Take' in body(mechanism_port, 'MechPort_Run') and
           'Servo_Applied' in body(mechanism_port, 'MechPort_Run'), 'PWM必须经过显式舵机意图及应用确认')
+    check('TIM_CHANNEL_4' not in mechanism_port, 'PE14仅配置预留，不能并入原三个舵机控制')
     check('Bus_MechWatch();' in body(base, 'Base_Init'), '启动STOP必须包含机构地址')
     check(not re.search(r'\b(?:Bus_(?:Start|Speed|Send)|Exec_(?:Arm|Goal))\s*\(', body(base, 'Base_Init')),
           'Base_Init禁止使能、下发动作或自动开始查询')
