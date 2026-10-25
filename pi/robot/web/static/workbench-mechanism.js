@@ -1,4 +1,4 @@
-import {initDevice} from './workbench-device.js?v=3';
+import {initDevice} from './workbench-device.js?v=4';
 
 /* 机械页仅接实车API；导航模型的刷新不参与本页状态或控制权。 */
 let remote;
@@ -10,5 +10,8 @@ export function initMechanism() {
 export function renderMechanism() {}
 export function cancelMechHeld() {}
 export async function stopMechHeld() {
-    await remote?.release();
+    await remote?.release('page-leave');
+}
+export async function stopMechanism(source) {
+    await remote?.stop(source);
 }

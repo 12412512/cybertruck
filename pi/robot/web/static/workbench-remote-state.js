@@ -17,6 +17,7 @@ export function blockedReasons(state, owned, pending) {
     const reasons = [], m = state.mechanism;
     if (!state.connected || !m) reasons.push(state.reason || '设备反馈未就绪');
     if (state.base?.fault || m?.fault) reasons.push(`故障锁存：底盘 ${state.base?.fault || 0} / 机构 ${m?.fault || 0}`);
+    if (state.action_locked) reasons.push(state.reason || '动作已锁定，只读反馈保留');
     if (state.site_ready === false) reasons.push('设备核心保持只读，现场动作许可未开放');
     if (!owned) reasons.push('尚未取得实车控制权');
     if (pending) reasons.push('上一请求结果待核对，请勿重复发送');
@@ -27,8 +28,9 @@ export function blockedReasons(state, owned, pending) {
 }
 export function allowed(state, owned, pending, action) {
     if (action === 'stop') return true;
-    if (action === 'claim') return state.connected === true && !pending;
+    if (action === 'claim') return state.connected === true && !pending && !state.action_locked;
     if (action === 'load') return true;
+    if (state.action_locked) return false;
     if (action === 'attach' || action === 'teach') return owned && state.connected === true && !pending &&
         (action !== 'attach' || (!state.base?.fault && !state.mechanism?.fault && state.base?.stopped && !state.mechanism?.attached));
     return canAct(state, owned, pending, action);

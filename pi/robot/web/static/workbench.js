@@ -3,8 +3,8 @@ import {drawMap, drawSpeed} from './workbench-map.js?v=3';
 import {initLidar, renderLidar} from './workbench-lidar.js?v=6';
 import {modelView} from './workbench-execution.js?v=1';
 import {initScene, sceneValues, applyScene, overlayDraft} from './workbench-scene.js?v=3';
-import {isEditing, motionDirection, matchesRelease} from './workbench-input.js';
-import {initMechanism, renderMechanism, cancelMechHeld, stopMechHeld} from './workbench-mechanism.js?v=5';
+import {motionDirection, matchesRelease, stopShortcut} from './workbench-input.js?v=2';
+import {initMechanism, renderMechanism, cancelMechHeld, stopMechHeld, stopMechanism} from './workbench-mechanism.js?v=6';
 
 const $ = id => document.getElementById(id);
 const text = (id, value) => { $(id).textContent = value; };
@@ -99,10 +99,6 @@ function clearHeld() {
     heldButton = null;
 }
 async function stop(reason = '已请求停止模拟') {
-    if (document.body.dataset.page === 'mechanism') {
-        document.getElementById('real-stop')?.click();
-        return;
-    }
     generation++;
     clearHeld();
     cancelMechHeld();
@@ -110,6 +106,10 @@ async function stop(reason = '已请求停止模拟') {
     updateButtons();
     try { await post('stop', {}, ''); notify(reason + '；控制权已释放。'); }
     catch (error) { notify('网关未确认停止；离线核心点动租约会独立过期。' + error.message, true); }
+}
+function stopVisible(source) {
+    if (document.body.dataset.page === 'mechanism') return stopMechanism(source);
+    return stop();
 }
 async function stopHeld(reason) {
     generation++;
@@ -155,8 +155,8 @@ for (const button of document.querySelectorAll('.jog')) {
     button.addEventListener('contextmenu', event => event.preventDefault());
 }
 window.addEventListener('keydown', event => {
-    if ((event.code === 'Escape' || event.code === 'Space') && !isEditing(event)) {
-        event.preventDefault(); stop(); return;
+    if (stopShortcut(event)) {
+        event.preventDefault(); stopVisible(`keyboard-${event.code}`); return;
     }
     const direction = motionDirection(event);
     if (!direction || $('page-drive').hidden) return;
@@ -170,7 +170,7 @@ window.addEventListener('blur', () => { if (held) stopHeld('窗口失焦'); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && held) stopHeld('页面已隐藏'); });
 window.addEventListener('pagehide', () => { if (held) stop('页面关闭'); });
 window.addEventListener('offline', () => { if (held) stop('浏览器断网'); });
-$('stop').onclick = () => stop();
+$('stop').onclick = () => stopVisible('top-stop-button');
 $('pad-stop').onclick = () => stop();
 $('claim').onclick = async () => {
     const epoch = generation;

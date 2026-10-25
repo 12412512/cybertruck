@@ -13,3 +13,13 @@ export function motionDirection(event) {
 export function matchesRelease(event, heldDirection) {
     return typeof heldDirection === 'string' && keys[event.code] === heldDirection;
 }
+
+export function stopShortcut(event) {
+    if (event.repeat || event.ctrlKey || event.metaKey || event.altKey || isEditing(event)) return false;
+    if (event.code === 'Escape') return true;
+    if (event.code !== 'Space') return false;
+    // 空格聚焦按钮时属于原生激活操作，不再额外触发全局停止。
+    const target = event.target;
+    return !(/BUTTON|A|SUMMARY/.test(target?.tagName || '') ||
+        target?.closest?.('button,a,summary,[role="button"]'));
+}

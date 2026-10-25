@@ -2,7 +2,7 @@
 
 import argparse
 from contextlib import asynccontextmanager
-from collections import OrderedDict
+from collections import OrderedDict, deque
 import json
 import hashlib
 from pathlib import Path
@@ -26,13 +26,16 @@ class DeviceCommand(BaseModel):
 
 
 class DeviceCore:
-    def __init__(self, clock=time.monotonic, runtime=None, site_ready=False):
-        self.link = MechanismLink()
+    def __init__(self, clock=time.monotonic, runtime=None, site_ready=False, commissioning=False):
+        if commissioning and not site_ready:
+            raise ValueError('机械调试模式需要本次现场许可；默认保持只读')
+        self.link = MechanismLink(commissioning=commissioning)
         self.clock = clock
         self.lock = threading.RLock()
         self.owner = self.token = ''
         self.until = 0.
         self.cache = OrderedDict()
+        self.safety_events = deque(maxlen=32)
         self.site_ready = site_ready
         self.pose_path = Path(runtime) / 'physical_poses.json' if runtime else None
         self.poses = []
@@ -43,8 +46,7 @@ class DeviceCore:
         now = self.clock()
         with self.lock:
             if self.token and now >= self.until:
-                self.link.emergency('实车调试控制权过期，停止并失效会话')
-                self.owner = self.token = ''
+                self.stop_control('控制权租约过期；动作锁定，只读反馈保留', 'lease-expired', self.owner)
             wire = self.link.step(now)
         if wire:
             written = transport.write(wire)
@@ -58,19 +60,58 @@ class DeviceCore:
     def state(self):
         with self.lock:
             return dict(self.link.view(self.clock()), owner=self.owner, poses=self.poses, site_ready=self.site_ready,
+                        safety_events=list(self.safety_events),
                         lease_remaining_s=max(0., self.until-self.clock()) if self.token else 0.)
+
+    def stop_control(self, reason, source, client):
+        """由核心锁保护；不记录控制令牌，停止后仍由唯一串口读取反馈。"""
+        self.link.emergency(reason)
+        self.owner = self.token = ''
+        self.until = 0.
+        self.safety_events.append(dict(at_s=self.clock(), wall_s=time.time(),
+            source=source, client=client, reason=reason))
 
     def command(self, value):
         value = DeviceCommand.model_validate(value)
         now = self.clock()
         with self.lock:
             if value.op == 'stop':
-                self.link.emergency('Web请求停止；保持夹爪，不自动恢复')
-                self.owner = self.token = ''
+                source = value.args.get('source', 'explicit-stop')
+                if not isinstance(source, str) or len(source) > 48:
+                    source = 'external-stop'
+                self.stop_control('Web请求停止；动作锁定，只读反馈保留', source, value.client)
                 return dict(status='STOP_REQUESTED', domain='physical')
+            if value.op == 'release':
+                if (not self.token or value.client != self.owner or
+                        not secrets.compare_digest(value.token, self.token)):
+                    return dict(status='IGNORED_OLD_OWNER', domain='physical')
+                source = value.args.get('source', 'page-release')
+                if not isinstance(source, str) or len(source) > 48:
+                    source = 'page-release'
+                self.stop_control('页面退出控制；动作锁定，只读反馈保留', source, value.client)
+                return dict(status='STOP_REQUESTED', domain='physical')
+            if value.op == 'observe':
+                # 诊断附着不取得运动租约；浏览器关闭后由唯一核心继续保活与只读轮询。
+                if (self.site_ready or self.token or value.token or value.args or
+                        self.link.firmware not in ('GC-BASE-0.3.23', 'GC-BASE-0.3.24', 'GC-BASE-0.3.25')):
+                    raise ValueError('只读附着要求独立只读模式、无人持有控制权且无附加参数')
+                key = ('readonly:' + value.client, value.request_id)
+                encoded = value.model_dump_json()
+                if key in self.cache:
+                    previous, result = self.cache[key]
+                    if previous != encoded:
+                        raise ValueError('相同只读请求ID内容发生变化')
+                    return result
+                result = self.link.submit(value.request_id, 'attach', {}, now)
+                self.cache[key] = (encoded, result)
+                while len(self.cache) > 100:
+                    self.cache.popitem(last=False)
+                return result
             if value.op == 'claim':
                 if self.token and now < self.until and (value.client != self.owner or value.token != self.token):
                     raise ValueError('另一浏览器持有实车控制权')
+                if self.link.action_locked:
+                    raise ValueError('动作已停止并锁定；反馈保持在线，需核对后重新准备')
                 if self.link.latched:
                     raise ValueError('设备会话已失效，需人工只读核对后重启设备核心')
                 self.owner = value.client
@@ -136,7 +177,7 @@ def create_app(core, transport=None):
                 core.tick(transport)
             except Exception as exc:
                 with core.lock:
-                    core.link.emergency(f'设备核心停止：{exc}')
+                    core.link.reset(f'设备核心停止：{exc}')
                     wire = core.link.step(core.clock())
                 try:
                     if wire:
@@ -189,7 +230,10 @@ def main():
     parser.add_argument('--runtime', type=Path, default=Path('output/runtime'))
     parser.add_argument('--port', type=int, default=8091)
     parser.add_argument('--site-ready', action='store_true', help='仅本次烧录后用户明确确认现场才可设置')
+    parser.add_argument('--mechanism-commissioning', action='store_true', help='显式开放0.3.24机械调试，仍检查故障、反馈、零点和互锁')
     args = parser.parse_args()
+    if args.mechanism_commissioning and not args.site_ready:
+        parser.error('机械调试模式必须同时确认本次现场条件')
     args.runtime.mkdir(parents=True, exist_ok=True)
     lock = ProcessLock(args.runtime / 'core.lock')
     transport = serial.Serial(port=None, baudrate=115200, timeout=.01, write_timeout=.1)
@@ -201,7 +245,8 @@ def main():
         transport.open()
         time.sleep(.5)  # USB打开可能复位；静默后用新boot/session握手。
         transport.reset_input_buffer()
-        uvicorn.run(create_app(DeviceCore(runtime=args.runtime, site_ready=args.site_ready), transport), host='127.0.0.1', port=args.port, log_level='warning')
+        uvicorn.run(create_app(DeviceCore(runtime=args.runtime, site_ready=args.site_ready,
+            commissioning=args.mechanism_commissioning), transport), host='127.0.0.1', port=args.port, log_level='warning')
     finally:
         transport.close()
         lock.close()

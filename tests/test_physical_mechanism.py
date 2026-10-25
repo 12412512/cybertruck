@@ -13,6 +13,93 @@ from robot.web.workbench import device_router
 from fastapi import FastAPI
 
 class PhysicalMechanismTests(unittest.TestCase):
+    def test_0324_commissioning_is_explicit_and_keeps_protection(self):
+        with self.assertRaises(ValueError): DeviceCore(commissioning=True)
+        for change in ('normal', 'fault', 'stale', 'zero', 'wrong_firmware'):
+            link=self.ready();link.firmware='GC-BASE-0.3.24';link.commissioning=True
+            if change=='fault':link.base['fault']=2048
+            if change=='stale':link.actual_at=0
+            if change=='zero':link.actual['zero_version']=2
+            if change=='wrong_firmware':link.firmware='GC-BASE-0.3.23'
+            args=dict(axis='lift',target_m=.002,zero_version=1,rpm=5)
+            if change=='normal':
+                result=link.submit('trial', 'move', args, 1.01)
+                self.assertEqual(result['status'],'QUEUED')
+            else:
+                with self.subTest(change=change),self.assertRaises(ValueError):
+                    link.submit('trial','move',args,1.01)
+                self.assertFalse(link.commands)
+
+    def test_0325_requires_explicit_commissioning(self):
+        link=self.readonly_current('GC-BASE-0.3.25')
+        with self.assertRaises(ValueError):link.submit('blocked','zero',dict(confirmed=True),1.01)
+        link=self.ready();link.firmware='GC-BASE-0.3.25';link.commissioning=True
+        self.assertEqual(link.submit('candidate','move',dict(axis='tray',target_rad=0,zero_version=1),1.01)['status'],'QUEUED')
+
+    def readonly_current(self, firmware='GC-BASE-0.3.23'):
+        link=MechanismLink();link.boot=123;link.bound=True;link.firmware=firmware
+        link.actual_at=link.base_at=1.;link.actual=dict.fromkeys(FIELDS,0)
+        link.actual['schema']=1;link.base=dict(mode=0,fault=0,stopped=True)
+        return link
+
+    def test_current_firmware_only_allows_readonly_attach(self):
+        link=self.readonly_current()
+        link.submit('read-only','attach',{},1.01)
+        kind,data,_=link.commands[0]
+        self.assertEqual((kind,struct.unpack('<II',data)),(48,(1,0x4D454348)))
+        for action in ('enable','zero','anchor','move','confirm','next','pose','invalidate'):
+            link=self.readonly_current()
+            with self.subTest(action=action),self.assertRaises(ValueError):
+                link.submit('blocked',action,{},1.01)
+            self.assertFalse(link.commands)
+
+    def test_0324_candidate_is_readonly_and_keeps_fault_gate(self):
+        core=DeviceCore(clock=lambda:1.01);core.link=self.readonly_current('GC-BASE-0.3.24')
+        core.command(dict(op='observe',client='offline',request_id='once'))
+        self.assertEqual(core.link.commands[0][0],48)
+        self.assertFalse(core.token);self.assertFalse(core.owner)
+        for action in ('enable','zero','anchor','move','confirm','next','pose','invalidate'):
+            link=self.readonly_current('GC-BASE-0.3.24')
+            with self.subTest(action=action),self.assertRaises(ValueError):
+                link.submit('blocked',action,{},1.01)
+            self.assertFalse(link.commands)
+        link=self.readonly_current('GC-BASE-0.3.24');link.base['fault']=2048
+        with self.assertRaises(ValueError):link.submit('fault','attach',{},1.01)
+        self.assertFalse(link.commands)
+
+    def test_current_attach_rejects_fault_motion_pwm_and_stale_state(self):
+        for field in ('attached','fault','zero_valid','pwm_mask','axis_state','servo_state','pose_state','motion_uncertain'):
+            link=self.readonly_current();link.actual[field]=1
+            with self.subTest(field=field),self.assertRaises(ValueError):link.submit('r','attach',{},1.01)
+            self.assertFalse(link.commands)
+        for field,value in [('mode',1),('fault',2048),('stopped',False)]:
+            link=self.readonly_current();link.base[field]=value
+            with self.subTest(field=field),self.assertRaises(ValueError):link.submit('r','attach',{},1.01)
+        link=self.readonly_current();link.actual_at=0
+        with self.assertRaises(ValueError):link.submit('r','attach',{},1.01)
+
+    def test_readonly_observe_has_no_motion_lease_and_does_not_requeue_duplicates(self):
+        core=DeviceCore(clock=lambda:1.01);core.link=self.readonly_current()
+        command=dict(op='observe',client='acceptance',request_id='once')
+        result=core.command(command)
+        self.assertEqual(core.command(command),result)
+        self.assertEqual(len(core.link.commands),1)
+        self.assertFalse(core.token);self.assertFalse(core.owner);self.assertEqual(core.until,0)
+        for args in ({'action':'enable'},{'action':'zero'},{'action':'move'}):
+            other=DeviceCore(clock=lambda:1.01);other.link=self.readonly_current()
+            with self.subTest(args=args),self.assertRaises(ValueError):
+                other.command(dict(command,args=args))
+            self.assertFalse(other.link.commands)
+
+    def test_readonly_observe_refuses_other_owner_or_site_ready(self):
+        for flag in ('owner','site'):
+            core=DeviceCore(clock=lambda:1.01);core.link=self.readonly_current()
+            if flag=='owner':core.token='someone'
+            else:core.site_ready=True
+            with self.subTest(flag=flag),self.assertRaises(ValueError):
+                core.command(dict(op='observe',client='a',request_id='b'))
+            self.assertFalse(core.link.commands)
+
     def ready(self):
         link=MechanismLink();link.boot=123;link.bound=True;link.firmware='GC-BASE-0.3.14'
         link.actual_at=link.base_at=1.;link.actual=dict.fromkeys(FIELDS,0)
@@ -63,7 +150,7 @@ class PhysicalMechanismTests(unittest.TestCase):
             def write(self,data):self.writes.append(data);return len(data)
             def read(self,size):return b''
         transport=Transport();core.tick(transport)
-        self.assertTrue(core.link.latched);self.assertEqual(core.token,'')
+        self.assertTrue(core.link.action_locked);self.assertFalse(core.link.latched);self.assertEqual(core.token,'')
         packet=p.Decoder().feed(transport.writes[0])[0]
         self.assertEqual(packet.kind,p.STOP)
 

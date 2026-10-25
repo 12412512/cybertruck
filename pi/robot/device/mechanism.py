@@ -86,8 +86,9 @@ def pose_body(action_id, revision, targets, single_step=True, release_confirmed=
 
 
 class MechanismLink(Link):
-    def __init__(self):
+    def __init__(self, commissioning=False):
         super().__init__(capabilities=5)
+        self.commissioning = commissioning
         self.commands = deque(maxlen=1)
         self.results = deque(maxlen=40)
         self.actual = {}
@@ -99,10 +100,18 @@ class MechanismLink(Link):
         self.stop_wire = b''
         self.operation = None
         self.token = 0
+        self.action_locked = False
+        self.stop_queued = False
+        self.stop_acknowledged = False
+        self.stop_reason = ''
 
     def reset(self, reason):
         # 失联后只请求停止，不自动重新握手/重发动作。
         self.latched = True
+        self.action_locked = True
+        self.stop_queued = False
+        self.stop_acknowledged = False
+        self.stop_reason = reason
         self.commands.clear()
         self.operation = None
         self.message = reason
@@ -111,7 +120,19 @@ class MechanismLink(Link):
         self.pending = None
 
     def emergency(self, reason):
-        self.reset(reason)
+        """停止动作但保留同会话只读轮询；动作锁不自动解除。"""
+        if self.latched or not self.bound or not self.boot:
+            self.reset(reason)
+            return
+        if self.action_locked:
+            return
+        self.action_locked = True
+        self.stop_reason = reason
+        self.stop_acknowledged = False
+        self.commands.clear()
+        self.operation = None
+        self.pending = None
+        self.stop_queued = True
 
     def step(self, now):
         if self.stop_wire:
@@ -119,6 +140,12 @@ class MechanismLink(Link):
             return data
         if self.latched:
             return b''
+        if self.stop_queued:
+            self.stop_queued = False
+            self.request = (self.request + 1) & 0xFFFFFFFF
+            packet = p.Packet(p.STOP, self.boot, self.session, self.request, 250, b'')
+            self.pending = (packet, now)
+            return packet.encode()
         return super().step(now)
 
     def extra_request(self, now):
@@ -133,6 +160,12 @@ class MechanismLink(Link):
         return None
 
     def custom_reply(self, packet, request, now, sent=None):
+        if request.kind == p.STOP:
+            if packet.boot != self.boot or packet.payload != bytes([p.OK]):
+                self.reset('停止应答无效，动作保持锁定')
+            else:
+                self.stop_acknowledged = True
+            return True
         if request.kind not in range(48, 59) and request.kind != 35:
             return False
         if packet.boot != self.boot or not packet.payload:
@@ -178,9 +211,19 @@ class MechanismLink(Link):
         return True
 
     def submit(self, request_id, action, args, now):
-        if (self.latched or not self.bound or self.firmware not in ('GC-BASE-0.3.14', 'GC-BASE-0.3.15', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19')
+        if self.action_locked:
+            raise ValueError('动作已停止并锁定；只读反馈保留，需人工核对后重新准备')
+        # 新板端目前只验收诊断附着，不能借版本兼容开放其它机械命令。
+        commissioned = self.commissioning and self.firmware in ('GC-BASE-0.3.24', 'GC-BASE-0.3.25')
+        readonly_attach = not commissioned and self.firmware in ('GC-BASE-0.3.23', 'GC-BASE-0.3.24', 'GC-BASE-0.3.25') and action == 'attach'
+        if (self.latched or not self.bound or (not readonly_attach and not commissioned and self.firmware not in ('GC-BASE-0.3.14', 'GC-BASE-0.3.15', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19'))
                 or now - self.actual_at >= .25 or now - self.base_at >= .25):
             raise ValueError('实车固件/会话/反馈未就绪')
+        if readonly_attach and (self.base.get('mode') != 0 or self.base.get('fault') or
+                not self.base.get('stopped') or self.actual.get('schema') != 1 or
+                any(self.actual.get(key) for key in ('attached', 'fault', 'zero_valid', 'pwm_mask',
+                    'axis_state', 'servo_state', 'pose_state', 'motion_uncertain'))):
+            raise ValueError('只读附着要求无故障、底盘已停车、机构未接入且无动作/PWM')
         if self.commands or self.operation or (self.pending and self.pending[0].kind in range(48, 58)):
             raise ValueError('上一条实车命令尚未完成应答')
         if action != 'attach' and (self.base.get('fault') or self.actual.get('fault') or not self.actual.get('base_stopped')):
@@ -196,6 +239,9 @@ class MechanismLink(Link):
         fresh = self.bound and not self.latched and now - self.actual_at < .25 and now - self.base_at < .25
         return dict(available=True, domain='physical', connected=fresh, real_connected=fresh,
                     firmware=self.firmware, boot_id=str(self.boot), session_id=str(self.session),
-                    latched=self.latched, reason=self.message, mechanism=self.actual if fresh else None,
+                    latched=self.latched, action_locked=self.action_locked,
+                    stop_acknowledged=self.stop_acknowledged,
+                    reason=self.stop_reason if self.action_locked else self.message,
+                    mechanism=self.actual if fresh else None,
                     base=self.base if fresh else None, results=list(self.results),
                     state_age_ms=None if self.actual_at < 0 else max(0, round((now-self.actual_at)*1000)))

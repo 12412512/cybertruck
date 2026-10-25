@@ -1,5 +1,5 @@
 import {stateName, samePose, rejectionText} from './workbench-mech-guide.js?v=2';
-import {actuators, freshDevice, blockedReasons, allowed, moveArgs} from './workbench-remote-state.js?v=1';
+import {actuators, freshDevice, blockedReasons, allowed, moveArgs} from './workbench-remote-state.js?v=2';
 
 /* 仅访问实车网关；页面初始化只读取，不自动取得控制权或恢复动作。 */
 export function initDevice(root) {
@@ -54,7 +54,7 @@ export function initDevice(root) {
     const el=id=>card.querySelector(`#real-${id}`);
     const client=`physical_${crypto.randomUUID().replaceAll('-','')}`;
     let token='', state={}, receivedAt=0, pending='', pendingAction='', pendingLabel='', pendingAxis='';
-    let polling=false, sending=false, poseKey='', identity='', heartbeatBusy=false;
+    let polling=false, sending=false, poseKey='', identity='', heartbeatBusy=false, renewalUncertain=false;
     const acceptedEnables=new Set(), entries=[];
     const message=text=>{el('message').textContent=text;};
     function log(text) {
@@ -83,7 +83,12 @@ export function initDevice(root) {
             response=await fetch('/api/device/command',{method:'POST',headers:{'Content-Type':'application/json','X-Workbench':'1'},
                 body:JSON.stringify({op,args,client,token,request_id:requestId})});
             const value=await response.json();
-            if(!response.ok){if(modifying)pending='';throw Error(value.detail||'设备核心拒绝请求');}
+            if(!response.ok){
+                if(modifying && response.status<500)pending='';
+                const error=Error(value.detail||'设备核心拒绝请求');
+                error.status=response.status;
+                throw error;
+            }
             if(value.token)token=value.token;
             if(modifying && value.status!=='QUEUED'){pending='';log(`${pendingLabel}：${value.status==='SAVED_DRAFT'?'已保存新版本，未执行':value.status}`);}
             return value;
@@ -96,7 +101,7 @@ export function initDevice(root) {
         if(sending)return;
         sending=true;
         try {
-            if(!allowed(current(),!!token,pending,action))throw Error('实时反馈、控制权、故障或互锁条件未满足');
+            if(!allowed(current(),!!token,pending||renewalUncertain,action))throw Error('实时反馈、控制权、故障或互锁条件未满足');
             if(!['attach','teach'].includes(action) && !el('confirm').checked)throw Error('请勾选本次现场及目标确认');
             const value=await send('mechanism',{action,zero_version:state.mechanism?.zero_version||0,...args});
             message(value.status==='QUEUED'?`${label(action,args)}请求已排队，等待板端结果`:'姿态已保存，未发送动作');
@@ -104,15 +109,16 @@ export function initDevice(root) {
         }catch(error){message(error.message);log(error.message);}
         finally{if(args.release_confirmed)el('release').checked=false;sending=false;draw();}
     }
-    async function stop() {
+    async function stop(source='panel-stop-button') {
         token=''; // 停止请求等待期间不再续约；请求丢失仍由租约保护停车。
-        try{await send('stop');message('停止请求已发送；会话失效，不自动恢复或张爪');log('已请求停止实车');}
+        renewalUncertain=false;
+        try{await send('stop',{source});message('停止请求已发送；动作锁定，保留实时反馈，不自动恢复或张爪');log(`停止来源：${source}`);}
         catch(error){message(`停止未确认：${error.message}；请核对实物状态`);}
         finally{draw();}
     }
-    const release=()=>{
+    const release=(source='page-release')=>{
         if(!token)return;
-        const body={op:'stop',client,token,request_id:crypto.randomUUID().replaceAll('-','')};token='';
+        const body={op:'release',client,token,request_id:crypto.randomUUID().replaceAll('-',''),args:{source}};token='';renewalUncertain=false;
         fetch('/api/device/command',{method:'POST',keepalive:true,headers:{'Content-Type':'application/json','X-Workbench':'1'},body:JSON.stringify(body)})
             .catch(()=>message('退出时停止未确认，请核对车辆；主控保护继续生效'));
         draw();
@@ -122,7 +128,7 @@ export function initDevice(root) {
         try{await send('claim');message('已取得控制权；尚未使能或动作');}catch(error){message(error.message);}
         finally{sending=false;draw();}
     };
-    el('attach').onclick=()=>act('attach');el('stop').onclick=stop;
+    el('attach').onclick=()=>act('attach');el('stop').onclick=()=>stop('panel-stop-button');
     for(const a of actuators){
         el(`move-${a.id}`).onclick=()=>{try{act('move',moveArgs(a.id,el(`target-${a.id}`).value,a.unit==='mm'?number(`rpm-${a.id}`):5,el('release').checked));}catch(error){message(error.message);}};
         if(a.unit==='mm')el(`enable-${a.id}`).onclick=()=>act('enable',{axis:a.id,confirmed:true});
@@ -147,15 +153,15 @@ export function initDevice(root) {
     card.addEventListener('input',draw);el('poses').onchange=draw;
     function draw(){
         const value=current(),m=value.mechanism;
-        el('status').textContent=!value.connected?'状态未知 / 连接中断':value.base?.fault||m?.fault?'故障锁定':!value.site_ready?'实车只读':'实车在线';
+        el('status').textContent=!value.connected?(state.connected?'反馈过期 · 动作暂停':'状态未知 / 连接中断'):value.action_locked?'动作已锁定 · 反馈在线':renewalUncertain?'控制权核对中 · 动作暂停':value.base?.fault||m?.fault?'故障锁定':!value.site_ready?'实车只读':'实车在线';
         el('firmware').textContent=value.firmware||'—';
         el('fault').textContent=value.connected?`${value.base?.fault??'—'} / ${m?.fault??'—'}`:'未知';
         el('stopped').textContent=value.connected?(value.base?.stopped?'已确认':'未确认'):'未知';
         el('zero-state').textContent=!value.connected?'未知':m?.zero_valid?`有效 · v${m.zero_version}`:'无效 / 未建立';
         el('pwm').textContent=value.connected&&m?actuators.slice(2).filter((a,i)=>m.pwm_mask&(1<<i)).map(a=>a.pin).join('、')||'全部关闭':'未知';
         el('owner').textContent=token?'本页持有控制权':'未持有控制权';
-        el('blockers').textContent=blockedReasons(value,!!token,pending).join('；')||'接口就绪；每项动作仍由板端复核';
-        const permit=action=>!sending&&allowed(value,!!token,pending,action);
+        el('blockers').textContent=blockedReasons(value,!!token,pending||renewalUncertain).join('；')||'接口就绪；每项动作仍由板端复核';
+        const permit=action=>!sending&&allowed(value,!!token,pending||renewalUncertain,action);
         el('claim').disabled=!!token||!permit('claim');el('attach').disabled=!permit('attach');
         el('zero').disabled=!permit('zero')||!!m?.zero_valid;el('anchor').disabled=!permit('anchor');
         for(const a of actuators){
@@ -173,14 +179,15 @@ export function initDevice(root) {
         const record=selected();let matches=false;try{matches=!!record&&samePose(targets(),record);}catch{}
         el('pose-load').disabled=!record;el('pose').disabled=!permit('pose')||!matches;
         el('version-note').textContent=record?`${record.id} · v${record.revision} · ${record.sha256.slice(0,12)} · ${matches?'目标与版本一致':'当前目标不同，禁止调用'}`:'暂无实车姿态；保存不运动。';
-        el('feedback').textContent=value.connected&&m?`轴：${stateName('axis',m.axis_state)} / ${m.axis_reason}\n舵机：${stateName('servo',m.servo_state)} / ${m.servo_reason}\n姿态：${stateName('pose',m.pose_state)} · #${m.pose_id} v${m.revision} · ${m.step_index}/${m.step_count}\n反馈龄 ${value.state_age_ms}ms · 配置 ${m.config_mask}/3 · PWM位图 ${m.pwm_mask}\n启动 ${value.boot_id} · 会话 ${value.session_id}`:value.reason||'没有新鲜设备状态，不使用旧反馈授权动作';
+        const safety=(value.safety_events||[]).slice(-5).map(e=>`${new Date(e.wall_s*1000).toLocaleTimeString('zh-CN',{hour12:false})} · ${e.source} · ${e.reason}`).join('\n');
+        el('feedback').textContent=(value.connected&&m?`轴：${stateName('axis',m.axis_state)} / ${m.axis_reason}\n舵机：${stateName('servo',m.servo_state)} / ${m.servo_reason}\n姿态：${stateName('pose',m.pose_state)} · #${m.pose_id} v${m.revision} · ${m.step_index}/${m.step_count}\n反馈龄 ${value.state_age_ms}ms · 配置 ${m.config_mask}/3 · PWM位图 ${m.pwm_mask}\n启动 ${value.boot_id} · 会话 ${value.session_id}`:value.reason||'没有新鲜设备状态，不使用旧反馈授权动作')+(safety?`\n最近停止来源：\n${safety}`:'');
     }
     async function poll(){
         if(polling||document.hidden)return;polling=true;
         try{
             const response=await fetch('/api/device/state',{cache:'no-store'});if(!response.ok)throw Error('设备状态读取失败');
             state=await response.json();receivedAt=performance.now();const nextIdentity=`${state.boot_id}:${state.session_id}`;
-            if(identity&&identity!==nextIdentity){token='';pending='';acceptedEnables.clear();message('设备身份已变化，旧控制权和参考无效；不自动恢复');}
+            if(identity&&identity!==nextIdentity){token='';pending='';renewalUncertain=false;acceptedEnables.clear();message('设备身份已变化，旧控制权和参考无效；不自动恢复');}
             identity=nextIdentity;const result=(state.results||[]).find(r=>r.request_id===pending);
             if(result){
                 const text=result.result?`${pendingLabel}：${rejectionText(pendingAction,result.result,state)}`:`${pendingLabel}：板端已接受，完成以反馈为准`;
@@ -197,13 +204,19 @@ export function initDevice(root) {
         }catch(error){state={connected:false,reason:error.message};}
         finally{polling=false;draw();}
     }
-    setInterval(poll,200);setInterval(draw,100);
+    setInterval(poll,100);setInterval(draw,100);
     setInterval(async()=>{
         if(!token||document.hidden||heartbeatBusy)return;heartbeatBusy=true;
-        try{await send('renew');}catch(error){token='';message('控制权失效，请先核对状态；不自动恢复');}
+        try{await send('renew');renewalUncertain=false;}
+        catch(error){
+            renewalUncertain=true;
+            if(error.status===409 || error.status===403){token='';renewalUncertain=false;message('控制权已失效，动作不自动恢复；反馈继续显示');}
+            else message('续约回复未确认，暂停新动作；在原租约期限内核对，不重发动作');
+        }
         finally{heartbeatBusy=false;draw();}
     },400);
-    window.addEventListener('pagehide',release);window.addEventListener('offline',release);
-    document.addEventListener('visibilitychange',()=>{if(document.hidden)release();});
+    window.addEventListener('pagehide',()=>release('page-exit'));
+    window.addEventListener('offline',()=>release('browser-offline'));
+    document.addEventListener('visibilitychange',()=>{if(document.hidden)release('page-hidden');});
     draw();poll();return{release,stop};
 }
