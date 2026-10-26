@@ -10,7 +10,11 @@ void MechPort_Stop(uint32_t reason, uint32_t now);
 uint8_t MechPort_Command(uint8_t type, const uint8_t *data, uint16_t size,
                          uint8_t *reply, uint16_t *reply_size, uint32_t now);
 uint8_t MechPort_Query(BusFrame frames[2], uint32_t now);
+void MechPort_QueryAccept(void);
 uint8_t MechPort_Output(BusFrame frames[2], uint32_t now);
 void MechPort_Sent(uint8_t success, uint32_t now);
 uint8_t MechPort_Owned(void);
+/* 人工恢复：仅核对实时静止，关闭PWM；不清故障、不建零、不使能。 */
+uint8_t MechPort_CanReset(uint32_t now, uint32_t version);
+uint8_t MechPort_PwmOff(void);
 #endif

@@ -71,7 +71,7 @@ static void Tick(void)
 }
 static void ServoGoalStart(uint8_t channel, int32_t target, uint8_t release)
 {
-    ServoGoal request = {1, 1, 10000, 0, 0, 0};
+    ServoGoal request = {1, 1, 10000, 0, 0, 0, 0};
     request.channel = channel; request.target_mdeg = target; request.release_confirmed = release;
     CHECK(Servo_Begin(&servo, &request, now) == MECH_OK && !outputs);
 }
@@ -161,7 +161,7 @@ int main(int argc, char **argv)
         }
         else if (which == 7)
         {
-            ServoGoal request2 = {1,1,10000,0,3,0};
+            ServoGoal request2 = {1,1,10000,0,3,0,0};
             CHECK(servo.hold_possible && Servo_Begin(&servo, &request2, now) == SERVO_HOLD);
             CHECK(!outputs && !servo.goal.id);
         }

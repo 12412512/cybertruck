@@ -12,11 +12,12 @@ static int Busy(const Servo *servo)
     return servo->state >= SERVO_ACCEPTED && servo->state <= SERVO_COMMAND_DONE;
 }
 
-static int Bounds(uint8_t channel, int32_t target)
+static int Bounds(uint8_t channel, int32_t target, uint8_t manual)
 {
     return Mech_Pulse(channel, target) &&
            (channel != MECH_ARM_CHANNEL ||
-            (target >= MECH_ARM_MIN_MDEG && target <= MECH_ARM_MAX_MDEG));
+            (manual ? target <= MECH_MANUAL_ARM_MAX_MDEG :
+             (target >= MECH_ARM_MIN_MDEG && target <= MECH_ARM_MAX_MDEG)));
 }
 
 uint8_t Servo_Reference(const Servo *servo, uint8_t channel)
@@ -28,13 +29,15 @@ uint8_t Servo_Reference(const Servo *servo, uint8_t channel)
            (servo->reference_mask & bit) && (servo->confirmed_mask & bit);
 }
 
-static uint32_t Check(const Servo *servo, uint8_t channel, uint32_t now)
+static uint32_t Check(const Servo *servo, uint8_t channel, uint32_t now, uint8_t manual)
 {
     uint8_t arm = Servo_Reference(servo, MECH_ARM_CHANNEL);
     int32_t angle = servo->command_mdeg[MECH_ARM_CHANNEL - 1];
     if (!servo->guard || servo->guard->boot != servo->boot || servo->guard->session != servo->session)
         return MECH_SESSION;
-    if (channel == MECH_GRIP_CHANNEL)
+    if (manual && servo->guard->concurrent_axes)
+        return Mech_GroupReady(servo->guard, now, servo->zero_version);
+    if (manual || channel == MECH_GRIP_CHANNEL)
         return Mech_Ready(servo->guard, now, servo->zero_version);
     return Mech_CheckRotate(servo->guard, now, servo->zero_version,
                             (uint8_t)(channel == MECH_TRAY_CHANNEL), arm, angle);
@@ -56,7 +59,7 @@ void Servo_Init(Servo *servo, MechGuard *guard, uint8_t simulation)
     }
 }
 
-uint32_t Servo_Seed(Servo *servo, const int32_t initial[3], uint32_t now, uint8_t confirmed)
+static uint32_t Seed(Servo *servo, const int32_t initial[3], uint32_t now, uint8_t confirmed, uint8_t manual)
 {
     uint32_t result;
     unsigned index;
@@ -69,11 +72,11 @@ uint32_t Servo_Seed(Servo *servo, const int32_t initial[3], uint32_t now, uint8_
     result = Mech_Ready(servo->guard, now, servo->guard->zero_version);
     if (result)
         return result;
-    if (Mech_Position(servo->guard, 0) > MECH_CLEARANCE_UM ||
-        Mech_Position(servo->guard, 1) > MECH_CLEARANCE_UM)
+    if (!manual && (Mech_Position(servo->guard, 0) > MECH_CLEARANCE_UM ||
+        Mech_Position(servo->guard, 1) > MECH_CLEARANCE_UM))
         return MECH_COLLISION;
     for (index = 0; index < 3; index++)
-        if (!Bounds((uint8_t)(index + 1), initial[index]))
+        if (!Bounds((uint8_t)(index + 1), initial[index], manual))
             return MECH_RANGE;
     memcpy(servo->command_mdeg, initial, sizeof(servo->command_mdeg));
     servo->zero_version = servo->guard->zero_version;
@@ -85,14 +88,25 @@ uint32_t Servo_Seed(Servo *servo, const int32_t initial[3], uint32_t now, uint8_
     return MECH_OK;
 }
 
+uint32_t Servo_Seed(Servo *servo, const int32_t initial[3], uint32_t now, uint8_t confirmed)
+{
+    return Seed(servo, initial, now, confirmed, 0);
+}
+
+uint32_t Servo_SeedManual(Servo *servo, const int32_t initial[3], uint32_t now, uint8_t confirmed)
+{
+    return Seed(servo, initial, now, confirmed, 1);
+}
+
 static int Same(const ServoGoal *a, const ServoGoal *b)
 {
     return a->id == b->id && a->zero_version == b->zero_version &&
            a->timeout_ms == b->timeout_ms && a->target_mdeg == b->target_mdeg &&
-           a->channel == b->channel && a->release_confirmed == b->release_confirmed;
+           a->channel == b->channel && a->release_confirmed == b->release_confirmed &&
+           a->speed_mdeg_s == b->speed_mdeg_s;
 }
 
-uint32_t Servo_Begin(Servo *servo, const ServoGoal *goal, uint32_t now)
+static uint32_t Begin(Servo *servo, const ServoGoal *goal, uint32_t now, uint8_t manual)
 {
     uint32_t result;
     if (!servo || !goal || !servo->guard)
@@ -100,23 +114,27 @@ uint32_t Servo_Begin(Servo *servo, const ServoGoal *goal, uint32_t now)
     if (!goal->id || goal->id < servo->goal.id)
         return SERVO_ID;
     if (goal->id == servo->goal.id)
-        return Same(goal, &servo->goal) ? MECH_OK : SERVO_ID;
+        return Same(goal, &servo->goal) && servo->manual == manual ? MECH_OK : SERVO_ID;
     if (Busy(servo))
         return SERVO_BUSY;
     if (servo->state == SERVO_FAILED || servo->state == SERVO_CANCELLED)
         return MECH_FAULT;
-    if (!Bounds(goal->channel, goal->target_mdeg) || goal->timeout_ms < 1000 || goal->timeout_ms > 30000)
+    if (!Bounds(goal->channel, goal->target_mdeg, manual) || goal->timeout_ms < 1000 ||
+        goal->timeout_ms > MECH_SERVO_TIMEOUT_MS ||
+        (goal->speed_mdeg_s && (goal->speed_mdeg_s < MECH_SERVO_SPEED_MIN ||
+                               goal->speed_mdeg_s > MECH_SERVO_SPEED_MAX)))
         return MECH_RANGE;
     if (goal->zero_version != servo->zero_version)
         return MECH_VERSION;
     if (!(servo->reference_mask & Bit(goal->channel)))
         return SERVO_REFERENCE;
-    result = Check(servo, goal->channel, now);
+    result = Check(servo, goal->channel, now, manual);
     if (result)
         return result;
     if (goal->channel == MECH_GRIP_CHANNEL && servo->hold_possible &&
         goal->target_mdeg != MECH_GRIP_MAX_MDEG && !goal->release_confirmed)
         return SERVO_HOLD;
+    servo->manual = manual;
     servo->goal = *goal;
     servo->started_ms = servo->last_step_ms = now;
     servo->state = SERVO_ACCEPTED;
@@ -126,6 +144,16 @@ uint32_t Servo_Begin(Servo *servo, const ServoGoal *goal, uint32_t now)
         servo->hold_possible = 1;
     /* 首个微步前可使用刚才核对的参考；从第一次输出起撤销该通道确认。 */
     return MECH_OK;
+}
+
+uint32_t Servo_Begin(Servo *servo, const ServoGoal *goal, uint32_t now)
+{
+    return Begin(servo, goal, now, 0);
+}
+
+uint32_t Servo_Manual(Servo *servo, const ServoGoal *goal, uint32_t now)
+{
+    return Begin(servo, goal, now, 1);
 }
 
 void Servo_Stop(Servo *servo, uint32_t reason, uint32_t now)
@@ -149,13 +177,13 @@ void Servo_Stop(Servo *servo, uint32_t reason, uint32_t now)
 void Servo_Poll(Servo *servo, uint32_t now, uint8_t base_stopped)
 {
     uint32_t result;
-    int32_t current, target, next;
+    int32_t current, target, next, step;
     uint8_t bit;
     uint8_t wait_stable = 0;
     if (!servo || !servo->guard || !Busy(servo))
         return;
     Mech_Poll(servo->guard, now, base_stopped);
-    result = Check(servo, servo->goal.channel, now);
+    result = Check(servo, servo->goal.channel, now, servo->manual);
     /* 部分新反馈尚未凑成稳定轮次时先暂停输出；真实轴运动不能等。 */
     if (result == MECH_UNSTABLE && !servo->guard->sample[0].value && !servo->guard->sample[4].value)
     {
@@ -163,7 +191,7 @@ void Servo_Poll(Servo *servo, uint32_t now, uint8_t base_stopped)
         result = MECH_OK;
     }
     if (!base_stopped || result || !servo->guard->zero_valid ||
-        (servo->goal.channel != MECH_GRIP_CHANNEL &&
+        (!servo->manual && servo->goal.channel != MECH_GRIP_CHANNEL &&
          (Mech_Position(servo->guard, 0) > MECH_CLEARANCE_UM ||
           Mech_Position(servo->guard, 1) > MECH_CLEARANCE_UM)))
     {
@@ -184,7 +212,7 @@ void Servo_Poll(Servo *servo, uint32_t now, uint8_t base_stopped)
     if (servo->state == SERVO_SETTLING)
     {
         if ((uint32_t)(now - servo->issued_ms) >= MECH_SERVO_WAIT_MS)
-            servo->state = SERVO_COMMAND_DONE;
+            servo->state = servo->manual ? SERVO_MANUAL_DONE : SERVO_COMMAND_DONE;
         return;
     }
     if (servo->state == SERVO_COMMAND_DONE)
@@ -195,13 +223,15 @@ void Servo_Poll(Servo *servo, uint32_t now, uint8_t base_stopped)
         return;
     current = servo->command_mdeg[servo->goal.channel - 1];
     target = servo->goal.target_mdeg;
+    step = servo->goal.speed_mdeg_s ?
+        (int32_t)(servo->goal.speed_mdeg_s * MECH_SERVO_STEP_MS / 1000U) : MECH_SERVO_STEP_MDEG;
     bit = Bit(servo->goal.channel);
     if (!(servo->output_mask & bit))
         next = current; /* 首次显式输出必须从已核对的初始参考起步。 */
     else if (current < target)
-        next = target - current > MECH_SERVO_STEP_MDEG ? current + MECH_SERVO_STEP_MDEG : target;
+        next = target - current > step ? current + step : target;
     else
-        next = current - target > MECH_SERVO_STEP_MDEG ? current - MECH_SERVO_STEP_MDEG : target;
+        next = current - target > step ? current - step : target;
     servo->pending.id = servo->goal.id;
     servo->pending.zero_version = servo->goal.zero_version;
     servo->pending.sequence = ++servo->output_sequence;
@@ -250,7 +280,7 @@ uint32_t Servo_Confirm(Servo *servo, const ServoEvidence *evidence, uint32_t now
 {
     if (servo && servo->guard)
         Servo_Poll(servo, now, servo->guard->base_stopped);
-    if (!servo || !evidence || servo->state != SERVO_COMMAND_DONE ||
+    if (!servo || !evidence || (servo->state != SERVO_COMMAND_DONE && servo->state != SERVO_MANUAL_DONE) ||
         evidence->boot != servo->boot || evidence->session != servo->session ||
         evidence->id != servo->goal.id || evidence->zero_version != servo->zero_version ||
         evidence->channel != servo->goal.channel || evidence->target_mdeg != servo->goal.target_mdeg ||
@@ -262,7 +292,7 @@ uint32_t Servo_Confirm(Servo *servo, const ServoEvidence *evidence, uint32_t now
         (servo->simulation ? evidence->kind != SERVO_MODEL :
          (evidence->kind != SERVO_MANUAL && evidence->kind != SERVO_VISION)))
         return SERVO_EVIDENCE;
-    if (Check(servo, servo->goal.channel, now))
+    if (Check(servo, servo->goal.channel, now, servo->manual))
         return SERVO_EVIDENCE;
     servo->evidence_sequence = evidence->sequence;
     servo->confirmation_kind = evidence->kind;

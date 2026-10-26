@@ -29,7 +29,7 @@ typedef struct
     uint32_t last_sequence[8], ack_barrier, zero_version;
     int32_t pulse_position[2], goal_pulses;
     int64_t before_actual, before_target, before_other, delta_raw, anchor[2];
-    uint8_t ack_seen, emitted, settled_samples, stop_sent_mask, stop_confirmed;
+    uint8_t ack_seen, emitted, settled_samples, stop_sent_mask, stop_confirmed, manual;
 } Axis;
 
 /* 无HAL、无Bus、无自动使能/PWM。仅产出意图，未来唯一设备所有者显式消费。
@@ -37,6 +37,8 @@ typedef struct
 void Axis_Init(Axis *axis, MechGuard *guard);
 uint32_t Axis_Begin(Axis *axis, const AxisGoal *goal, uint32_t now_ms,
                     uint8_t arm_known, int32_t arm_mdeg);
+/* 只允许由显式手动调试入口调用；不用于Pose自动过渡。 */
+uint32_t Axis_Manual(Axis *axis, const AxisGoal *goal, uint32_t now_ms);
 uint8_t Axis_Take(Axis *axis, BusFrame frames[2], uint32_t now_ms);
 void Axis_Sent(Axis *axis, uint32_t id, uint8_t tx_ok, uint32_t now_ms);
 void Axis_Ack(Axis *axis, const MotorReply *reply, uint32_t now_ms);

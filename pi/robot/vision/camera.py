@@ -6,6 +6,7 @@ import hashlib
 import json
 import threading
 import time
+import uuid
 from pathlib import Path
 
 from .observe import Detector, ROOT
@@ -88,6 +89,7 @@ def create_app(config=None):
     captures = {role: Capture(settings[role], settings['resolution']) for role in ('material', 'qr')}
     detector = Detector()
     detect_lock = threading.Lock()
+    stream_id = uuid.uuid4().hex
 
     @asynccontextmanager
     async def lifespan(app):
@@ -112,7 +114,8 @@ def create_app(config=None):
             except ValueError as error:
                 devices[role] = dict(available=False, reason=str(error))
         return dict(available=any(v['available'] for v in devices.values()), cameras=devices,
-                    motion_authority=False, timestamp_kind='主机读取完成时刻；非曝光时刻')
+                    stream_id=stream_id, motion_authority=False,
+                    timestamp_kind='主机读取完成时刻；非曝光时刻')
 
     def read(role):
         if role not in captures:
@@ -137,9 +140,15 @@ def create_app(config=None):
         ok, image = cv2.imencode('.jpg', frame)
         if not ok:
             raise HTTPException(503, '图像编码失败')
+        encoded = 'data:image/jpeg;base64,' + base64.b64encode(image).decode()
+        age = time.monotonic() - stamp
+        if age > .25:
+            raise HTTPException(503, '图像编码后已过期')
         # 图像与叠加绑定同一帧，避免预览和识别各拉一张产生错位。
         return dict(result, domain='camera_live', camera=role, frame_id=sequence,
-                    age_ms=round(age*1000, 1), image='data:image/jpeg;base64,' + base64.b64encode(image).decode())
+                    stream_id=stream_id, captured_s=stamp, processed_s=time.monotonic(),
+                    timestamp_kind='host_read_complete_monotonic',
+                    age_ms=round(age*1000, 1), image=encoded)
 
     @app.get('/frame')
     def frame(role: str = 'material'):

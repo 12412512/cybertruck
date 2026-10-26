@@ -43,6 +43,7 @@ void Bus_Observe(void (*receive)(const BusFrame *frame))
 /* finite_owned直到人工确认后的BusRearm才清除；不能中途换地址或续发运动。 */
 static uint8_t finite_owned, finite_pending, finite_wheel;
 static uint8_t mech_watch;
+static uint8_t mech_group_grant;
 static uint8_t finite_address[4], finite_dir[4];
 static uint16_t finite_rpm;
 static uint32_t finite_pulses[4];
@@ -60,6 +61,7 @@ static void Depth(void)
 }
 static void ClearMotion(void)
 {
+    mech_group_grant = 0;
     latest = 0;
     batch = 0;
     batch_wheel = 0;
@@ -111,6 +113,16 @@ uint8_t Bus_MechDone(void)
         cancelling || bus_diag.pending_stop_count || finite_owned)
         return 0;
     bus_diag.motion_uncertain = 0;
+    mech_group_grant = 0;
+    return 1;
+}
+uint8_t Bus_MechGroup(uint8_t axes)
+{
+    if (axes > 3 || can_diag.errors || can_diag.rx_overflow || bus_diag.rx_overflow ||
+        bus_diag.error || bus_diag.locked || bus_diag.active || finite_owned ||
+        bus_diag.motion_uncertain || bus_diag.pending_stop_count || batch || latest)
+        return 0;
+    mech_group_grant = axes;
     return 1;
 }
 static void Fault(uint32_t error)
@@ -257,7 +269,8 @@ void Bus_Stop(void)
 }
 int Bus_Rearm(void)
 {
-    if (bus_diag.active || batch || latest || bus_diag.pending_stop_count || cancelling || diagnostic_owner ||
+    if ((bus_diag.error & ~BUS_ERROR_STOP) || can_diag.errors || can_diag.rx_overflow || bus_diag.rx_overflow ||
+        bus_diag.active || batch || latest || bus_diag.pending_stop_count || cancelling || diagnostic_owner ||
         job || can_diag.tx_pending || can_diag.tx_isolated || can_diag.free_mailboxes != 3 ||
         Can_Status() == CAN_BUSY || Can_Status() == CAN_CANCELLING)
     {
@@ -282,7 +295,7 @@ int Bus_Rearm(void)
 }
 uint8_t Bus_Send(const BusFrame *frames, uint8_t count)
 {
-    uint8_t i, stop, move, enable;
+    uint8_t i, stop, move, enable, group_bit = 0;
     if (!frames || !count || count > 2)
     {
         bus_diag.rejected++;
@@ -303,6 +316,8 @@ uint8_t Bus_Send(const BusFrame *frames, uint8_t count)
         return 0;
     }
     move = (uint8_t)(frames[0].data[0] == 0xF6 || frames[0].data[0] == 0xFD);
+    if (frames[0].data[0] == 0xFD && count == 2 && (frames[0].id >> 8) >= 5 && (frames[0].id >> 8) <= 6)
+        group_bit = (uint8_t)(mech_group_grant & (1U << ((frames[0].id >> 8) - 5)));
     enable = (uint8_t)(frames[0].data[0] == 0xF3 && frames[0].len > 2 && frames[0].data[2]);
     if (!stop && (diagnostic_owner || diagnostic_pending || bus_diag.active || batch || job || cancelling ||
                   bus_diag.pending_stop_count))
@@ -310,7 +325,8 @@ uint8_t Bus_Send(const BusFrame *frames, uint8_t count)
         bus_diag.rejected++;
         return 0;
     }
-    if ((move || enable) && (bus_diag.motion_uncertain || bus_diag.locked || finite_owned))
+    if ((move || enable) && ((bus_diag.motion_uncertain && !group_bit) || bus_diag.locked || finite_owned ||
+                            (mech_group_grant && !group_bit)))
     {
         bus_diag.rejected++;
         return 0;
@@ -325,7 +341,10 @@ uint8_t Bus_Send(const BusFrame *frames, uint8_t count)
     diagnostic_pending = (uint8_t)!stop;
     diagnostic_state = CAN_BUSY;
     if (move)
+    {
         bus_diag.motion_uncertain = 1;
+        mech_group_grant &= (uint8_t)~group_bit;
+    }
     if (stop)
     {
         stop_address = (uint8_t)(frames[0].id >> 8);
@@ -675,14 +694,21 @@ static void Complete(uint32_t now)
 }
 static void CheckErrors(void)
 {
-    if ((bus_diag.active || finite_owned || job) &&
-        (can_diag.errors != seen_errors || can_diag.rx_overflow != seen_overflow))
+    /* 每个计数只取一次；取消过程中新增的中断事件留给下一轮，不能记作已检查。 */
+    uint32_t errors = can_diag.errors, overflow = can_diag.rx_overflow;
+    uint32_t changed = 0;
+    if (errors != seen_errors)
+        changed |= BUS_ERROR_CAN;
+    if (overflow != seen_overflow)
+        changed |= BUS_ERROR_RX;
+    if ((bus_diag.active || finite_owned || job) && changed)
     {
-        Fault(can_diag.errors != seen_errors ? BUS_ERROR_CAN : BUS_ERROR_RX);
+        /* 同轮发送错误与接收溢出分别保留，不能用二选一丢失原因。 */
+        Fault(changed);
         Bus_Cancel();
     }
-    seen_errors = can_diag.errors;
-    seen_overflow = can_diag.rx_overflow;
+    seen_errors = errors;
+    seen_overflow = overflow;
 }
 void Bus_Poll(void)
 {

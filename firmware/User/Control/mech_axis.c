@@ -59,8 +59,8 @@ static int Same(const AxisGoal *first, const AxisGoal *second)
            first->rpm == second->rpm && first->axis == second->axis;
 }
 
-uint32_t Axis_Begin(Axis *axis, const AxisGoal *goal, uint32_t now,
-                    uint8_t arm_known, int32_t arm_mdeg)
+static uint32_t Begin(Axis *axis, const AxisGoal *goal, uint32_t now,
+                      uint8_t arm_known, int32_t arm_mdeg, uint8_t manual)
 {
     MechGuard *guard;
     uint32_t result;
@@ -73,14 +73,14 @@ uint32_t Axis_Begin(Axis *axis, const AxisGoal *goal, uint32_t now,
         return AXIS_ID;
     /* 相同动作只返回原状态；冲突或旧ID拒绝，绝不重新发FD。 */
     if (goal->id == axis->goal.id)
-        return Same(goal, &axis->goal) ? MECH_OK : AXIS_ID;
+        return Same(goal, &axis->goal) && axis->manual == manual ? MECH_OK : AXIS_ID;
     if (Busy(axis))
         return AXIS_BUSY;
-    if (!goal->rpm || goal->rpm > MECH_AXIS_MAX_RPM || goal->timeout_ms < 500 ||
-        goal->timeout_ms > 15000)
+    if (!goal->rpm || goal->rpm > (manual ? MECH_MANUAL_MAX_RPM : MECH_AXIS_MAX_RPM) ||
+        goal->timeout_ms < 500 || goal->timeout_ms > (manual ? MECH_MANUAL_TIMEOUT_MS : 15000U))
         return MECH_RANGE;
-    result = Mech_CheckAxis(guard, now, goal->zero_version, goal->axis, goal->target_um,
-                            arm_known, arm_mdeg);
+    result = manual ? Mech_AxisManual(guard, now, goal->zero_version, goal->axis, goal->target_um) :
+        Mech_CheckAxis(guard, now, goal->zero_version, goal->axis, goal->target_um, arm_known, arm_mdeg);
     if (result)
         return result;
     if (axis->zero_version != guard->zero_version)
@@ -95,10 +95,16 @@ uint32_t Axis_Begin(Axis *axis, const AxisGoal *goal, uint32_t now,
         Fail(axis, AXIS_TARGET, now);
         return AXIS_TARGET;
     }
-    pulses = (int32_t)Mech_Pulses(goal->axis, goal->target_um);
+    uint32_t converted = manual ? Mech_ManualPulses(goal->axis, goal->target_um) :
+                                 Mech_Pulses(goal->axis, goal->target_um);
+    if (converted > INT32_MAX || Abs(guard->zero_target[goal->axis] + sign * Raw((int32_t)converted)) > UINT32_MAX)
+        return MECH_RANGE;
+    pulses = (int32_t)converted;
     difference = pulses - axis->pulse_position[goal->axis];
     if (!difference)
         return MECH_RANGE;
+    axis->manual = manual;
+    guard->manual_range = manual;
     axis->goal = *goal;
     axis->goal_pulses = pulses;
     axis->delta_raw = sign * Raw(difference);
@@ -115,6 +121,17 @@ uint32_t Axis_Begin(Axis *axis, const AxisGoal *goal, uint32_t now,
     axis->state = AXIS_ACCEPTED;
     Barrier(axis);
     return MECH_OK;
+}
+
+uint32_t Axis_Begin(Axis *axis, const AxisGoal *goal, uint32_t now,
+                    uint8_t arm_known, int32_t arm_mdeg)
+{
+    return Begin(axis, goal, now, arm_known, arm_mdeg, 0);
+}
+
+uint32_t Axis_Manual(Axis *axis, const AxisGoal *goal, uint32_t now)
+{
+    return Begin(axis, goal, now, 0, 0, 1);
 }
 
 uint8_t Axis_Take(Axis *axis, BusFrame frames[2], uint32_t now)
@@ -266,16 +283,19 @@ void Axis_Poll(Axis *axis, uint32_t now, uint8_t base_stopped)
     if (axis->state < AXIS_RUNNING)
     {
         if (axis->state == AXIS_ACCEPTED &&
-            (guard->sample[0].value || guard->sample[4].value ||
+            (guard->sample[axis->goal.axis * 4].value ||
+             (!(guard->concurrent_axes & (1U << (1U - axis->goal.axis))) && guard->sample[(1U - axis->goal.axis) * 4].value) ||
              Abs(guard->sample[axis->goal.axis * 4 + 1].value - axis->before_actual) > MECH_STABLE_RAW ||
              Abs(guard->sample[axis->goal.axis * 4 + 3].value - axis->before_target) > MECH_AXIS_TARGET_RAW ||
-             Abs(guard->sample[(1U - axis->goal.axis) * 4 + 1].value - axis->before_other) > MECH_AXIS_OTHER_RAW))
+             (!(guard->concurrent_axes & (1U << (1U - axis->goal.axis))) &&
+              Abs(guard->sample[(1U - axis->goal.axis) * 4 + 1].value - axis->before_other) > MECH_AXIS_OTHER_RAW)))
             Fail(axis, AXIS_TARGET, now);
         return;
     }
     moving = axis->goal.axis * 4;
     other = (1U - axis->goal.axis) * 4;
-    if (guard->sample[other].value || Abs(guard->sample[other + 1].value - axis->before_other) > MECH_AXIS_OTHER_RAW)
+    if (!(guard->concurrent_axes & (1U << (1U - axis->goal.axis))) &&
+        (guard->sample[other].value || Abs(guard->sample[other + 1].value - axis->before_other) > MECH_AXIS_OTHER_RAW))
         Fail(axis, AXIS_OTHER, now);
     else if (!axis->ack_seen && (uint32_t)(now - axis->sent_ms) >= MECH_AXIS_ACK_MS)
         Fail(axis, AXIS_ACK, now);
@@ -285,7 +305,8 @@ void Axis_Poll(Axis *axis, uint32_t now, uint8_t base_stopped)
         tolerance = (MECH_FEEDBACK_TOL_UM * (int64_t)MECH_RAW_PER_320 +
                      (axis->goal.axis ? MECH_REACH_UM_PER_320 : MECH_LIFT_UM_PER_320) - 1) /
                     (axis->goal.axis ? MECH_REACH_UM_PER_320 : MECH_LIFT_UM_PER_320);
-        if (Abs(guard->sample[moving].value) > MECH_AXIS_SPEED_LIMIT ||
+        int64_t speed_limit = axis->manual ? axis->goal.rpm + axis->goal.rpm / 5U + 3U : MECH_AXIS_SPEED_LIMIT;
+        if (Abs(guard->sample[moving].value) > speed_limit ||
             Abs(traveled) > Abs(axis->delta_raw) + tolerance ||
             traveled * (axis->delta_raw > 0 ? 1 : -1) < -MECH_AXIS_REVERSE_RAW)
             Fail(axis, AXIS_REVERSE, now);

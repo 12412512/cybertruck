@@ -11,6 +11,32 @@ from pyocd.core.target import Target
 ROOT=Path(__file__).resolve().parents[1]
 
 
+def layout_type(die):
+    """返回真实类型大小和数组标志；数组缺byte_size时不能误用单元素大小。"""
+    if die.tag == 'DW_TAG_array_type':
+        item_size, _ = layout_type(die.get_DIE_from_attribute('DW_AT_type'))
+        count = 1
+        dimensions = 0
+        for bound in die.iter_children():
+            if bound.tag != 'DW_TAG_subrange_type':
+                continue
+            dimensions += 1
+            values = bound.attributes
+            if 'DW_AT_count' in values:
+                count *= values['DW_AT_count'].value
+            elif 'DW_AT_upper_bound' in values:
+                lower = values['DW_AT_lower_bound'].value if 'DW_AT_lower_bound' in values else 0
+                count *= values['DW_AT_upper_bound'].value - lower + 1
+            else:
+                raise ValueError('数组缺少长度，拒绝猜测布局')
+        if not dimensions:
+            raise ValueError('数组缺少维度，拒绝猜测布局')
+        return item_size * count, True
+    if 'DW_AT_type' in die.attributes and 'DW_AT_byte_size' not in die.attributes:
+        return layout_type(die.get_DIE_from_attribute('DW_AT_type'))
+    return die.attributes['DW_AT_byte_size'].value, False
+
+
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--manifest',type=Path,required=True)
@@ -45,10 +71,8 @@ def main():
                 for member in kind.iter_children():
                     if member.tag!='DW_TAG_member':continue
                     typ=member.get_DIE_from_attribute('DW_AT_type')
-                    while 'DW_AT_byte_size' not in typ.attributes and 'DW_AT_type' in typ.attributes:
-                        typ=typ.get_DIE_from_attribute('DW_AT_type')
-                    if 'DW_AT_byte_size' not in typ.attributes:continue
-                    fields[member.attributes['DW_AT_name'].value.decode()]=dict(offset=member.attributes['DW_AT_data_member_location'].value,size=typ.attributes['DW_AT_byte_size'].value)
+                    size, is_array = layout_type(typ)
+                    fields[member.attributes['DW_AT_name'].value.decode()]=dict(offset=member.attributes['DW_AT_data_member_location'].value,size=size,array=is_array)
                 layouts[name]=fields
         wheel_symbol=max(table.get_symbol_by_name('wheels'),key=lambda s:s['st_size'])
         wheel_address=wheel_symbol['st_value'];wheel_stride=wheel_symbol['st_size']//4
@@ -64,7 +88,7 @@ def main():
         def fields(address,layout):
             result={}
             for name,item in layout.items():
-                if item['size'] in (1,2,4,8):
+                if item['size'] in (1,2,4,8) and not item.get('array'):
                     result[name]=int.from_bytes(bytes(target.read_memory_block8(address+item['offset'],item['size'])),'little')
             return result
         start=time.monotonic()

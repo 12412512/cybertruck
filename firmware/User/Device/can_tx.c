@@ -472,7 +472,8 @@ void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *h)
 }
 static void CanTxDone(CAN_HandleTypeDef *h, uint32_t mailbox, uint8_t bad)
 {
-    if (h != &board_can || tx_state != CAN_BUSY || !tx_pending || tx_mailbox != mailbox)
+    /* 错误已锁定时，迟到完成回调不得发布成功序号或DONE历史。 */
+    if (h != &board_can || tx_state != CAN_BUSY || !tx_pending || tx_mailbox != mailbox || tx_bad)
         return;
     if (bad)
         tx_bad = 1;

@@ -13,6 +13,8 @@ import time
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from .device.mechanism import MechanismLink
+from .device.mech_sequence import Sequence, record as sequence_record
+from .device.recovery import Recovery
 from .runtime import ProcessLock
 
 
@@ -39,6 +41,10 @@ class DeviceCore:
         self.site_ready = site_ready
         self.pose_path = Path(runtime) / 'physical_poses.json' if runtime else None
         self.poses = []
+        self.sequence = Sequence()
+        self.recovery = Recovery(runtime)
+        self.sequence_path = Path(runtime)/'physical_sequences.json' if runtime else None
+        self.sequences = json.loads(self.sequence_path.read_text(encoding='utf-8')) if self.sequence_path and self.sequence_path.exists() else []
         if self.pose_path and self.pose_path.exists():
             self.poses = json.loads(self.pose_path.read_text(encoding='utf-8'))
 
@@ -47,6 +53,15 @@ class DeviceCore:
         with self.lock:
             if self.token and now >= self.until:
                 self.stop_control('控制权租约过期；动作锁定，只读反馈保留', 'lease-expired', self.owner)
+            try:
+                error = self.recovery.advance(self,now)
+            except (OSError, ValueError) as exc:
+                self.recovery.status = 'FAILED'
+                error = self.recovery.reason = f'恢复归档/校验失败，保持停止：{exc}'
+            if not error:
+                error = self.sequence.advance(self.link,now)
+            if error:
+                self.stop_control(error,'program-failed',self.owner)
             wire = self.link.step(now)
         if wire:
             written = transport.write(wire)
@@ -60,12 +75,16 @@ class DeviceCore:
     def state(self):
         with self.lock:
             return dict(self.link.view(self.clock()), owner=self.owner, poses=self.poses, site_ready=self.site_ready,
+                        sequences=self.sequences, sequence=self.sequence.view(),
+                        recovery=self.recovery.view(),
                         safety_events=list(self.safety_events),
                         lease_remaining_s=max(0., self.until-self.clock()) if self.token else 0.)
 
     def stop_control(self, reason, source, client):
         """由核心锁保护；不记录控制令牌，停止后仍由唯一串口读取反馈。"""
         self.link.emergency(reason)
+        self.sequence.cancel(reason)
+        self.recovery.cancel(reason)
         self.owner = self.token = ''
         self.until = 0.
         self.safety_events.append(dict(at_s=self.clock(), wall_s=time.time(),
@@ -93,7 +112,7 @@ class DeviceCore:
             if value.op == 'observe':
                 # 诊断附着不取得运动租约；浏览器关闭后由唯一核心继续保活与只读轮询。
                 if (self.site_ready or self.token or value.token or value.args or
-                        self.link.firmware not in ('GC-BASE-0.3.23', 'GC-BASE-0.3.24', 'GC-BASE-0.3.25')):
+                        self.link.firmware not in ('GC-BASE-0.3.23', 'GC-BASE-0.3.24', 'GC-BASE-0.3.25', 'GC-BASE-0.3.26', 'GC-BASE-0.3.27', 'GC-BASE-0.3.28', 'GC-BASE-0.3.29', 'GC-BASE-0.3.30', 'GC-BASE-0.3.31', 'GC-BASE-0.3.32', 'GC-BASE-0.3.33', 'GC-BASE-0.3.34')):
                     raise ValueError('只读附着要求独立只读模式、无人持有控制权且无附加参数')
                 key = ('readonly:' + value.client, value.request_id)
                 encoded = value.model_dump_json()
@@ -107,6 +126,38 @@ class DeviceCore:
                 while len(self.cache) > 100:
                     self.cache.popitem(last=False)
                 return result
+            if value.op == 'prepare':
+                if not self.site_ready or self.token or value.token:
+                    raise ValueError('重新准备要求现场许可且无人持有控制权')
+                key = ('prepare:' + str(self.link.boot) + ':' + value.client, value.request_id)
+                encoded = value.model_dump_json()
+                if key in self.cache:
+                    previous, result = self.cache[key]
+                    if previous != encoded:
+                        raise ValueError('相同准备请求ID内容发生变化')
+                    return result
+                result = self.link.prepare(value.request_id, value.args, now)
+                self.cache[key] = (encoded, result)
+                while len(self.cache) > 100:
+                    self.cache.popitem(last=False)
+                return result
+            if value.op == 'recover':
+                if not self.site_ready or self.token or value.token:
+                    raise ValueError('故障恢复需要现场许可且无人持有控制权')
+                key = ('recover:'+value.client, value.request_id)
+                encoded = value.model_dump_json()
+                if key in self.cache:
+                    old, result = self.cache[key]
+                    if old != encoded:
+                        raise ValueError('相同恢复请求内容变化')
+                    return result
+                self.recovery.start(self.link, value.args, now)
+                self.cache[key] = (encoded, dict(status='RECOVERY_STARTED',domain='physical',action_sent=False))
+                while len(self.cache)>100:
+                    self.cache.popitem(last=False)
+                return self.cache[key][1]
+            if self.recovery.active:
+                raise ValueError('正在归档和恢复；请等待结果，可停止取消')
             if value.op == 'claim':
                 if self.token and now < self.until and (value.client != self.owner or value.token != self.token):
                     raise ValueError('另一浏览器持有实车控制权')
@@ -135,9 +186,30 @@ class DeviceCore:
                 return result
             args = dict(value.args)
             action = args.pop('action', '')
-            if not self.site_ready and action not in ('teach', 'attach', 'invalidate'):
+            if self.sequence.status=='RUNNING':
+                raise ValueError('联调执行中，禁止插入单项、改模式或重复执行；可停止整组')
+            if not self.site_ready and action not in ('teach', 'program_save', 'attach', 'invalidate'):
                 raise ValueError('本次烧录后尚未确认实车条件；设备核心保持只读，不使能/PWM')
-            if action == 'teach':
+            if action == 'program_save':
+                name=args.get('id','')
+                revision=1+max((r['revision'] for r in self.sequences if r['id']==name),default=0)
+                saved=sequence_record(name,args.get('rows'),revision)
+                from .device.mechanism import payload
+                from .device.mech_sequence import groups
+                for stage in groups(saved['rows']):
+                    payload('group',dict(members=stage['members']),{},1)
+                self.sequences.append(saved)
+                if self.sequence_path:
+                    from .workbench.storage import write_json
+                    write_json(self.sequence_path,self.sequences)
+                result=dict(status='SAVED_DRAFT',revision=revision,domain='physical_draft')
+            elif action == 'program_run':
+                saved=next((r for r in self.sequences if r['id']==args.get('id') and r['revision']==args.get('revision')),None)
+                if saved is None:
+                    raise ValueError('联调表版本不存在，先保存')
+                self.sequence.start(saved,args.get('mode','ordered'),self.link,now)
+                result=dict(status='PROGRAM_STARTED',domain='physical',action_sent=False)
+            elif action == 'teach':
                 pose_id = args.get('pose_id', '')
                 if not pose_id or len(pose_id) > 48 or not all(c.isalnum() or c == '_' for c in pose_id):
                     raise ValueError('实车姿态编号无效')
@@ -230,7 +302,7 @@ def main():
     parser.add_argument('--runtime', type=Path, default=Path('output/runtime'))
     parser.add_argument('--port', type=int, default=8091)
     parser.add_argument('--site-ready', action='store_true', help='仅本次烧录后用户明确确认现场才可设置')
-    parser.add_argument('--mechanism-commissioning', action='store_true', help='显式开放0.3.24机械调试，仍检查故障、反馈、零点和互锁')
+    parser.add_argument('--mechanism-commissioning', action='store_true', help='显式开放兼容固件的机械调试，仍检查故障、反馈、零点和范围')
     args = parser.parse_args()
     if args.mechanism_commissioning and not args.site_ready:
         parser.error('机械调试模式必须同时确认本次现场条件')

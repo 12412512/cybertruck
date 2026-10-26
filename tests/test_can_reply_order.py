@@ -32,6 +32,33 @@ class CanReplyOrderTests(unittest.TestCase):
     def test_real_error_during_receive_cannot_complete_current_query(self): self.run_case(6)
     def test_ring_overflow_during_receive_cannot_complete_current_query(self): self.run_case(7)
 
+    def test_error_then_late_complete_never_publishes_success(self): self.run_case(12)
+    def test_simultaneous_can_and_rx_errors_preserve_both_causes(self): self.run_case(13)
+
+    def test_id6_target_query_reply_order_and_real_error_lock(self):
+        for case in range(8, 12):
+            with self.subTest(case=case): self.run_case(case)
+
+    def test_old_fault_evidence_paths_fail_new_cases(self):
+        device = self.device
+        with tempfile.TemporaryDirectory(dir=ROOT / 'output/tests') as folder:
+            folder = Path(folder)
+            for case in (12, 13):
+                can = (device / 'can_tx.c').read_text(encoding='utf-8')
+                bus = (device / 'bus.c').read_text(encoding='utf-8')
+                if case == 12:
+                    can = can.replace('tx_mailbox != mailbox || tx_bad)', 'tx_mailbox != mailbox)')
+                else:
+                    bus = bus.replace('Fault(changed);', 'Fault(errors != seen_errors ? BUS_ERROR_CAN : BUS_ERROR_RX);')
+                cpath, bpath = folder / 'can.c', folder / 'bus.c'
+                cpath.write_text(can, encoding='utf-8')
+                bpath.write_text(bus, encoding='utf-8')
+                binary = folder / 'old.exe'
+                compile_c(binary, [ROOT / 'tests/can_reply_order.c', cpath, bpath, device / 'drive.c'],
+                          extra=['-I', str(ROOT / 'tests'), '-include', str(ROOT / 'tests/can_hal_stub.h')])
+                result = subprocess.run([str(binary), str(case)], capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+
     def test_previous_receive_guard_window_is_detected(self):
         source = (self.device / 'bus.c').read_text(encoding='utf-8')
         old = source.replace('    /* RX搬运/观察回调期间也可能进错误中断；本轮不得先报告完成。 */\n'

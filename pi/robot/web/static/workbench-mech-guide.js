@@ -2,7 +2,7 @@
 export const names = {lift:'升降',reach:'伸缩',arm:'转臂',tray:'料盘',gripper:'夹爪'};
 const states = {
     axis:['空闲','已接受','发送中','运行中','稳定确认','停止中','完成','失败','取消'],
-    servo:['空闲','已接受','缓动','等待输出','命令稳定等待','等待人工姿态确认','已确认','失败','取消'],
+    servo:['空闲','已接受','缓动','等待输出','命令稳定等待','等待人工姿态确认','已确认','失败','取消','命令完成 · 实际未确认'],
     pose:['空闲','已接受','执行中','等待舵机确认','等待单步放行','停止中','完成','失败','取消']
 };
 export function stateName(kind,value) { return states[kind]?.[value] ?? '未知'; }
@@ -30,9 +30,10 @@ export function canAct(state,owned,pending,action) {
     if (!state.base?.stopped || !m.base_stopped || !m.attached) return false;
     if (m.config_mask!==3) return false;
     if (!action.startsWith('enable') && action!=='zero' && !m.zero_valid) return false;
+    if (state.manual_debug && (action==='pose' || action==='next')) return false;
     if (action==='pose' && m.pwm_mask!==7) return false;
     if (action==='next') return m.pose_state===4;
-    if (action==='confirm') return m.servo_state===5;
+    if (action==='confirm') return [5,9].includes(m.servo_state);
     return !((m.axis_state>=1&&m.axis_state<=5)||(m.servo_state>=1&&m.servo_state<=5)||(m.pose_state>=1&&m.pose_state<=5));
 }
 export function targetError(axis,value) {

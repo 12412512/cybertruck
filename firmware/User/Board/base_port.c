@@ -1,12 +1,14 @@
 #include "base_port.h"
 #include "exec.h"
 #include "bus_internal.h"
+#include "bus_config.h"
 #include "port.h"
 #include "comm.h"
 #include "execute.h"
 #include "addresses.h"
 #include "can.h"
 #include "mech_port.h"
+#include "mech_guard.h"
 #include "start.h"
 #include "gpio.h"
 #include <math.h>
@@ -18,12 +20,16 @@ static Start start_key;
 static Select zone_switch;
 static ExecGate start_failure;
 static uint32_t diag_busy, query_index, query_ms, enable_sent;
+static uint8_t query_slot;
 static uint32_t zero_sequence, zero_action, zero_id;
 static uint32_t stop_barrier, stable_tick;
 static int64_t stable_position[4];
 static ImuSample gyro;
 static const uint8_t addresses[4] = BASE_SAFE_ADDRESSES;
 static uint32_t startup_pending, startup_ms;
+static uint32_t recovery_started, recovery_version;
+static uint32_t recovery_token;
+static uint8_t recovery_pending;
 typedef char ExecConfigSize[(sizeof(ExecConfig) == 52) ? 1 : -1];
 typedef char ExecGoalSize[(sizeof(TrackGoal) == 96) ? 1 : -1];
 
@@ -160,10 +166,26 @@ static int Stopped(uint32_t since)
 
 static void StopCommand(uint32_t reason, uint32_t now)
 {
+    recovery_pending = 0; /* 明确STOP可取消尚未执行的重启。 */
     Start_Cancel(&start_key);
     HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
     MechPort_Stop(reason, now);
     Exec_Stop(&executor, reason, now);
+}
+
+static void Recover_Run(uint32_t now)
+{
+    if (recovery_pending && (uint32_t)(now - recovery_started) >= 250)
+    {
+        /* 给ACK及停车留出时间；新反馈仍静止才执行一次系统复位。 */
+        if (Stopped(stop_barrier) && MechPort_CanReset(now, recovery_version))
+        {
+            recovery_pending = 0;
+            NVIC_SystemReset();
+        }
+        else if ((uint32_t)(now - recovery_started) >= 2000)
+            recovery_pending = 0;
+    }
 }
 
 static uint8_t Command(uint8_t type, const uint8_t *data, uint16_t size, uint8_t *reply, uint16_t *reply_size,
@@ -172,6 +194,36 @@ static uint8_t Command(uint8_t type, const uint8_t *data, uint16_t size, uint8_t
     uint32_t configured = executor.config.version;
     Select_Run(&zone_switch, now, HAL_GPIO_ReadPin(ZONE_SWITCH_GPIO_Port, ZONE_SWITCH_Pin) == GPIO_PIN_SET);
     Start_Check(&start_key, &zone_switch, now);
+    if (type == 65)
+    {
+        uint32_t result = MECH_OK;
+        if (size != 16 || !Frame_Get(data, 4) || Frame_Get(data, 4) <= recovery_token ||
+            Frame_Get(data + 4, 4) != 0x52454356UL ||
+            Frame_Get(data + 8, 4) != 7)
+            return COMM_FORMAT;
+        if (recovery_pending || executor.mode == EXEC_ACTIVE || executor.mode == EXEC_ARMING ||
+            executor.mode == EXEC_READY || !executor.stop_confirmed || !Stopped(stop_barrier) ||
+            !MechPort_CanReset(now, (uint32_t)Frame_Get(data + 12, 4)))
+            result = MECH_UNSTABLE;
+        else
+        {
+            StopCommand(MECH_MANUAL, now);
+            if (!MechPort_PwmOff())
+                result = MECH_FAULT;
+            else
+            {
+                recovery_version = (uint32_t)Frame_Get(data + 12, 4);
+                recovery_token = (uint32_t)Frame_Get(data, 4);
+                recovery_started = now;
+                recovery_pending = 1;
+            }
+        }
+        Frame_Put(reply, result, 4);
+        *reply_size = 4;
+        return COMM_OK;
+    }
+    if (recovery_pending && type != EXEC_STATE && type != 58 && type != 64 && type != 68 && type != 36 && type != 38)
+        return COMM_BUSY;
     if (type == EXEC_ARM && (start_key.phase != START_FIRED ||
         start_key.version != configured || start_key.boot != Comm_Boot() ||
         start_key.session != Comm_Session() ||
@@ -228,10 +280,18 @@ static uint8_t Command(uint8_t type, const uint8_t *data, uint16_t size, uint8_t
         *reply_size = 108;
         return COMM_OK;
     }
-    if (type >= 48 && type <= 58)
+    if ((type >= 48 && type <= 58) || (type >= 61 && type <= 64) || (type >= 66 && type <= 68))
     {
-        if (type != 58 && (startup_pending || executor.mode == EXEC_ACTIVE ||
+        if (type != 58 && type != 64 && type != 68 && (startup_pending || executor.mode == EXEC_ACTIVE ||
                            executor.mode == EXEC_ARMING || executor.mode == EXEC_READY))
+            return COMM_BUSY;
+        if (type == 61 && Fault())
+        {
+            Frame_Put(reply, MECH_FAULT, 4);
+            *reply_size = 4;
+            return COMM_OK;
+        }
+        if (type == 61 && (!executor.stop_confirmed || !Stopped(stop_barrier)))
             return COMM_BUSY;
         uint8_t mech_result = MechPort_Command(type, data, size, reply, reply_size, now);
         if (Bus_Status() == CAN_BUSY)
@@ -268,6 +328,9 @@ void Base_Init(void)
     CAN_FilterTypeDef filter = {0};
     ExecIo io = {Ready, EnableWheel, Bus_Start, Send, Stop, Fault, Stopped, Rearm};
     CommHooks hooks = {StopCommand, Command};
+    query_slot = 0;
+    recovery_pending = 0;
+    recovery_token = 0;
     Exec_Init(&executor, io);
     Start_Init(&start_key);
     Select_Init(&zone_switch, HAL_GetTick(),
@@ -303,9 +366,15 @@ static void Query(uint32_t now)
     BusFrame frames[2];
     uint8_t count;
     const uint8_t kinds[3] = {0x35, 0x36, 0x3A};
-    static uint8_t mech_turn;
+    /* 12项轮反馈与8项轴反馈按3:2分配；不因拒收或冷却跳过任何项。 */
+    static const uint8_t mech_slots[5] = {0, 1, 0, 1, 0};
+    /* 启动STOP由Bus立即调度；准备期只延后新查询，不清故障、不提前准许动作。 */
+    if (startup_pending && (uint32_t)(now - startup_ms) < BUS_STARTUP_SETTLE_MS)
+    {
+        return;
+    }
     if (diag_busy || executor.mode == EXEC_READY ||
-        executor.mode == EXEC_ACTIVE || (uint32_t)(now - query_ms) < 5)
+        executor.mode == EXEC_ACTIVE || (uint32_t)(now - query_ms) < BUS_QUERY_INTERVAL_MS)
     {
         return;
     }
@@ -320,14 +389,15 @@ static void Query(uint32_t now)
                 MechPort_Sent(0, now);
             return;
         }
-        mech_turn ^= 1;
-        if (mech_turn)
+        if (mech_slots[query_slot])
         {
             count = MechPort_Query(frames, now);
             if (count && Bus_Send(frames, count))
             {
+                MechPort_QueryAccept();
                 diag_busy = 1;
                 query_ms = now;
+                query_slot = (uint8_t)((query_slot + 1U) % 5U);
             }
             return;
         }
@@ -338,6 +408,8 @@ static void Query(uint32_t now)
         diag_busy = 1;
         query_index = (query_index + 1) % 12;
         query_ms = now;
+        if (MechPort_Owned())
+            query_slot = (uint8_t)((query_slot + 1U) % 5U);
     }
 }
 
@@ -352,10 +424,17 @@ void Base_Run(void)
     unsigned index, kind;
     Bus_Poll();
     now = HAL_GetTick();
+    /* 准备期只是延后查询；STOP或接收期间的真实CAN错误仍须立即锁定。 */
+    if (startup_pending && Fault() && !executor.fault)
+    {
+        Exec_Stop(&executor, 0x800U, now);
+    }
     if (diag_busy && Bus_Status() != CAN_BUSY && Bus_Status() != CAN_CANCELLING)
     {
         MechPort_Sent((uint8_t)(Bus_Status() == CAN_SENT), now);
-        if (Bus_Status() != CAN_SENT)
+        /* 正常STOP会主动取消未完成查询；只有纯STOP且无真实错误时不报总线故障。
+         * TERR、回包超时、RX溢出等仍由Fault检查及原失败分支立即锁定。 */
+        if (Bus_Status() != CAN_SENT && !(bus_diag.error == BUS_ERROR_STOP && !Fault()))
         {
             Exec_Stop(&executor, 0x800U, now);
         }
@@ -423,4 +502,5 @@ void Base_Run(void)
     MechPort_Run(HAL_GetTick(), (uint8_t)(executor.stop_confirmed && Ready(HAL_GetTick(), 0, 0)),
                  Fault() | executor.fault);
     Query(now);
+    Recover_Run(now);
 }

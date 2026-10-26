@@ -131,6 +131,21 @@ int main(void)
     assert(Mech_Zero(&guard, now, 1) == MECH_UNSTABLE);
     puts("unpolled newer feedback cannot reuse stable evidence: PASS");
 
+    /* 正常异步轮询：新反馈经检查且仍静止，不必等八个查询恰好同时更新。 */
+    Zero();
+    count = guard.stable_samples;
+    now++;
+    Feed(0, 0x35, 0);
+    assert(Mech_Ready(&guard, now, 1) == MECH_UNSTABLE);
+    Mech_Poll(&guard, now, 1);
+    assert(guard.stable_samples == count);
+    assert(Mech_Ready(&guard, now, 1) == MECH_OK);
+    /* 部分反馈已经显示真实位移时，立即撤销稳定证据。 */
+    Feed(0, 0x36, 10000 + MECH_STABLE_RAW + 1);
+    Mech_Poll(&guard, now, 1);
+    assert(!guard.stable_samples);
+    assert(Mech_Ready(&guard, now, 1) == MECH_UNSTABLE);
+
     Zero();
     now += 251; Mech_Poll(&guard, now, 1);
     assert(!guard.zero_valid && guard.fault == MECH_STALE && guard.stop_required);

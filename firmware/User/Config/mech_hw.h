@@ -12,6 +12,8 @@
 #define MECH_LIFT_MAX_UM         49000L
 #define MECH_REACH_MAX_UM        50000L
 #define MECH_FEEDBACK_AGE_MS       250U
+/* 沿用旧axis.c：上一笔查询完成后，再留10ms机构查询间隔。 */
+#define MECH_QUERY_GAP_MS           10U
 #define MECH_ZERO_STABLE_MS        300U
 #define MECH_STABLE_SAMPLES          5U
 #define MECH_STILL_RAW              16L
@@ -33,6 +35,8 @@
 
 /* 复用旧axis.c的受限单轴参数；仅供未绑定IO的执行状态机。 */
 #define MECH_AXIS_MAX_RPM            30U
+#define MECH_MANUAL_MAX_RPM        3000U
+#define MECH_MANUAL_TIMEOUT_MS    300000U
 #define MECH_AXIS_SPEED_LIMIT        33U
 #define MECH_AXIS_TARGET_RAW          4L
 #define MECH_AXIS_OTHER_RAW          32L
@@ -43,9 +47,13 @@
 #define MECH_AXIS_ARRIVE_SAMPLES       3U
 #define MECH_SERVO_STEP_MS            20U
 #define MECH_SERVO_STEP_MDEG         900L
+#define MECH_SERVO_SPEED_MIN       1000U
+#define MECH_SERVO_SPEED_MAX     360000U
+#define MECH_SERVO_TIMEOUT_MS    420000U
 #define MECH_SERVO_WAIT_MS           600U
 #define MECH_SERVO_OUTPUT_MS          50U
 #define MECH_ARM_MIN_MDEG          83000L
 #define MECH_ARM_MAX_MDEG         180000L
+#define MECH_MANUAL_ARM_MAX_MDEG  359000L
 
 #endif

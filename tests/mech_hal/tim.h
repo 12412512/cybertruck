@@ -8,6 +8,7 @@
 extern int htim1;
 uint32_t HAL_GetTick(void);
 uint32_t HAL_TIM_PWM_Start(int *timer, uint32_t channel);
+uint32_t HAL_TIM_PWM_Stop(int *timer, uint32_t channel);
 void Test_Compare(uint32_t channel, uint32_t pulse);
 #define __HAL_TIM_SET_COMPARE(timer, channel, pulse) Test_Compare(channel, pulse)
 #endif

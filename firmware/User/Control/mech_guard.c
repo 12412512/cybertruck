@@ -46,7 +46,7 @@ static uint8_t Stable(const MechGuard *guard, uint32_t now)
         (uint32_t)(now - guard->stable_since) < MECH_ZERO_STABLE_MS)
         return MECH_UNSTABLE;
     for (index = 0; index < 8; index++)
-        if (guard->completed_sequence[index] != guard->sample[index].rx_sequence)
+        if (guard->checked_sequence[index] != guard->sample[index].rx_sequence)
             return MECH_UNSTABLE;
     return MECH_OK;
 }
@@ -83,6 +83,40 @@ uint8_t Mech_Ready(const MechGuard *guard, uint32_t now, uint32_t version)
     return guard ? Ready(guard, now, version) : MECH_NO_ZERO;
 }
 
+uint8_t Mech_GroupReady(const MechGuard *guard, uint32_t now, uint32_t version)
+{
+    uint8_t result, axis;
+    if (!guard || guard->fault || !guard->zero_valid || version != guard->zero_version || !guard->base_stopped)
+        return !guard ? MECH_NO_ZERO : guard->fault ? MECH_FAULT : !guard->zero_valid ? MECH_NO_ZERO :
+               version != guard->zero_version ? MECH_VERSION : MECH_BASE;
+    result = Fresh(guard, now);
+    if (result)
+        return result;
+    for (axis = 0; axis < 2; axis++)
+    {
+        unsigned i = axis * 4;
+        if ((guard->sample[i + 2].value & 0x0D) != 1)
+            return MECH_DRIVER;
+        if (!(guard->concurrent_axes & (1U << axis)) && (guard->sample[i].value ||
+            Abs(guard->sample[i + 1].value - guard->sample[i + 3].value) > MECH_STILL_RAW))
+            return MECH_UNSTABLE;
+    }
+    return MECH_OK;
+}
+
+uint8_t Mech_CanPrepare(const MechGuard *guard, uint32_t now)
+{
+    uint8_t result;
+    if (!guard || guard->fault != MECH_MANUAL || guard->zero_valid)
+        return MECH_FAULT;
+    if (!guard->base_stopped)
+        return MECH_BASE;
+    if (guard->config_mask != 3)
+        return MECH_CONFIG;
+    result = Fresh(guard, now);
+    return result ? result : Stationary(guard);
+}
+
 void Mech_Invalidate(MechGuard *guard, uint32_t reason)
 {
     if (!guard)
@@ -90,6 +124,8 @@ void Mech_Invalidate(MechGuard *guard, uint32_t reason)
     if (guard->zero_valid)
         guard->stop_required = 1;
     guard->zero_valid = 0;
+    guard->manual_range = 0;
+    guard->concurrent_axes = 0;
     guard->stable_started = 0;
     guard->stable_samples = 0;
     if (!guard->fault)
@@ -161,7 +197,8 @@ void Mech_Poll(MechGuard *guard, uint32_t now, uint8_t base_stopped)
         for (axis = 0; axis < 2; axis++)
         {
             int64_t position = Mech_Position(guard, axis);
-            if (position < -MECH_FEEDBACK_TOL_UM || position > maximum_um[axis] + MECH_FEEDBACK_TOL_UM)
+            if (position < -MECH_FEEDBACK_TOL_UM ||
+                (!guard->manual_range && position > maximum_um[axis] + MECH_FEEDBACK_TOL_UM))
                 Mech_Invalidate(guard, MECH_RANGE);
         }
     }
@@ -171,20 +208,27 @@ void Mech_Poll(MechGuard *guard, uint32_t now, uint8_t base_stopped)
         guard->stable_samples = 0;
         return;
     }
-    for (index = 0; index < 8; index++)
-        if (guard->completed_sequence[index] == guard->sample[index].rx_sequence)
-            changed = 0;
-    if (!changed)
-        return; /* 重复轮询同一批反馈不能积累静止证据。 */
+    /* 每份新反馈先检查；部分更新不能绕过真实位移检查，也不算新稳定轮次。 */
     if (guard->stable_started)
     {
         for (axis = 0; axis < 2; axis++)
         {
             if (Abs(guard->sample[axis * 4 + 1].value - guard->anchor_actual[axis]) > MECH_STABLE_RAW ||
                 Abs(guard->sample[axis * 4 + 3].value - guard->anchor_target[axis]) > MECH_STABLE_RAW)
+            {
                 guard->stable_started = 0;
+                guard->stable_samples = 0;
+            }
         }
     }
+    for (index = 0; index < 8; index++)
+    {
+        guard->checked_sequence[index] = guard->sample[index].rx_sequence;
+        if (guard->completed_sequence[index] == guard->sample[index].rx_sequence)
+            changed = 0;
+    }
+    if (!changed)
+        return; /* 完整稳定轮次仍要求八份反馈全部更新。 */
     if (!guard->stable_started)
     {
         guard->stable_started = 1;
@@ -243,6 +287,14 @@ int64_t Mech_Position(const MechGuard *guard, uint8_t axis)
            signs[axis] * distance_um[axis] / MECH_RAW_PER_320;
 }
 
+uint8_t Mech_AxisManual(const MechGuard *guard, uint32_t now, uint32_t version,
+                        uint8_t axis, int32_t target_um)
+{
+    if (!guard || axis > 1 || target_um < 0)
+        return MECH_RANGE;
+    return Ready(guard, now, version);
+}
+
 uint8_t Mech_CheckAxis(const MechGuard *guard, uint32_t now, uint32_t version,
                        uint8_t axis, int32_t target_um, uint8_t arm_known, int32_t arm_mdeg)
 {
@@ -280,6 +332,15 @@ uint32_t Mech_Pulses(uint8_t axis, int32_t target_um)
     if (axis > 1 || target_um < 0 || target_um > maximum_um[axis])
         return UINT32_MAX;
     return (uint32_t)((int64_t)target_um * 320 / distance_um[axis]);
+}
+
+uint32_t Mech_ManualPulses(uint8_t axis, int32_t target_um)
+{
+    int64_t pulses;
+    if (axis > 1 || target_um < 0)
+        return UINT32_MAX;
+    pulses = (int64_t)target_um * 320 / distance_um[axis];
+    return pulses <= INT32_MAX ? (uint32_t)pulses : UINT32_MAX;
 }
 
 uint16_t Mech_Pulse(uint8_t channel, int32_t target_mdeg)

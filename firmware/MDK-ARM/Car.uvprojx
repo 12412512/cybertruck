@@ -878,6 +878,16 @@
               <FilePath>../User/Control/mech_pose.h</FilePath>
             </File>
             <File>
+              <FileName>mech_group.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Control/mech_group.c</FilePath>
+            </File>
+            <File>
+              <FileName>mech_group.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../User/Control/mech_group.h</FilePath>
+            </File>
+            <File>
               <FileName>mech_servo.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/Control/mech_servo.c</FilePath>

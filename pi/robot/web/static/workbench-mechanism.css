@@ -5,6 +5,11 @@ body[data-page='mechanism'] #defaults,
 body[data-page='mechanism'] #notice { display:none; }
 body[data-page='mechanism'] footer { display:none; }
 .remote-mechanism { max-width:1480px; margin:0 auto; }
+.remote-steps{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 20px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.remote-steps span{font-size:12px;color:#81929c;padding:6px 10px;background:#f1f5f7;border-radius:5px}
+.remote-steps span.ready{color:#247970;background:#e8f5f1}
+.remote-recovery-help{margin:12px 0}
+.remote-recovery-help summary{font-size:12px}
 .remote-intro { display:flex; justify-content:space-between; align-items:center; gap:20px; }
 .remote-intro h2 { margin:8px 0; }
 .remote-intro p { margin:0; }
@@ -29,7 +34,7 @@ body[data-page='mechanism'] footer { display:none; }
 .remote-actuator-title small { color:#7e8a94; font-size:11px; }
 .remote-actuator-title span { margin-left:auto; font-size:12px; color:#6d8089; }
 .remote-inputs { display:grid; grid-template-columns:minmax(85px,1fr) minmax(85px,1fr) auto auto; gap:10px; align-items:end; }
-.remote-servo-row { display:grid; grid-template-columns:minmax(80px,1fr) auto; gap:10px; align-items:end; }
+.remote-servo-row { display:grid; grid-template-columns:minmax(80px,1fr) minmax(95px,1fr) auto; gap:10px; align-items:end; }
 .remote-inputs button,.remote-servo-row button { min-height:42px; }
 .remote-presets { display:flex; gap:8px; margin-top:10px; }
 .remote-presets button { padding:6px 12px; font-size:12px; }
@@ -105,3 +110,6 @@ body[data-page='mechanism'] footer { display:none; }
 #transfer-steps { max-height:280px; overflow:auto; line-height:1.8; padding-left:28px; }
 #transfer-steps .current { color:#007d78; font-weight:700; }
 #transfer-events { font-size:13px; }
+
+/* PC联调参数表：顺序与目标在同一行，输入不触发动作。 */
+.seq-table{overflow-x:auto}.seq-row{display:grid;grid-template-columns:80px minmax(170px,1fr) minmax(100px,1fr) minmax(130px,1fr) 72px;gap:12px;align-items:center;margin:10px 0;min-width:650px}.seq-heading{font-size:13px;color:var(--muted)}.seq-row input,.seq-row select{width:100%;min-width:0}

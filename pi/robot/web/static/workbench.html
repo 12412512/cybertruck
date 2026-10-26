@@ -6,8 +6,9 @@
         <title>
             工创小车 · 控制工作台
         </title>
-        <link rel="stylesheet" href="/static/workbench.css?v=1">
-        <link rel="stylesheet" href="/static/workbench-mechanism.css?v=7">
+        <link rel="stylesheet" href="/static/workbench.css?v=3">
+        <link rel="stylesheet" href="/static/workbench-mechanism.css?v=10">
+        <link rel="stylesheet" href="/static/workbench-vision.css?v=3">
     </head>
     <body>
         <aside class="sidebar">
@@ -41,6 +42,7 @@
                         实车
                     </span>
                 </button>
+                <button class="nav-item" data-page="vision"><span>◎</span>相机与标定</button>
                 <button class="nav-item" data-page="logs">
                     <span>
                         ≡
@@ -69,7 +71,7 @@
             <div class="sidebar-bottom">
                 GC / CONTROL LAB
                 <span>
-                    设备接入前先验证
+                    参数有版本 · 动作有反馈
                 </span>
             </div>
         </aside>
@@ -87,7 +89,7 @@
                     <span id="connection" class="badge muted">
                         离线核心连接中
                     </span>
-                    <span class="badge lab">
+                    <span class="badge lab" id="workspace-domain">
                         离线模型 · 实车控制见独立区
                     </span>
                     <button id="defaults" class="secondary controlled">恢复初始设置</button>
@@ -97,6 +99,7 @@
                             Space
                         </kbd>
                     </button>
+                    <button id="global-real-stop" class="danger" hidden>■ 停止实车</button>
                 </div>
             </header>
             <div id="notice" role="status" aria-live="polite">
@@ -628,7 +631,9 @@
                 </div>
             </section>
             <section id="page-mechanism" class="page" hidden><div id="mechanism-root"></div></section>
+            <section id="page-vision" class="page" hidden></section>
             <section id="page-logs" class="page" hidden>
+                <div id="workspace-health" class="card"></div>
                 <div class="section-intro">
                     <span class="eyebrow">
                         RUN HISTORY
@@ -649,6 +654,7 @@
                             最多 100 条
                         </span>
                     </div>
+                    <div class="log-tools"><input id="events-filter" aria-label="筛选运行记录" placeholder="搜索阶段、故障或停止原因"><button id="events-export">导出模型事件</button></div>
                     <div id="events" class="event-list">
                     </div>
                 </div>
@@ -660,8 +666,9 @@
                 </span>
             </footer>
         </main>
-        <script type="module" src="/static/workbench.js?v=18">
+        <script type="module" src="/static/workbench.js?v=29">
         </script>
-        <script type="module" src="/static/workbench-vision.js?v=1"></script>
+        <script type="module" src="/static/workbench-vision.js?v=3"></script>
+        <script type="module" src="/static/workbench-shell.js?v=1"></script>
     </body>
 </html>

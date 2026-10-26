@@ -4,7 +4,7 @@ import {initLidar, renderLidar} from './workbench-lidar.js?v=6';
 import {modelView} from './workbench-execution.js?v=1';
 import {initScene, sceneValues, applyScene, overlayDraft} from './workbench-scene.js?v=3';
 import {motionDirection, matchesRelease, stopShortcut} from './workbench-input.js?v=2';
-import {initMechanism, renderMechanism, cancelMechHeld, stopMechHeld, stopMechanism} from './workbench-mechanism.js?v=6';
+import {initMechanism, renderMechanism, cancelMechHeld, stopMechHeld, stopMechanism} from './workbench-mechanism.js?v=17';
 
 const $ = id => document.getElementById(id);
 const text = (id, value) => { $(id).textContent = value; };
@@ -108,7 +108,7 @@ async function stop(reason = '已请求停止模拟') {
     catch (error) { notify('网关未确认停止；离线核心点动租约会独立过期。' + error.message, true); }
 }
 function stopVisible(source) {
-    if (document.body.dataset.page === 'mechanism') return stopMechanism(source);
+    if (document.body.dataset.page !== 'drive' && document.body.dataset.page !== undefined) return stopMechanism(source);
     return stop();
 }
 async function stopHeld(reason) {
@@ -171,6 +171,17 @@ document.addEventListener('visibilitychange', () => { if (document.hidden && hel
 window.addEventListener('pagehide', () => { if (held) stop('页面关闭'); });
 window.addEventListener('offline', () => { if (held) stop('浏览器断网'); });
 $('stop').onclick = () => stopVisible('top-stop-button');
+$('global-real-stop').onclick = () => stopMechanism('global-stop-button');
+$('events-filter').oninput = () => {
+    const query = $('events-filter').value.trim().toLowerCase();
+    for (const row of $('events').children) row.hidden = !row.textContent.toLowerCase().includes(query);
+};
+$('events-export').onclick = () => {
+    const value = {exported_at:new Date().toISOString(), domain:'simulation_history', events:current?.events || []};
+    const url = URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));
+    const link = document.createElement('a');link.href=url;link.download=`gc-model-events-${Date.now()}.json`;
+    link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
 $('pad-stop').onclick = () => stop();
 $('claim').onclick = async () => {
     const epoch = generation;
@@ -318,8 +329,9 @@ for (const button of document.querySelectorAll('[data-page]')) button.onclick = 
     if (document.body.dataset.page === 'mechanism' && button.dataset.page !== 'mechanism') stopMechHeld();
     document.querySelectorAll('.page').forEach(page => { page.hidden = page.id !== `page-${button.dataset.page}`; });
     document.querySelectorAll('[data-page]').forEach(item => item.classList.toggle('active', item === button));
-    document.querySelector('h1').textContent = {drive:'底盘与导航', mechanism:'机械远程控制', logs:'运行记录'}[button.dataset.page];
+    document.querySelector('h1').textContent = {drive:'底盘与导航', mechanism:'机械远程控制', vision:'相机与标定', logs:'运行记录'}[button.dataset.page];
     document.body.dataset.page = button.dataset.page;
+    $('global-real-stop').hidden = !['vision','logs'].includes(button.dataset.page);
     $('stop').innerHTML = button.dataset.page === 'mechanism' ? '■ 停止实车 <kbd>Space</kbd>' : '■ 停止模拟 <kbd>Space</kbd>';
     history.replaceState(null, '', `#${button.dataset.page}`);
 };
@@ -434,10 +446,11 @@ function render(state) {
         for (const event of state.events) {
             const row = document.createElement('div'); const time = document.createElement('time');
             const name = document.createElement('b'); const detail = document.createElement('p');
-            time.textContent = new Date(event.at * 1000).toLocaleTimeString('zh-CN', {hour12:false});
+            time.textContent = new Date(event.at * 1000).toLocaleString('zh-CN', {hour12:false});
             name.textContent = event.name; detail.textContent = event.detail;
             row.append(time, name, detail); $('events').append(row);
         }
+        $('events-filter').oninput();
     }
 }
 function invalidate() {
@@ -461,5 +474,5 @@ setInterval(() => {
 initScene({changed:draftChanged, notify, isRunning:moving});
 initMechanism({command, notify});
 const initialPage = location.hash.slice(1);
-if (['drive','mechanism','logs'].includes(initialPage)) document.querySelector(`[data-page="${initialPage}"]`).click();
+if (['drive','mechanism','vision','logs'].includes(initialPage)) document.querySelector(`[data-page="${initialPage}"]`).click();
 sequenceView(); updateButtons(); connect();

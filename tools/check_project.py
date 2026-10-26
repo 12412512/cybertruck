@@ -22,7 +22,7 @@ USER_FILES = {FW / 'User' / name for name in (
     'Control/ref.c', 'Control/ref.h', 'Control/track.c', 'Control/track.h')}
 USER_FILES.update(FW / 'User' / name for name in (
     'Control/mech_guard.c', 'Control/mech_guard.h', 'Control/mech_axis.c', 'Control/mech_axis.h', 'Config/mech_hw.h',
-    'Control/mech_servo.c', 'Control/mech_servo.h', 'Control/start.c', 'Control/start.h', 'Control/mech_pose.c', 'Control/mech_pose.h',
+    'Control/mech_group.c', 'Control/mech_group.h', 'Control/mech_servo.c', 'Control/mech_servo.h', 'Control/start.c', 'Control/start.h', 'Control/mech_pose.c', 'Control/mech_pose.h',
     'Control/preview.c', 'Control/preview.h',
     'Board/mech_port.c', 'Board/mech_port.h',
     'Control/exec.c', 'Control/exec.h', 'Comm/execute.c', 'Comm/execute.h', 'Board/base_port.c', 'Board/base_port.h',
@@ -104,8 +104,11 @@ def load_ioc():
 def verify_ioc(data):
     expected = {
         "Mcu.CPN": "STM32F407ZGT6", "Mcu.Package": "LQFP144",
-        "RCC.HSI_VALUE": "16000000", "RCC.PLLSourceVirtual": "RCC_PLLSOURCE_HSI",
-        "RCC.PLLM": "16", "RCC.PLLN": "240", "RCC.PLLQ": "5",
+        "RCC.HSI_VALUE": "16000000", "RCC.HSE_VALUE": "8000000",
+        "RCC.PLLSourceVirtual": "RCC_PLLSOURCE_HSE",
+        "RCC.PLLM": "8", "RCC.PLLN": "240", "RCC.PLLQ": "5",
+        "PH0-OSC_IN.Mode": "HSE-External-Oscillator", "PH0-OSC_IN.Signal": "RCC_OSC_IN",
+        "PH1-OSC_OUT.Mode": "HSE-External-Oscillator", "PH1-OSC_OUT.Signal": "RCC_OSC_OUT",
         "RCC.SYSCLKSource": "RCC_SYSCLKSOURCE_PLLCLK",
         "RCC.SYSCLKFreq_VALUE": "120000000", "RCC.HCLKFreq_Value": "120000000",
         "RCC.APB1CLKDivider": "RCC_HCLK_DIV4", "RCC.APB1Freq_Value": "30000000",
@@ -179,11 +182,11 @@ def verify_sources(data):
     defines = dict(re.findall(r"^\s*#define\s+(\w+)\s+(\w+)\s*$", header, re.M))
     clock = body(sources["main"], "SystemClock_Config")
     for name, value in {
-        "RCC_OscInitStruct.OscillatorType": "RCC_OSCILLATORTYPE_HSI",
-        "RCC_OscInitStruct.HSIState": "RCC_HSI_ON",
+        "RCC_OscInitStruct.OscillatorType": "RCC_OSCILLATORTYPE_HSE",
+        "RCC_OscInitStruct.HSEState": "RCC_HSE_ON",
         "RCC_OscInitStruct.PLL.PLLState": "RCC_PLL_ON",
-        "RCC_OscInitStruct.PLL.PLLSource": "RCC_PLLSOURCE_HSI",
-        "RCC_OscInitStruct.PLL.PLLM": data.get("RCC.PLLM", "16"),
+        "RCC_OscInitStruct.PLL.PLLSource": "RCC_PLLSOURCE_HSE",
+        "RCC_OscInitStruct.PLL.PLLM": data.get("RCC.PLLM", "8"),
         "RCC_OscInitStruct.PLL.PLLN": data.get("RCC.PLLN", "240"),
         "RCC_OscInitStruct.PLL.PLLP": "RCC_PLLP_DIV2",
         "RCC_OscInitStruct.PLL.PLLQ": data.get("RCC.PLLQ", "5"),
@@ -194,6 +197,22 @@ def verify_sources(data):
     }.items():
         assignment(clock, name, value, "生成时钟")
     call(clock, "HAL_RCC_ClockConfig", "&RCC_ClkInitStruct,FLASH_LATENCY_3", "生成时钟")
+    hal_config = clean_c(read(FW / "Core/Inc/stm32f4xx_hal_conf.h"))
+    check(bool(re.search(r"#define\s+HSE_VALUE\s+8000000U\b", hal_config)),
+          "HAL HSE_VALUE必须为板上8MHz晶振，不能沿用25MHz")
+    # 时钟建立失败必须在初始化CAN/PWM之前停住，不能退回HSI继续动作。
+    for function in ("HAL_RCC_OscConfig", "HAL_RCC_ClockConfig"):
+        check(bool(re.search(r"if\s*\(\s*" + function +
+                             r"\([^;]+?\)\s*!=\s*HAL_OK\s*\)\s*\{\s*Error_Handler\(\);\s*\}", clock)),
+              f"{function}失败必须进入Error_Handler")
+    handler = body(sources["main"], "Error_Handler")
+    check(bool(re.search(r"while\s*\(1\)", handler)) and "__disable_irq()" in compact(handler),
+          "时钟失败处理必须停机，不允许返回后初始化外设")
+    entry = body(sources["main"], "main")
+    clock_pos = entry.find("SystemClock_Config();")
+    check(clock_pos >= 0 and all(entry.find(name + "();") > clock_pos for name in
+                                ("MX_GPIO_Init", "MX_CAN1_Init", "MX_TIM1_Init", "App_Init")),
+          "外设及App必须在时钟成功建立后初始化")
     for name, value in {
         "hcan1.Init.Prescaler": data.get("CAN1.Prescaler", "4"),
         "hcan1.Init.TimeSeg1": data.get("CAN1.BS1", "CAN_BS1_12TQ"),

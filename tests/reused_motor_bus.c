@@ -198,8 +198,8 @@ static void TestStop(void)
     assert(!Bus_Rearm() && !Bus_Start());
     FreeHardware(); Bus_Poll(); Stops();
     for(n=before;n<sends;n++) assert(Op(n)==0xFE);
-    assert(bus_diag.locked && Bus_Rearm()); before=sends;
-    assert(Bus_Start()); Bus_Poll(); assert(sends==before+1U && Op(before)==0x35);
+    assert(bus_diag.locked && (bus_diag.error&BUS_ERROR_CAN) && !Bus_Rearm()); before=sends;
+    assert(!Bus_Start()); Bus_Poll(); assert(sends==before);
     puts("PASS 3: Stop survives abort timeout; hardware release sends only retained stops");
 }
 static void TestFault(void)
@@ -208,8 +208,8 @@ static void TestFault(void)
     assert(Bus_Start() && Bus_Speed(rpm)); (void)InitialQueries(0); assert(Bus_Speed(rpm)); before=sends;
     FreeHardware(); Bus_Poll(); assert(bus_diag.locked && (bus_diag.error&BUS_ERROR_CAN));
     Stops(); for(n=before;n<sends;n++) assert(Op(n)==0xFE);
-    assert(!Bus_Speed(rpm)); assert(Bus_Rearm());
-    assert(Bus_Start()); before=sends; Bus_Poll(); assert(sends==before+1U && Op(before)==0x35);
+    assert(!Bus_Speed(rpm) && !Bus_Rearm() && !Bus_Start());
+    before=sends; Bus_Poll(); assert(sends==before);
     puts("PASS 4: CAN failure locks and clears both current and pending speed without replay");
 }
 static void TestQueries(void)
@@ -347,7 +347,7 @@ static void TestTwoStops(void)
     assert(bus_diag.pending_stop_count==2 && !Bus_Rearm());
     FreeHardware(); Bus_Poll(); Stops();
     for(i=1;i<sends;i++) { assert(Op(i)==0xFE); if(Addr(i)==7) mask|=1; if(Addr(i)==8) mask|=2; }
-    assert(mask==3 && Bus_Status()==CAN_SENT); Bus_Release(); assert(Bus_Rearm());
+    assert(mask==3 && Bus_Status()==CAN_SENT); Bus_Release(); assert(!Bus_Rearm() && (bus_diag.error&BUS_ERROR_CAN));
     puts("PASS 11: two different diagnostic Stop addresses survive replacement and cancellation");
 }
 static void TestDiagStopFault(void)
@@ -358,7 +358,7 @@ static void TestDiagStopFault(void)
     assert(!bus_diag.stop_pending); Bus_Release(); assert(!Bus_Rearm());
     now+=9; Bus_Poll(); assert(sends==before); now++; Bus_Poll(); assert(sends==before+1 && Addr(before)==7);
     Finish(); Bus_Poll(); assert(Bus_Status()==CAN_SENT && !bus_diag.pending_stop_count);
-    assert(Bus_Rearm());
+    assert(!Bus_Rearm() && (bus_diag.error&BUS_ERROR_CAN));
     puts("PASS 12: failed single diagnostic Stop retries safely after Release without extra wheel stops");
 }
 static void TestWait(int diagnostic)
@@ -371,7 +371,7 @@ static void TestWait(int diagnostic)
     if(diagnostic) { assert(Bus_Status()==CAN_FAILED && !bus_diag.pending_stop_count); Bus_Release(); }
     else assert(bus_diag.stop_pending==15);
     available=1; FreeHardware(); Bus_Poll(); Stops();
-    assert(Bus_Rearm());
+    assert(!Bus_Rearm() && (bus_diag.error&BUS_ERROR_CAN));
     printf("PASS %d: mailbox wait has finite failure state for %s\n",diagnostic?14:13,diagnostic?"diagnostic":"four wheel batch");
 }
 static const uint8_t finite_dirs[4]={0,1,1,0};
@@ -389,7 +389,13 @@ static void FiniteStops(unsigned before)
     assert(mask==15 && bus_diag.locked && bus_diag.motion_uncertain);
     after=sends; Pump(); Pump(); assert(sends==after);
     assert(!Bus_Finite(finite_dirs,10,finite_steps));
-    Bus_Release(); assert(Bus_Rearm());
+    Bus_Release();
+    if ((bus_diag.error & ~BUS_ERROR_STOP) || can_diag.errors || can_diag.rx_overflow || bus_diag.rx_overflow)
+    {
+        uint32_t error=bus_diag.error;
+        assert(!Bus_Rearm() && bus_diag.error==error && bus_diag.locked);
+    }
+    else assert(Bus_Rearm());
 }
 static void TestFiniteAdmission(void)
 {
@@ -613,6 +619,23 @@ static void TestMechStops(void)
     assert(bus_diag.error==BUS_ERROR_STOP);
     puts("PASS: six retained stops; mechanism completion cannot clear stop/fault latch");
 }
+static void TestMechGroup(unsigned which)
+{
+    BusFrame frames[2];uint8_t count;
+    Bus_MechWatch();assert(Bus_MechGroup(3));
+    count=Drive_Build(5,0xFD,0,5,1,100,0,0,frames);
+    assert(Bus_Send(frames,count));Bus_Poll();Finish();Bus_Poll();Drain();Bus_Release();
+    assert(bus_diag.motion_uncertain);
+    if(which==40){Bus_Stop();assert(!Bus_MechGroup(3));Stops();assert(bus_diag.motion_uncertain);return;}
+    if(which==41){can_diag.errors++;Bus_Poll();assert(!Bus_MechGroup(3));return;}
+    assert(!Bus_Send(frames,count)); /* ID5的一次授权已经消费。 */
+    count=Drive_Build(1,0xFD,0,5,1,100,0,0,frames);assert(!Bus_Send(frames,count));
+    count=Drive_Build(6,0xF6,0,5,1,0,0,0,frames);assert(!Bus_Send(frames,count));
+    count=Drive_Build(6,0xFD,0,5,1,100,0,0,frames);assert(Bus_Send(frames,count));
+    Bus_Poll();Finish();Bus_Poll();Drain();Bus_Release();
+    assert(bus_diag.motion_uncertain&&!Bus_Send(frames,count));
+    assert(Bus_MechDone()&&!bus_diag.motion_uncertain);
+}
 int main(int argc,char **argv)
 {
     int test;
@@ -635,6 +658,7 @@ int main(int argc,char **argv)
     case 35: TestReceiveMillisecond(); break;
     case 36: TestMechConfigWait(0); break; case 37: TestMechConfigWait(1); break;
     case 38: TestMechStops(); break;
+    case 39: TestMechGroup(39); break; case 40: TestMechGroup(40); break; case 41: TestMechGroup(41); break;
     case 33: TestFiniteStopInbox(); break; case 34: TestLegacyStopInbox(); break; default: assert(0);
     }
     if(test) assert(polls); return 0;

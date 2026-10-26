@@ -25,6 +25,7 @@ const BusWheel *Bus_Wheels(void);
 /* 机构接入后保留ID5/6停止地址；只由唯一板级适配器调用。 */
 void Bus_MechWatch(void);
 uint8_t Bus_MechDone(void);
+uint8_t Bus_MechGroup(uint8_t axes); /* 仅登记联调组内各轴一次FD授权，不清运动不确定性。 */
 void Bus_Observe(void (*receive)(const BusFrame *frame));
 
 #endif

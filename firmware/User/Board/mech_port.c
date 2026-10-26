@@ -1,5 +1,6 @@
 #include "mech_port.h"
 #include "mech_pose.h"
+#include "mech_group.h"
 #include "mech_hw.h"
 #include "bus_internal.h"
 #include "comm.h"
@@ -10,12 +11,16 @@ static MechGuard guard;
 static Axis axis;
 static Servo servo;
 static Pose pose;
+static Group group;
 static MotorConfigRx config_rx[2];
 static MotorConfig config[2];
 static uint8_t attached, pending_kind, pending_axis, enabled_mask, query_index;
-static uint8_t pwm_mask, stopping_mask;
+static uint8_t pwm_mask, stopping_mask, manual_mode;
 static uint8_t axis_done;
+/* 1待输出、2稳定等待、3待人工确认、4已确认、5已中止；不伪造角度反馈。 */
+static uint32_t home_id, home_state, home_reason, home_started, home_issued;
 static uint8_t enable_pending;
+static uint8_t query_kind, query_pending, query_finished;
 static uint32_t last_token, last_result, query_tick;
 static uint8_t last_type, last_data[96];
 static uint16_t last_size;
@@ -41,15 +46,45 @@ uint8_t MechPort_Owned(void)
     return attached;
 }
 
+uint8_t MechPort_CanReset(uint32_t now, uint32_t version)
+{
+    unsigned index;
+    if (!attached || version != guard.zero_version || guard.config_mask != 3)
+        return 0;
+    for (index = 0; index < 8; index++)
+        if (!guard.sample[index].valid || !guard.sample[index].rx_sequence ||
+            (uint32_t)(now - guard.sample[index].tick) > 250)
+            return 0;
+    /* 停止后的旧目标可以尚未到达，不能要求实际位置等于中断目标。 */
+    return !guard.sample[0].value && !guard.sample[4].value &&
+           !(guard.sample[2].value & 12) && !(guard.sample[6].value & 12);
+}
+
+uint8_t MechPort_PwmOff(void)
+{
+    unsigned index;
+    uint8_t success = 1;
+    for (index = 0; index < 3; index++)
+        if (HAL_TIM_PWM_Stop(&htim1, pwm_channels[index]) != HAL_OK)
+            success = 0;
+    if (success)
+        pwm_mask = 0;
+    return success;
+}
+
 void MechPort_Init(void)
 {
     attached = pending_kind = enabled_mask = query_index = pwm_mask = stopping_mask = axis_done = enable_pending = 0;
+    manual_mode = 0;
+    home_id = home_state = home_reason = home_started = home_issued = 0;
     last_token = last_result = query_tick = 0;
+    query_kind = query_pending = query_finished = 0;
     memset(config, 0, sizeof(config));
     Mech_Init(&guard, 0, 0);
     Axis_Init(&axis, &guard);
     Servo_Init(&servo, &guard, 0);
     Pose_Init(&pose, &axis, &servo);
+    Group_Init(&group, &axis, &servo);
 }
 
 void MechPort_Feed(const BusFrame *frame)
@@ -71,6 +106,7 @@ void MechPort_Feed(const BusFrame *frame)
     {
         reply.handled_ms = now;
         Axis_Ack(&axis, &reply, now);
+        Group_Ack(&group, &reply, now);
         if (reply.code == 0x33 || reply.code == 0x35 || reply.code == 0x36 || reply.code == 0x3A)
             (void)Mech_Feed(&guard, &reply, now);
         else if (reply.result != 2 && reply.result != 0x9F)
@@ -80,10 +116,20 @@ void MechPort_Feed(const BusFrame *frame)
 
 void MechPort_Stop(uint32_t reason, uint32_t now)
 {
+    if (home_state >= 1 && home_state <= 4)
+    {
+        home_state = 5;
+        home_reason = reason ? reason : MECH_MANUAL;
+    }
     if (!attached)
         return;
+    manual_mode = 0;
     enable_pending = 0;
+    query_kind = query_pending = 0;
+    query_tick = now;
+    query_finished = 1;
     Mech_Invalidate(&guard, reason ? reason : MECH_MANUAL);
+    Group_Stop(&group, reason ? reason : MECH_MANUAL, now);
     Pose_Cancel(&pose, now);
     Servo_Stop(&servo, reason ? reason : SERVO_CANCEL, now);
     Axis_Stop(&axis, reason ? reason : AXIS_CANCEL, now);
@@ -115,7 +161,40 @@ void MechPort_Run(uint32_t now, uint8_t base_stopped, uint32_t fault)
     Pose_Poll(&pose, now, base_stopped);
     Axis_Poll(&axis, now, base_stopped);
     Servo_Poll(&servo, now, base_stopped);
-    if (!fault && !guard.fault && Servo_Take(&servo, &output, now))
+    Group_Poll(&group, now, base_stopped);
+    if (home_state >= 1 && home_state <= 3)
+    {
+        uint32_t result = Mech_Ready(&guard, now, guard.zero_version);
+        if (fault || guard.fault || !base_stopped ||
+            (result && result != MECH_UNSTABLE) || (uint32_t)(now - home_started) >= 60000)
+            MechPort_Stop(result ? result : fault ? MECH_FAULT : !base_stopped ? MECH_BASE : SERVO_TIMEOUT, now);
+        else if (!result && home_state == 1)
+        {
+            /* 三个通道在同一轮明确输出原命令0°；未知初始位置不能假装限速。 */
+            for (index = 0; index < 3; index++)
+            {
+                uint8_t bit = (uint8_t)(1U << index);
+                __HAL_TIM_SET_COMPARE(&htim1, pwm_channels[index], Mech_Pulse((uint8_t)(index + 1), 0));
+                if (!(pwm_mask & bit) && HAL_TIM_PWM_Start(&htim1, pwm_channels[index]) != HAL_OK)
+                {
+                    MechPort_Stop(SERVO_OUTPUT_ERROR, now);
+                    break;
+                }
+                pwm_mask |= bit;
+            }
+            if (home_state == 1)
+            {
+                home_issued = now;
+                home_state = 2;
+            }
+        }
+        else if (home_state == 2 && (uint32_t)(now - home_issued) >= MECH_SERVO_WAIT_MS)
+            home_state = 3;
+    }
+    if (group.state == GROUP_DONE && Mech_Ready(&guard, now, guard.zero_version) == MECH_OK)
+        axis_done = 1;
+    for (index = 0; index < 4; index++)
+    if (!fault && !guard.fault && (index < 3 ? Group_Pwm(&group, index, &output, now) : Servo_Take(&servo, &output, now)))
     {
         uint32_t channel = pwm_channels[output.channel - 1];
         uint8_t bit = (uint8_t)(1U << (output.channel - 1));
@@ -127,7 +206,10 @@ void MechPort_Run(uint32_t now, uint8_t base_stopped, uint32_t fault)
             if (ok)
                 pwm_mask |= bit;
         }
-        Servo_Applied(&servo, output.id, output.sequence, ok, HAL_GetTick());
+        if (index < 3)
+            Group_Applied(&group, index, &output, ok, HAL_GetTick());
+        else
+            Servo_Applied(&servo, output.id, output.sequence, ok, HAL_GetTick());
     }
     if (guard.stop_required && !stopping_mask)
     {
@@ -147,7 +229,8 @@ uint8_t MechPort_Query(BusFrame frames[2], uint32_t now)
 {
     static const uint8_t kinds[4] = {0x35, 0x36, 0x3A, 0x33};
     uint8_t address, code;
-    if (!attached || (uint32_t)(now - query_tick) < 5)
+    if (!attached || query_pending ||
+        (query_finished && (uint32_t)(now - query_tick) < MECH_QUERY_GAP_MS))
         return 0;
     if (!config[0].valid || !config[1].valid)
     {
@@ -158,10 +241,20 @@ uint8_t MechPort_Query(BusFrame frames[2], uint32_t now)
     {
         address = (uint8_t)(5 + query_index / 4);
         code = kinds[query_index % 4];
-        query_index = (uint8_t)((query_index + 1) % 8);
     }
-    query_tick = now;
+    query_kind = code;
     return Drive_Build(address, code, 0, 0, 0, 0, 0, 0, frames);
+}
+
+void MechPort_QueryAccept(void)
+{
+    /* 接纳不代表TXOK或回包；拒收时重复构造同一反馈项，不跳号。 */
+    if (!query_kind || query_pending)
+        return;
+    query_pending = 1;
+    if (query_kind != 0x42)
+        query_index = (uint8_t)((query_index + 1) % 8);
+    query_kind = 0;
 }
 
 uint8_t MechPort_Output(BusFrame frames[2], uint32_t now)
@@ -176,6 +269,16 @@ uint8_t MechPort_Output(BusFrame frames[2], uint32_t now)
         {
             pending_kind = 2;
             enable_pending = 0;
+        }
+        return count;
+    }
+    if (group.state == GROUP_RUNNING)
+    {
+        count = Group_Take(&group, frames, now);
+        if (count)
+        {
+            axis_done = 0;
+            pending_kind = 3;
         }
         return count;
     }
@@ -195,10 +298,18 @@ uint8_t MechPort_Output(BusFrame frames[2], uint32_t now)
 
 void MechPort_Sent(uint8_t success, uint32_t now)
 {
+    if (query_pending)
+    {
+        query_pending = 0;
+        query_tick = now;
+        query_finished = 1;
+    }
     if (pending_kind == 1)
         Axis_Sent(&axis, axis.goal.id, success, now);
     if (pending_kind == 2 && success)
         enabled_mask |= (uint8_t)(1U << pending_axis);
+    if (pending_kind == 3)
+        Group_Sent(&group, success, now);
     if (pending_kind && !success)
         MechPort_Stop(AXIS_TX, now);
     pending_kind = 0;
@@ -217,11 +328,51 @@ static uint32_t Mutate(uint8_t type, const uint8_t *data, uint16_t size, uint32_
         Axis_Init(&axis, &guard);
         Servo_Init(&servo, &guard, 0);
         Pose_Init(&pose, &axis, &servo);
+        Group_Init(&group, &axis, &servo);
         Bus_MechWatch();
         return MECH_OK;
     }
     if (!attached || guard.session != Comm_Session())
         return MECH_SESSION;
+    if (home_state >= 1 && home_state <= 3 && type != 67 && type != 57)
+        return MECH_UNSTABLE;
+    if (type == 61 && size == 9)
+    {
+        uint8_t result;
+        uint32_t axis_id = axis.goal.id, servo_id = servo.goal.id;
+        uint32_t pose_id = pose.goal.id, child_id = pose.child_id;
+        uint32_t group_id = group.goal.id;
+        /* 正常停止专用：真实CAN/反馈/机构故障不得通过此入口清除。 */
+        if (data[8] != 1 || version != guard.zero_version)
+            return MECH_MANUAL;
+        if (can_diag.errors || can_diag.rx_overflow || bus_diag.rx_overflow ||
+            bus_diag.error != BUS_ERROR_STOP || pwm_mask)
+            return MECH_FAULT;
+        if (AxisBusy() || ServoBusy() || PoseBusy() || pending_kind || enable_pending ||
+            stopping_mask || guard.stop_required || bus_diag.pending_stop_count ||
+            bus_diag.stop_sequence != bus_diag.stop_sent_sequence)
+            return MECH_UNSTABLE;
+        result = Mech_CanPrepare(&guard, now);
+        if (result)
+            return result;
+        if (!Bus_Rearm())
+            return MECH_UNSTABLE;
+        guard.fault = 0;
+        guard.stable_started = 0;
+        guard.stable_samples = 0;
+        enabled_mask = axis_done = 0;
+        Axis_Init(&axis, &guard);
+        Servo_Init(&servo, &guard, 0);
+        Pose_Init(&pose, &axis, &servo);
+        Group_Init(&group, &axis, &servo);
+        group.goal.id = group_id;
+        /* 不回绕动作编号；重建零点和舵机参考仍必须另行人工确认。 */
+        axis.goal.id = axis_id;
+        servo.goal.id = servo_id;
+        pose.goal.id = pose_id;
+        pose.child_id = child_id;
+        return MECH_OK;
+    }
     if (type == 57 && size == 8)
     {
         MechPort_Stop(MECH_MANUAL, now);
@@ -231,6 +382,44 @@ static uint32_t Mutate(uint8_t type, const uint8_t *data, uint16_t size, uint32_
         return MECH_FAULT;
     if (version != guard.zero_version && type != 50)
         return MECH_VERSION;
+    if ((type == 66 || type == 67) && size == 13)
+    {
+        uint32_t id = (uint32_t)Frame_Get(data + 8, 4), result;
+        if (!manual_mode || data[12] != 1)
+            return MECH_MANUAL;
+        result = Mech_Ready(&guard, now, version);
+        if (result)
+            return result;
+        if (type == 66)
+        {
+            if (!id || id <= home_id || id <= axis.goal.id || id <= servo.goal.id ||
+                id <= pose.goal.id || id <= group.goal.id || AxisBusy() || ServoBusy() ||
+                PoseBusy() || group.state == GROUP_RUNNING || pending_kind || enable_pending)
+                return MECH_UNSTABLE;
+            home_id = id;
+            home_state = 1;
+            home_reason = home_issued = 0;
+            home_started = now;
+            Servo_Init(&servo, &guard, 0);
+            servo.goal.id = id; /* 新动作必须继续递增，旧目标不能复活。 */
+            return MECH_OK;
+        }
+        if ((uint32_t)(now - home_started) >= 60000)
+            return SERVO_TIMEOUT;
+        if (home_state != 3 || id != home_id || pwm_mask != 7)
+            return MECH_VERSION;
+        {
+            const int32_t zero[3] = {0, 0, 0};
+            result = Servo_SeedManual(&servo, zero, now, 1);
+            if (!result)
+            {
+                servo.output_mask = 7;
+                servo.state = SERVO_MANUAL_DONE;
+                home_state = 4;
+            }
+            return result;
+        }
+    }
     if (type == 56 && size == 17)
         return Pose_Next(&pose, (uint32_t)Frame_Get(data + 8, 4),
                          (uint32_t)Frame_Get(data + 12, 4), data[16], now);
@@ -251,8 +440,54 @@ static uint32_t Mutate(uint8_t type, const uint8_t *data, uint16_t size, uint32_
             return MECH_MANUAL;
         return Servo_Confirm(&servo, &evidence, now);
     }
-    if (AxisBusy() || ServoBusy() || PoseBusy() || enable_pending || pending_kind)
+    if (group.state == GROUP_RUNNING || AxisBusy() || ServoBusy() || PoseBusy() || enable_pending || pending_kind)
         return MECH_UNSTABLE;
+    if (type == 63 && size == 60)
+    {
+        GroupGoal goal;
+        if (!manual_mode)
+            return MECH_MANUAL;
+        memset(&goal, 0, sizeof(goal));
+        goal.id = (uint32_t)Frame_Get(data + 8, 4);
+        goal.zero_version = version;
+        goal.timeout_ms = (uint32_t)Frame_Get(data + 12, 4);
+        goal.mask = (uint32_t)Frame_Get(data + 16, 4);
+        if (goal.id <= axis.goal.id || goal.id <= servo.goal.id || goal.id <= pose.child_id)
+            return AXIS_ID;
+        if (bus_diag.motion_uncertain && !Bus_MechDone())
+            return AXIS_BUSY;
+        for (index = 0; index < 5; index++)
+        {
+            goal.target[index] = (int32_t)Frame_Get(data + 20 + index * 4, 4);
+            goal.speed[index] = (uint32_t)Frame_Get(data + 40 + index * 4, 4);
+        }
+        uint32_t result = Group_Begin(&group, &goal, now);
+        if (!result && !Bus_MechGroup(group.axis_mask))
+        {
+            Group_Stop(&group, MECH_FAULT, now);
+            return MECH_FAULT;
+        }
+        return result;
+    }
+    if (type == 62 && size == 10 && data[8] <= 1)
+    {
+        uint32_t result;
+        if (data[9] != 1)
+            return MECH_MANUAL;
+        result = Mech_Ready(&guard, now, version);
+        if (result)
+            return result;
+        if (!data[8] && (Mech_Position(&guard, 0) > MECH_LIFT_MAX_UM + MECH_FEEDBACK_TOL_UM ||
+                         Mech_Position(&guard, 1) > MECH_REACH_MAX_UM + MECH_FEEDBACK_TOL_UM))
+            return MECH_RANGE;
+        if (!data[8] && (servo.reference_mask & (1U << (MECH_ARM_CHANNEL - 1U))) &&
+            (servo.command_mdeg[MECH_ARM_CHANNEL - 1U] < MECH_ARM_MIN_MDEG ||
+             servo.command_mdeg[MECH_ARM_CHANNEL - 1U] > MECH_ARM_MAX_MDEG))
+            return MECH_RANGE; /* 扩展手动角度不能直接交给旧自动姿态。 */
+        manual_mode = data[8];
+        guard.manual_range = manual_mode;
+        return MECH_OK;
+    }
     if (type == 49 && size == 9 && data[8] < 2)
     {
         if (!guard.base_stopped || guard.config_mask != 3 || enabled_mask & (1U << data[8]))
@@ -268,7 +503,8 @@ static uint32_t Mutate(uint8_t type, const uint8_t *data, uint16_t size, uint32_
         int32_t initial[3];
         for (index = 0; index < 3; index++)
             initial[index] = (int32_t)Frame_Get(data + 8 + index * 4, 4);
-        return Servo_Seed(&servo, initial, now, data[20] == 1);
+        return manual_mode ? Servo_SeedManual(&servo, initial, now, data[20] == 1) :
+            Servo_Seed(&servo, initial, now, data[20] == 1);
     }
     if (type == 52 && size == 23)
     {
@@ -284,10 +520,13 @@ static uint32_t Mutate(uint8_t type, const uint8_t *data, uint16_t size, uint32_
             return AXIS_ID;
         if (bus_diag.motion_uncertain && !Bus_MechDone())
             return AXIS_BUSY;
-        return Axis_Begin(&axis, &goal, now, Servo_Reference(&servo, 2), servo.command_mdeg[1]);
+        return manual_mode ? Axis_Manual(&axis, &goal, now) :
+            Axis_Begin(&axis, &goal, now, Servo_Reference(&servo, 2), servo.command_mdeg[1]);
     }
-    if (type == 53 && size == 22)
+    if (type == 53 && (size == 22 || size == 26))
     {
+        if (size == 26 && !manual_mode)
+            return MECH_MANUAL;
         ServoGoal goal;
         memset(&goal, 0, sizeof(goal));
         goal.id = (uint32_t)Frame_Get(data + 8, 4);
@@ -296,12 +535,15 @@ static uint32_t Mutate(uint8_t type, const uint8_t *data, uint16_t size, uint32_
         goal.timeout_ms = (uint32_t)Frame_Get(data + 16, 4);
         goal.channel = data[20];
         goal.release_confirmed = data[21];
+        goal.speed_mdeg_s = size == 26 ? (uint32_t)Frame_Get(data + 22, 4) : 0;
         if (goal.id <= pose.child_id || goal.id <= axis.goal.id)
             return SERVO_ID;
-        return Servo_Begin(&servo, &goal, now);
+        return manual_mode ? Servo_Manual(&servo, &goal, now) : Servo_Begin(&servo, &goal, now);
     }
     if (type == 55 && size == 42)
     {
+        if (manual_mode)
+            return MECH_MANUAL;
         PoseGoal goal;
         memset(&goal, 0, sizeof(goal));
         goal.zero_version = version;
@@ -326,6 +568,24 @@ uint8_t MechPort_Command(uint8_t type, const uint8_t *data, uint16_t size,
 {
     uint32_t token, result;
     unsigned index;
+    if (type == 64 && !size)
+    {
+        uint32_t values[10] = {1, now, group.goal.id, group.state, group.reason, group.goal.mask, group.axis_mask,
+                              (uint32_t)servo.command_mdeg[0], (uint32_t)servo.command_mdeg[1], (uint32_t)servo.command_mdeg[2]};
+        for (index = 0; index < 10; index++)
+            Frame_Put(reply + index * 4, values[index], 4);
+        *reply_size = 40;
+        return COMM_OK;
+    }
+    if (type == 68 && !size)
+    {
+        uint32_t values[8] = {1, now, home_id, home_state, home_reason,
+                              guard.zero_version, pwm_mask, home_issued};
+        for (index = 0; index < 8; index++)
+            Frame_Put(reply + index * 4, values[index], 4);
+        *reply_size = 32;
+        return COMM_OK;
+    }
     if (type == 58 && !size)
     {
         uint32_t values[28];

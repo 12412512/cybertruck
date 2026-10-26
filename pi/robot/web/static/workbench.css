@@ -10,6 +10,23 @@
     --red:#bd3d43;
 }
 
+/* 共用PC布局：长名称不挤压控制区，状态与当前页面作用域并列。 */
+.header-actions{flex-wrap:wrap;justify-content:flex-end}
+.topbar{align-items:flex-start}
+.sidebar-note .status-dot{background:#6f8390}
+.sidebar-note .status-dot.online{background:#52c0b3}
+.workspace-health-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:18px;margin:18px 0}
+.workspace-health-grid>div{display:grid;gap:8px}
+.workspace-health-grid strong{font-size:14px}
+#workspace-health{margin-bottom:24px}
+#workspace-health .hint{font-size:12px}
+.log-tools{display:flex;gap:12px;margin:14px 0}
+.log-tools input{flex:1;min-width:0}
+.event-list time{font-size:10px;line-height:1.7;overflow-wrap:anywhere}
+body[data-page='mechanism'] .remote-intro h2{display:none}
+body[data-page='mechanism'] .remote-intro{margin-bottom:16px}
+body[data-page='mechanism'] .remote-intro .eyebrow{display:none}
+
 /* 本轮面向PC的场景编辑区；保留旧布局，不新增手机交互。 */
 .scene-toolbar {
     display:flex;

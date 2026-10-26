@@ -41,6 +41,58 @@ int main(int argc, char **argv)
     Bus_Setup(addresses);
     if (which == 3)
         tick = UINT32_MAX - 2U;
+    if (which == 12 || which == 13)
+    {
+        Query(6, 0x33);
+        Fail(HAL_CAN_ERROR_TX_TERR0);
+        if (which == 12)
+        {
+            CallbackDone();
+            CHECK(can_diag.tx_done_sequence == 0);
+        }
+        else
+            can_diag.rx_overflow++;
+        Bus_Poll();
+        CHECK(bus_diag.locked && (bus_diag.error & BUS_ERROR_CAN));
+        if (which == 13) CHECK(bus_diag.error & BUS_ERROR_RX);
+        CHECK(Bus_Status() != CAN_SENT && sends == 1 && !Bus_Rearm());
+        return 0;
+    }
+    if (which >= 8)
+    {
+        /* ID6/33专用：不能借错误ID、畸形帧、旧回复或TERR推进查询。 */
+        Query(6, 0x33);
+        CHECK(can_diag.last_tx_id==0x600 && can_diag.last_tx_length==2 &&
+              can_diag.last_tx_data0==0x6B33);
+        tick++;
+        if(which!=9)WireDone();
+        if(which==10)
+        {
+            Reply(5,0x33,0);Reply(6,0x36,0);Reply(6,0x33,1);
+            Bus_Poll();CHECK(!bus_diag.query_replies);
+        }
+        if(which==11)
+        {
+            Fail(HAL_CAN_ERROR_TX_TERR0);Reply(6,0x33,0);Bus_Poll();
+            CHECK(!bus_diag.query_replies&&can_diag.errors==1&&bus_diag.locked);
+            CHECK(!Bus_Rearm());
+            return 0;
+        }
+        Reply(6,0x33,0);Bus_Poll();
+        if(which==9)
+        {
+            CHECK(!bus_diag.query_replies);CallbackDone();Bus_Poll();tick=BUS_REPLY_TIMEOUT_MS;
+            Bus_Poll();CHECK(bus_diag.query_timeouts==1&&!Bus_Rearm());
+        }
+        else
+        {
+            CHECK(bus_diag.query_replies==1&&Bus_Status()==CAN_BUSY);
+            tick++;CallbackDone();tick++;Bus_Poll();
+            CHECK(Bus_Status()==CAN_SENT&&!bus_diag.query_timeouts);
+            Reply(6,0x33,0);Bus_Poll();CHECK(bus_diag.query_replies==1);
+        }
+        return 0;
+    }
     Query(1, 0x35);
     tick++;
     if (which == 0 || which == 3 || which == 5)
