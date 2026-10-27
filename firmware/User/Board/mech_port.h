@@ -14,6 +14,8 @@ void MechPort_QueryAccept(void);
 uint8_t MechPort_Output(BusFrame frames[2], uint32_t now);
 void MechPort_Sent(uint8_t success, uint32_t now);
 uint8_t MechPort_Owned(void);
+/* 只读当前活动身份，供底盘停车条件失败时冻结取证。 */
+uint8_t MechPort_Active(uint32_t *id, uint32_t *channel);
 /* 人工恢复：仅核对实时静止，关闭PWM；不清故障、不建零、不使能。 */
 uint8_t MechPort_CanReset(uint32_t now, uint32_t version);
 uint8_t MechPort_PwmOff(void);

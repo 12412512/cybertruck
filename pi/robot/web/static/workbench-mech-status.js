@@ -15,12 +15,21 @@ export function faultText(code) {
     return `${faults[code] || '未识别的机构故障'}（${code}）`;
 }
 
+export function parkingText(record) {
+    if (!record?.captured) return '';
+    const reasons = [[1,'反馈无效'],[2,'反馈超250ms'],[4,'轮速超过1RPM'],
+        [8,'驱动器异常'],[16,'停车未确认'],[32,'底层故障']];
+    const wheel = record.wheels?.[record.wheel-1];
+    return `首次停车条件失败 #${record.action_id}：${reasons.filter(([bit])=>record.mask&bit).map(([,name])=>name).join('、')}`+
+        (wheel?`；ID${record.wheel}轮速${wheel.rpm}RPM，速度/位置/状态帧龄${wheel.speed_age_ms}/${wheel.position_age_ms}/${wheel.status_age_ms}ms`:'')+'。';
+}
+
 export function mechanismNotice(state, waiting='') {
     const m=state.mechanism;
     if (!state.connected || !m) return {kind:'muted',text:'等待新鲜反馈，当前不能发送动作。'};
     if (state.base?.fault || m.fault) {
         const reason=state.base?.fault?`底盘故障（${state.base.fault}）`:faultText(m.fault);
-        const detail=m.fault===105?'这是板端另一轴监测触发；仅凭目测不能区分线缆牵扯与反馈变化。':'';
+        const detail=m.fault===9?parkingText(state.park_failure):m.fault===105?'这是板端另一轴监测触发；仅凭目测不能区分线缆牵扯与反馈变化。':'';
         return {kind:'fault',text:`${reason}。${detail}先停止并排除干涉；确认机构静止且有支撑后，按恢复说明人工操作。不能直接继续下一动作。`};
     }
     if (state.action_locked) return {kind:'muted',text:'本轮已停止；按“正常停止后重新准备”或恢复说明操作，不会自动续跑。'};

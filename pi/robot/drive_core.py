@@ -172,7 +172,7 @@ def run_trial(transport, profile, case, runtime, record, clock=time.monotonic, s
                 if box[0] <= 0 or box[1] <= 0 or box[2] >= 2.4 or box[3] >= 2.4:
                     raise ValueError('估计车体包络接近场界，停止；不将里程计当成独立定位证明')
             if stage == 'connect' and link.bound and state and (state['mode'] != 0 or state['stop_confirmed']):
-                can_candidate = simulation and link.firmware in ('GC-BASE-0.3.22', 'GC-BASE-0.3.23', 'GC-BASE-0.3.24')
+                can_candidate = simulation and link.firmware in ('GC-BASE-0.3.22', 'GC-BASE-0.3.23', 'GC-BASE-0.3.24', 'GC-BASE-0.3.35')
                 if switching and not can_candidate and link.firmware not in ('GC-BASE-0.3.20', 'GC-BASE-0.3.21'):
                     raise ValueError('PC1选区要求GC-BASE-0.3.20或0.3.21，旧固件不得降级执行')
                 if not can_candidate and ((wait_start and link.firmware not in ('GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19', 'GC-BASE-0.3.20', 'GC-BASE-0.3.21')) or (start2_route and link.firmware not in ('GC-BASE-0.3.19', 'GC-BASE-0.3.20', 'GC-BASE-0.3.21'))):

@@ -99,7 +99,7 @@ int main(int argc,char **argv)
                 Frame_Put(data+12,(uint32_t)targets[k],4);Frame_Put(data+16,10000,4);
                 data[20]=(uint8_t)ch;data[21]=1;Frame_Put(data+22,90000,4);
                 CHECK(!Command(53,data,26));
-                for(n=0;n<40&&servo.state!=SERVO_MANUAL_DONE;n++)Round();
+                for(n=0;n<80&&servo.state!=SERVO_MANUAL_DONE;n++)Round();
                 CHECK(servo.state==SERVO_MANUAL_DONE&&servo.command_mdeg[ch-1]==targets[k]&&home_state==4);
             }
         }

@@ -38,7 +38,10 @@ static uint32_t Move(uint32_t id,uint8_t channel,int32_t target,uint32_t rate)
     CHECK(servo.command_mdeg[channel-1]==target&&!Servo_Reference(&servo,channel));
     return now-start;
 }
-int main(int argc,char **argv)
+#ifndef TUNING_MAIN
+#define TUNING_MAIN main
+#endif
+int TUNING_MAIN(int argc,char **argv)
 {
     unsigned which=argc>1?(unsigned)atoi(argv[1]):0;
     Setup();
@@ -52,7 +55,7 @@ int main(int argc,char **argv)
     {
         uint32_t slow=Move(1,1,90000,30000);
         Setup();uint32_t fast=Move(1,1,90000,120000);
-        CHECK(slow>=3600&&slow<3700&&fast>=1350&&fast<1450);
+        CHECK(slow>3600&&slow<4300&&fast>1350&&fast<2500&&fast<slow);
         ServoGoal conflict=servo.goal;conflict.speed_mdeg_s=60000;
         CHECK(Servo_Manual(&servo,&conflict,now)==SERVO_ID);
     }

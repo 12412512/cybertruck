@@ -117,3 +117,4 @@ body[data-page='mechanism'] footer { display:none; }
 
 /* PC联调参数表：顺序与目标在同一行，输入不触发动作。 */
 .seq-table{overflow-x:auto}.seq-row{display:grid;grid-template-columns:80px minmax(170px,1fr) minmax(100px,1fr) minmax(130px,1fr) 72px;gap:12px;align-items:center;margin:10px 0;min-width:650px}.seq-heading{font-size:13px;color:var(--muted)}.seq-row input,.seq-row select{width:100%;min-width:0}
+.seq-delete-review{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px;border:1px solid #f0cccc;border-radius:8px;background:#fff7f6;font-size:13px}.seq-delete-review[hidden]{display:none}

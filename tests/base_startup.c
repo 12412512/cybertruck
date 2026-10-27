@@ -23,6 +23,8 @@ int Port_Imu(ImuSample *sample) { (void)sample; return 0; }
 uint16_t Port_Diag(uint8_t *data) { (void)data; return 0; }
 #ifndef BASE_REAL_MECH
 void MechPort_Init(void) { }
+static uint8_t mech_active;
+uint8_t MechPort_Active(uint32_t *id,uint32_t *channel) { *id=mech_active?32:0;*channel=2;return mech_active; }
 static uint8_t reset_ready;
 uint8_t MechPort_CanReset(uint32_t now,uint32_t version) { (void)now;return reset_ready && version==7; }
 static uint8_t reset_pwm_off=1;

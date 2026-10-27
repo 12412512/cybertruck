@@ -35,6 +35,11 @@ def profile():
 
 
 def compile_c(output, sources, extra=()):
+    sources = list(sources)
+    # 舵机复用正式底盘曲线，独立夹具也链接同一实现。
+    curve = ROOT / 'firmware/User/Control/curve.c'
+    if any(Path(p).name == 'mech_servo.c' for p in sources) and curve not in sources:
+        sources.append(curve)
     command = [sys.executable, '-m', 'ziglang', 'cc', '-std=c99', '-O2',
                '-Wall', '-Wextra', '-Werror', '-UNDEBUG', '-Wno-misleading-indentation']
     for name in ('Control', 'Device', 'Comm', 'Config'):

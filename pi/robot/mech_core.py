@@ -45,6 +45,11 @@ class DeviceCore:
         self.recovery = Recovery(runtime)
         self.sequence_path = Path(runtime)/'physical_sequences.json' if runtime else None
         self.sequences = json.loads(self.sequence_path.read_text(encoding='utf-8')) if self.sequence_path and self.sequence_path.exists() else []
+        self.sequence_archive_path = Path(runtime)/'physical_sequence_archive.json' if runtime else None
+        self.sequence_archive = json.loads(self.sequence_archive_path.read_text(encoding='utf-8')) if self.sequence_archive_path and self.sequence_archive_path.exists() else []
+        from .device.mech_sequence import digest
+        if any(digest(item) != item.get('sha256') or digest(item['record']) != item['record'].get('sha256') for item in self.sequence_archive):
+            raise ValueError('联调删除归档校验失败，保持原文件，不忽略历史')
         if self.pose_path and self.pose_path.exists():
             self.poses = json.loads(self.pose_path.read_text(encoding='utf-8'))
 
@@ -75,10 +80,50 @@ class DeviceCore:
     def state(self):
         with self.lock:
             return dict(self.link.view(self.clock()), owner=self.owner, poses=self.poses, site_ready=self.site_ready,
-                        sequences=self.sequences, sequence=self.sequence.view(),
+                        sequences=self.visible_sequences(), sequence=self.sequence.view(),
+                        sequence_management=dict(schema=1, deleted_count=len(self.sequence_archive)),
                         recovery=self.recovery.view(),
                         safety_events=list(self.safety_events),
                         lease_remaining_s=max(0., self.until-self.clock()) if self.token else 0.)
+
+    def visible_sequences(self):
+        deleted={(item['record']['id'],item['record']['revision']) for item in self.sequence_archive}
+        return [item for item in self.sequences if (item['id'],item['revision']) not in deleted]
+
+    def delete_sequence(self, value, now):
+        """只写版本归档；不发送UART，不改变控制权、基准或PWM。"""
+        from .device.mech_sequence import digest
+        args=value.args
+        key=('sequence_delete:'+value.client,value.request_id)
+        encoded=value.model_dump_json()
+        if key in self.cache:
+            previous,result=self.cache[key]
+            if previous!=encoded:
+                raise ValueError('相同删除请求ID内容变化')
+            return result
+        if (self.token and now<self.until and
+                (value.client!=self.owner or not secrets.compare_digest(value.token,self.token))):
+            raise ValueError('另一页面持有控制权，不能删除其联调版本')
+        view=self.link.view(now)
+        if (not view.get('connected') or self.sequence.status=='RUNNING' or self.link.group.get('state')==1 or
+                self.recovery.active or any(1<=self.link.actual.get(k,0)<=5 for k in ('axis_state','servo_state','pose_state'))):
+            raise ValueError('等待连接有效且动作空闲后删除版本；不会停止正在执行的动作')
+        record=next((r for r in self.visible_sequences() if r['id']==args.get('id') and r['revision']==args.get('revision')),None)
+        if (args.get('confirmed') is not True or type(args.get('revision')) is not int or record is None or
+                record['sha256']!=args.get('sha256') or digest(record)!=record['sha256']):
+            raise ValueError('删除版本不存在、内容变化或尚未确认，请刷新列表')
+        item=dict(record=record,deleted_at_s=time.time(),client=value.client,request_id=value.request_id,
+                  kind='archived_sequence_version',action_sent=False)
+        item['sha256']=digest(item)
+        updated=[*self.sequence_archive,item]
+        if self.sequence_archive_path:
+            from .workbench.storage import write_json
+            write_json(self.sequence_archive_path,updated)
+        self.sequence_archive=updated
+        result=dict(status='ARCHIVED_VERSION',id=record['id'],revision=record['revision'],action_sent=False)
+        self.cache[key]=(encoded,result)
+        while len(self.cache)>100:self.cache.popitem(last=False)
+        return result
 
     def stop_control(self, reason, source, client):
         """由核心锁保护；不记录控制令牌，停止后仍由唯一串口读取反馈。"""
@@ -94,6 +139,8 @@ class DeviceCore:
         value = DeviceCommand.model_validate(value)
         now = self.clock()
         with self.lock:
+            if value.op == 'sequence_delete':
+                return self.delete_sequence(value,now)
             if value.op == 'stop':
                 source = value.args.get('source', 'explicit-stop')
                 if not isinstance(source, str) or len(source) > 48:
@@ -112,7 +159,7 @@ class DeviceCore:
             if value.op == 'observe':
                 # 诊断附着不取得运动租约；浏览器关闭后由唯一核心继续保活与只读轮询。
                 if (self.site_ready or self.token or value.token or value.args or
-                        self.link.firmware not in ('GC-BASE-0.3.23', 'GC-BASE-0.3.24', 'GC-BASE-0.3.25', 'GC-BASE-0.3.26', 'GC-BASE-0.3.27', 'GC-BASE-0.3.28', 'GC-BASE-0.3.29', 'GC-BASE-0.3.30', 'GC-BASE-0.3.31', 'GC-BASE-0.3.32', 'GC-BASE-0.3.33', 'GC-BASE-0.3.34')):
+                        self.link.firmware not in ('GC-BASE-0.3.23', 'GC-BASE-0.3.24', 'GC-BASE-0.3.25', 'GC-BASE-0.3.26', 'GC-BASE-0.3.27', 'GC-BASE-0.3.28', 'GC-BASE-0.3.29', 'GC-BASE-0.3.30', 'GC-BASE-0.3.31', 'GC-BASE-0.3.32', 'GC-BASE-0.3.33', 'GC-BASE-0.3.34','GC-BASE-0.3.35')):
                     raise ValueError('只读附着要求独立只读模式、无人持有控制权且无附加参数')
                 key = ('readonly:' + value.client, value.request_id)
                 encoded = value.model_dump_json()
@@ -198,13 +245,14 @@ class DeviceCore:
                 from .device.mech_sequence import groups
                 for stage in groups(saved['rows']):
                     payload('group',dict(members=stage['members']),{},1)
-                self.sequences.append(saved)
+                updated=[*self.sequences,saved]
                 if self.sequence_path:
                     from .workbench.storage import write_json
-                    write_json(self.sequence_path,self.sequences)
+                    write_json(self.sequence_path,updated)
+                self.sequences=updated
                 result=dict(status='SAVED_DRAFT',revision=revision,domain='physical_draft')
             elif action == 'program_run':
-                saved=next((r for r in self.sequences if r['id']==args.get('id') and r['revision']==args.get('revision')),None)
+                saved=next((r for r in self.visible_sequences() if r['id']==args.get('id') and r['revision']==args.get('revision')),None)
                 if saved is None:
                     raise ValueError('联调表版本不存在，先保存')
                 self.sequence.start(saved,args.get('mode','ordered'),self.link,now)
@@ -290,6 +338,8 @@ def create_app(core, transport=None):
             return core.command(value)
         except (ValueError, TypeError, KeyError) as exc:
             raise HTTPException(409, str(exc)) from exc
+        except OSError as exc:
+            raise HTTPException(503, '版本文件未保存，请检查存储；原版本保持不变') from exc
 
     return app
 

@@ -121,7 +121,8 @@ int main(int argc, char **argv)
             CHECK(Servo_Take(&servo, &output, now) && output.command_mdeg == 180000);
             Servo_Applied(&servo, 1, output.sequence, 1, now);
             now += 200; Fresh();
-            CHECK(Servo_Take(&servo, &output, now) && output.command_mdeg == 179100);
+            CHECK(Servo_Take(&servo, &output, now) && output.command_mdeg < 180000 &&
+                  output.command_mdeg > 179100 && servo.pending_ms == 20);
         }
         else if (which == 3)
         {

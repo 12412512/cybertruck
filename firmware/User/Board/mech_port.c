@@ -46,6 +46,21 @@ uint8_t MechPort_Owned(void)
     return attached;
 }
 
+uint8_t MechPort_Active(uint32_t *id, uint32_t *channel)
+{
+    *channel = 0;
+    *id = group.state == GROUP_RUNNING ? group.goal.id : PoseBusy() ? pose.goal.id :
+          AxisBusy() ? axis.goal.id : ServoBusy() ? servo.goal.id :
+          home_state >= 1 && home_state <= 3 ? home_id : 0;
+    if (ServoBusy())
+        *channel = servo.goal.channel;
+    if (group.state == GROUP_RUNNING)
+        for (unsigned i = 0; i < 3; i++)
+            if (group.goal.mask == (1U << (i + 2)))
+                *channel = i + 1;
+    return attached && *id != 0;
+}
+
 uint8_t MechPort_CanReset(uint32_t now, uint32_t version)
 {
     unsigned index;

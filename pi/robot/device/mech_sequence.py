@@ -60,8 +60,9 @@ class Sequence:
         plan=groups(value['rows'],mode)
         # 所有步骤先做纯编码校验，避免执行第一步后才发现后面的非法目标。
         for stage in plan:
-            payload('group',dict(members=stage['members'],zero_version=link.actual.get('zero_version')),link.actual,1)
-        if (link.firmware not in ('GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34') or link.home.get('state') in (1,2,3) or not link.manual_debug or link.action_locked or link.latched or
+            payload('group',dict(members=stage['members'],zero_version=link.actual.get('zero_version'),
+                                 _firmware=link.firmware),link.actual,1)
+        if (link.firmware not in ('GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35') or link.home.get('state') in (1,2,3) or not link.manual_debug or link.action_locked or link.latched or
                 not link.commissioning or not link.bound or now-link.actual_at>=.25 or now-link.base_at>=.25 or
                 now-link.group_at>=.25 or link.group.get('state')==1 or link.actual.get('fault') or
                 not link.actual.get('zero_valid') or link.base.get('fault') or not link.base.get('stopped') or

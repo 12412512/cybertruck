@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {sequenceRows,sameRows} from '../pi/robot/web/static/workbench-sequence.js';
+import {sequenceRows,sameRows,canDeleteSequence} from '../pi/robot/web/static/workbench-sequence.js';
 let count=0;const check=x=>{assert.ok(x);count++;};
 const rows=[{order:1,axis:'lift',target:20,speed:5},{order:2,axis:'reach',target:10,speed:5},
  {order:2,axis:'arm',target:359,speed:90},{order:3,axis:'lift',target:0,speed:5}];
@@ -16,3 +16,9 @@ check(!sameRows(result,[...result.slice(0,3)]));
 check(!sameRows(result,result.map((r,i)=>({...r,...(i===0?{target_m:.03}:{})}))));
 check(sequenceRows([{order:1,axis:'gripper',target:60,speed:45}])[0].release_confirmed);
 console.log(`${count} sequence table checks PASS; no network or device access`);
+const state={connected:true,sequence_management:{schema:1},sequence:{status:'IDLE'},mechanism:{axis_state:6,servo_state:9,pose_state:0},group:{state:0}};
+check(canDeleteSequence(state,{id:'test'},false,''));
+for(const change of [{connected:false},{sequence_management:null},{owner:'other'},{sequence:{status:'RUNNING'}},{group:{state:1}},{mechanism:{servo_state:3}}])
+ check(!canDeleteSequence({...state,...change},{id:'test'},false,''));
+check(!canDeleteSequence(state,null,false,''));check(!canDeleteSequence(state,{id:'test'},false,'pending'));
+console.log('9 version-delete UI guards PASS; no file or device changes');

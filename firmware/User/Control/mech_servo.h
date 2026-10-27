@@ -2,6 +2,7 @@
 #define MECH_SERVO_H
 
 #include "mech_guard.h"
+#include "curve.h"
 
 enum
 {
@@ -46,6 +47,9 @@ typedef struct
     uint32_t output_sequence, evidence_sequence;
     uint8_t reference_mask, output_mask, confirmed_mask, taken, simulation;
     uint8_t hold_possible, confirmation_kind, manual;
+    CurvePlan profile; /* 复用底盘七段S曲线，内部转为弧度，PWM比例不变。 */
+    int32_t origin_mdeg;
+    uint32_t profile_ms, pending_ms;
 } Servo;
 
 /* 全部为无IO状态机。初始化不输出；Seed仅记录已确认的初始参考。

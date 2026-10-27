@@ -77,7 +77,7 @@ def payload(action, args, state, token):
         if not channel:
             raise ValueError('执行器无效')
         target = integer(args.get('target_rad'), 180000 / math.pi)
-        arm_max = 359000 if args.get('_firmware') in ('GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34') else 270000
+        arm_max = 359000 if args.get('_firmware') in ('GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35') else 270000
         if args.get('_manual_tuning') is True and not 0 <= target <= {1:270000,2:arm_max,3:98000}[channel]:
             raise ValueError('舵机命令角超出允许范围，0度不加偏置')
         speed = args.get('speed_rad_s')
@@ -86,9 +86,11 @@ def payload(action, args, state, token):
             rate = integer(speed, 180000 / math.pi)
             if not 1000 <= rate <= 360000:
                 raise ValueError('舵机指令速度必须为1～360度/秒')
-            span = 359000 if channel == 2 and args.get('_firmware') in ('GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34') else 270000
-            timeout = math.ceil(span/rate*1000 + 3000)
-            if timeout > (420000 if args.get('_firmware') in ('GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34') else 300000):
+            span = 359000 if channel == 2 and args.get('_firmware') in ('GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35') else 270000
+            # 七段S曲线的保守上界：D/V + V/A + A/J，另留3秒反馈/等待余量。
+            ramp_s = rate/180000 + .25 if args.get('_firmware') == 'GC-BASE-0.3.35' else 0
+            timeout = math.ceil(span/rate*1000 + ramp_s*1000 + 3000)
+            if timeout > (420000 if args.get('_firmware') in ('GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35') else 300000):
                 raise ValueError('本次舵机指令超过执行期限，请提高指令速度或分段')
             tail = struct.pack('<I', rate)
         return 53, prefix + struct.pack('<IiIBB', action_id,
@@ -107,7 +109,7 @@ def payload(action, args, state, token):
             if mask & (1 << i):
                 raise ValueError('同一同时组不能重复设置同一执行器，请拆为不同顺序')
             mask |= 1 << i
-            params = dict(member, _manual_tuning=True, _firmware='GC-BASE-0.3.32', release_confirmed=True)
+            params = dict(member, _manual_tuning=True, _firmware=args.get('_firmware','GC-BASE-0.3.32'), release_confirmed=True)
             if i >= 2:
                 params.setdefault('speed_rad_s', math.pi/4)
             _, wire = payload('move', params, state, token)
@@ -177,6 +179,8 @@ class MechanismLink(Link):
         self.recovery_wait = False
         self.home = {}
         self.home_at = -1.
+        self.park_failure = None
+        self.last_park_poll = -1.
 
     def reset(self, reason):
         self.recovery_wait = False
@@ -234,10 +238,13 @@ class MechanismLink(Link):
             kind, data, request_id = self.commands.popleft()
             self.operation = request_id
             return kind, data
-        if now - self.last_poll >= (.03 if self.firmware=='GC-BASE-0.3.34' else .04):
+        if self.firmware == 'GC-BASE-0.3.35' and now-self.last_park_poll >= 1:
+            self.last_park_poll = now
+            return 69, b''  # 仅取冻结记录，不重启/清故障；关键状态仍按原节拍轮询。
+        if now - self.last_poll >= (.03 if self.firmware in ('GC-BASE-0.3.34','GC-BASE-0.3.35') else .04):
             self.last_poll = now
-            if self.firmware in ('GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34'):
-                kinds=(35,58,64,68) if self.firmware=='GC-BASE-0.3.34' else (35,58,64)
+            if self.firmware in ('GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35'):
+                kinds=(35,58,64,68) if self.firmware in ('GC-BASE-0.3.34','GC-BASE-0.3.35') else (35,58,64)
                 self.poll_kind = kinds[self.poll_index % len(kinds)]
                 self.poll_index += 1
             else:
@@ -264,12 +271,12 @@ class MechanismLink(Link):
             else:
                 self.stop_acknowledged = True
             return True
-        if request.kind not in range(48, 59) and request.kind not in (35, 61, 62, 63, 64,66,67,68):
+        if request.kind not in range(48, 59) and request.kind not in (35, 61, 62, 63, 64,66,67,68,69):
             return False
         if packet.boot != self.boot or not packet.payload:
             self.reset('实车启动身份/回包无效')
             return True
-        if packet.payload[0] == p.BUSY and request.kind not in (58,35,64,66,67,68):
+        if packet.payload[0] == p.BUSY and request.kind not in (58,35,64,66,67,68,69):
             # BUSY代表未进入命令；只重试同一不可变载荷，板端操作编号去重。
             self.commands.appendleft((request.kind, request.payload, self.operation))
             self.operation = None
@@ -278,7 +285,20 @@ class MechanismLink(Link):
             self.reset('实车协议拒绝；动作不重放')
             return True
         data = packet.payload[1:]
-        if request.kind == 68:
+        if request.kind == 69:
+            if (len(data) != 120 or struct.unpack_from('<I',data)[0] != 1 or
+                    struct.unpack_from('<I',data,4)[0] not in (0,1) or
+                    struct.unpack_from('<I',data,12)[0] & ~63 or
+                    struct.unpack_from('<I',data,16)[0] > 4 or
+                    struct.unpack_from('<I',data,36)[0] > 3):
+                self.reset('底盘停车条件记录格式无效')
+            else:
+                names = ('schema','captured','tick_ms','mask','wheel','stopped','base_fault','can_errors','action_id','channel')
+                self.park_failure = dict(zip(names,struct.unpack_from('<10I',data)))
+                self.park_failure['wheels'] = [dict(zip(
+                    ('rpm','status','speed_age_ms','position_age_ms','status_age_ms'),
+                    struct.unpack_from('<i4I',data,40+i*20))) for i in range(4)]
+        elif request.kind == 68:
             if len(data)!=32 or struct.unpack_from('<I',data)[0]!=1:
                 self.reset('舵机初始化状态格式无效')
             else:
@@ -337,7 +357,7 @@ class MechanismLink(Link):
     def prepare(self, request_id, args, now):
         """同会话正常停止恢复；只恢复准备能力，不取得控制权或输出。"""
         m = self.actual
-        if (self.firmware not in ('GC-BASE-0.3.26', 'GC-BASE-0.3.27', 'GC-BASE-0.3.28', 'GC-BASE-0.3.29', 'GC-BASE-0.3.30', 'GC-BASE-0.3.31', 'GC-BASE-0.3.32', 'GC-BASE-0.3.33', 'GC-BASE-0.3.34') or not self.commissioning or
+        if (self.firmware not in ('GC-BASE-0.3.26', 'GC-BASE-0.3.27', 'GC-BASE-0.3.28', 'GC-BASE-0.3.29', 'GC-BASE-0.3.30', 'GC-BASE-0.3.31', 'GC-BASE-0.3.32', 'GC-BASE-0.3.33', 'GC-BASE-0.3.34','GC-BASE-0.3.35') or not self.commissioning or
                 self.latched or not self.bound or not self.action_locked or
                 not self.stop_acknowledged or now - self.actual_at >= .25 or
                 now - self.base_at >= .25 or not self.base.get('stopped') or
@@ -356,24 +376,24 @@ class MechanismLink(Link):
 
     def submit(self, request_id, action, args, now):
         args = dict(args)
-        tuned = self.firmware in ('GC-BASE-0.3.31','GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34') and self.manual_debug
+        tuned = self.firmware in ('GC-BASE-0.3.31','GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35') and self.manual_debug
         args['_manual_tuning'] = tuned  # 不信任调用方提供的模式标志。
         args['_firmware'] = self.firmware
         if self.home.get('state') in (1,2,3) and action!='home_confirm':
             raise ValueError('舵机回零尚未确认；请核对三路实际0度或停止')
         if action in ('home','home_confirm'):
-            if (self.firmware!='GC-BASE-0.3.34' or not self.manual_debug or
+            if (self.firmware not in ('GC-BASE-0.3.34','GC-BASE-0.3.35') or not self.manual_debug or
                     now-self.home_at>=.25 or self.home.get('zero_version')!=self.actual.get('zero_version')):
                 raise ValueError('回零初始化要求0.3.34手动模式及有效零点、新鲜初始化状态')
             if action=='home_confirm' and (self.home.get('state')!=3 or args.get('home_id')!=self.home.get('id')):
                 raise ValueError('只能确认本次已输出完成的回零动作')
         if self.group.get('state') == 1:
             raise ValueError('联调组运行中，禁止插入单项操作')
-        if action == 'group' and (self.firmware not in ('GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34') or not tuned or
+        if action == 'group' and (self.firmware not in ('GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35') or not tuned or
                 self.group.get('state') == 1 or now-self.group_at >= .25):
             raise ValueError('联调组需要0.3.32、手动模式及新鲜空闲组反馈')
         if action == 'move':
-            if self.firmware in ('GC-BASE-0.3.31','GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34') and not self.manual_debug:
+            if self.firmware in ('GC-BASE-0.3.31','GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35') and not self.manual_debug:
                 raise ValueError('单项调试请先进入手动模式；自动姿态使用独立入口')
             if args.get('speed_rad_s') is not None and not tuned:
                 raise ValueError('可调舵机速度需要0.3.31和本次手动模式')
@@ -381,15 +401,15 @@ class MechanismLink(Link):
                 args.setdefault('speed_rad_s', math.pi/4)
             if tuned and args.get('axis') == 'gripper':
                 args['release_confirmed'] = True  # 明确执行夹爪目标即代表本次开合意图。
-        if action == 'mode' and (self.firmware not in ('GC-BASE-0.3.27', 'GC-BASE-0.3.28', 'GC-BASE-0.3.29', 'GC-BASE-0.3.30', 'GC-BASE-0.3.31', 'GC-BASE-0.3.32', 'GC-BASE-0.3.33', 'GC-BASE-0.3.34') or not self.commissioning or not self.actual.get('zero_valid')):
+        if action == 'mode' and (self.firmware not in ('GC-BASE-0.3.27', 'GC-BASE-0.3.28', 'GC-BASE-0.3.29', 'GC-BASE-0.3.30', 'GC-BASE-0.3.31', 'GC-BASE-0.3.32', 'GC-BASE-0.3.33', 'GC-BASE-0.3.34','GC-BASE-0.3.35') or not self.commissioning or not self.actual.get('zero_valid')):
             raise ValueError('手动调试模式要求新固件、显式机械许可及有效人工零点')
         if action == 'pose' and self.manual_debug:
             raise ValueError('手动调试模式不执行自动姿态；请先返回互锁模式')
         if self.action_locked:
             raise ValueError('动作已停止并锁定；只读反馈保留，需人工核对后重新准备')
         # 新板端目前只验收诊断附着，不能借版本兼容开放其它机械命令。
-        commissioned = self.commissioning and self.firmware in ('GC-BASE-0.3.24', 'GC-BASE-0.3.25', 'GC-BASE-0.3.26', 'GC-BASE-0.3.27', 'GC-BASE-0.3.28', 'GC-BASE-0.3.29', 'GC-BASE-0.3.30', 'GC-BASE-0.3.31', 'GC-BASE-0.3.32', 'GC-BASE-0.3.33', 'GC-BASE-0.3.34')
-        readonly_attach = not commissioned and self.firmware in ('GC-BASE-0.3.23', 'GC-BASE-0.3.24', 'GC-BASE-0.3.25', 'GC-BASE-0.3.26', 'GC-BASE-0.3.27', 'GC-BASE-0.3.28', 'GC-BASE-0.3.29', 'GC-BASE-0.3.30', 'GC-BASE-0.3.31', 'GC-BASE-0.3.32', 'GC-BASE-0.3.33', 'GC-BASE-0.3.34') and action == 'attach'
+        commissioned = self.commissioning and self.firmware in ('GC-BASE-0.3.24', 'GC-BASE-0.3.25', 'GC-BASE-0.3.26', 'GC-BASE-0.3.27', 'GC-BASE-0.3.28', 'GC-BASE-0.3.29', 'GC-BASE-0.3.30', 'GC-BASE-0.3.31', 'GC-BASE-0.3.32', 'GC-BASE-0.3.33', 'GC-BASE-0.3.34','GC-BASE-0.3.35')
+        readonly_attach = not commissioned and self.firmware in ('GC-BASE-0.3.23', 'GC-BASE-0.3.24', 'GC-BASE-0.3.25', 'GC-BASE-0.3.26', 'GC-BASE-0.3.27', 'GC-BASE-0.3.28', 'GC-BASE-0.3.29', 'GC-BASE-0.3.30', 'GC-BASE-0.3.31', 'GC-BASE-0.3.32', 'GC-BASE-0.3.33', 'GC-BASE-0.3.34','GC-BASE-0.3.35') and action == 'attach'
         if (self.latched or not self.bound or (not readonly_attach and not commissioned and self.firmware not in ('GC-BASE-0.3.14', 'GC-BASE-0.3.15', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19'))
                 or now - self.actual_at >= .25 or now - self.base_at >= .25):
             raise ValueError('实车固件/会话/反馈未就绪')
@@ -420,4 +440,5 @@ class MechanismLink(Link):
                     base=self.base if fresh else None, results=list(self.results),
                     group=self.group if fresh and now-self.group_at<.25 else None,
                     home=self.home if fresh and now-self.home_at<.25 else None,
+                    park_failure=self.park_failure if fresh else None,
                     state_age_ms=None if self.actual_at < 0 else max(0, round((now-self.actual_at)*1000)))

@@ -2,7 +2,8 @@
 const health = document.getElementById('workspace-health');
 health.innerHTML = `<div class="card-head"><h2>连接与诊断</h2><button id="workspace-export">导出诊断摘要</button></div>
  <div class="workspace-health-grid"><div><small>实车设备</small><strong id="health-device">等待状态</strong></div><div><small>底盘 / 机构故障</small><strong id="health-fault">未知</strong></div><div><small>停车状态</small><strong id="health-stop">未知</strong></div><div><small>固件</small><strong id="health-firmware">—</strong></div></div>
- <p class="hint">诊断摘要只包含读取到的状态；不保存控制令牌，不发送设备命令。</p>`;
+ <p class="hint">诊断摘要只包含读取到的状态；不保存控制令牌，不发送设备命令。</p>
+ <details><summary>高级诊断</summary><p class="hint">供通信、反馈和路线问题排查。</p><a href="/diagnostics" target="_blank" rel="noopener">打开只读诊断页</a></details>`;
 const badge = document.createElement('span');
 badge.id = 'workspace-device-badge';
 badge.className = 'badge muted';

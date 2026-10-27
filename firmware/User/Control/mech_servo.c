@@ -1,6 +1,9 @@
 #include "mech_servo.h"
 #include "mech_hw.h"
+#include <math.h>
 #include <string.h>
+
+#define SERVO_RAD_PER_MDEG 0.000017453292519943295
 
 static uint8_t Bit(uint8_t channel)
 {
@@ -109,6 +112,8 @@ static int Same(const ServoGoal *a, const ServoGoal *b)
 static uint32_t Begin(Servo *servo, const ServoGoal *goal, uint32_t now, uint8_t manual)
 {
     uint32_t result;
+    CurvePlan profile;
+    CurveLimit limit;
     if (!servo || !goal || !servo->guard)
         return MECH_SESSION;
     if (!goal->id || goal->id < servo->goal.id)
@@ -134,6 +139,15 @@ static uint32_t Begin(Servo *servo, const ServoGoal *goal, uint32_t now, uint8_t
     if (goal->channel == MECH_GRIP_CHANNEL && servo->hold_possible &&
         goal->target_mdeg != MECH_GRIP_MAX_MDEG && !goal->release_confirmed)
         return SERVO_HOLD;
+    limit.velocity = (float)((goal->speed_mdeg_s ? goal->speed_mdeg_s : 45000U) * SERVO_RAD_PER_MDEG);
+    limit.acceleration = (float)(MECH_SERVO_ACCEL_DEG_S2 * 1000 * SERVO_RAD_PER_MDEG);
+    limit.jerk = (float)(MECH_SERVO_JERK_DEG_S3 * 1000 * SERVO_RAD_PER_MDEG);
+    if (!Curve_Make(&profile, (float)((goal->target_mdeg - servo->command_mdeg[goal->channel - 1]) *
+                                    SERVO_RAD_PER_MDEG), limit))
+        return MECH_RANGE;
+    servo->profile = profile;
+    servo->origin_mdeg = servo->command_mdeg[goal->channel - 1];
+    servo->profile_ms = servo->pending_ms = 0;
     servo->manual = manual;
     servo->goal = *goal;
     servo->started_ms = servo->last_step_ms = now;
@@ -177,7 +191,8 @@ void Servo_Stop(Servo *servo, uint32_t reason, uint32_t now)
 void Servo_Poll(Servo *servo, uint32_t now, uint8_t base_stopped)
 {
     uint32_t result;
-    int32_t current, target, next, step;
+    int32_t current, target, next;
+    CurvePoint point;
     uint8_t bit;
     uint8_t wait_stable = 0;
     if (!servo || !servo->guard || !Busy(servo))
@@ -223,15 +238,26 @@ void Servo_Poll(Servo *servo, uint32_t now, uint8_t base_stopped)
         return;
     current = servo->command_mdeg[servo->goal.channel - 1];
     target = servo->goal.target_mdeg;
-    step = servo->goal.speed_mdeg_s ?
-        (int32_t)(servo->goal.speed_mdeg_s * MECH_SERVO_STEP_MS / 1000U) : MECH_SERVO_STEP_MDEG;
     bit = Bit(servo->goal.channel);
+    servo->pending_ms = servo->profile_ms;
     if (!(servo->output_mask & bit))
         next = current; /* 首次显式输出必须从已核对的初始参考起步。 */
-    else if (current < target)
-        next = target - current > step ? current + step : target;
     else
-        next = current - target > step ? current - step : target;
+    {
+        /* 只推进一个20ms参考步；延迟/等待稳定后不追赶跳角，写入成功才提交进度。 */
+        servo->pending_ms += MECH_SERVO_STEP_MS;
+        if (!Curve_At(&servo->profile, servo->pending_ms / 1000.0, &point))
+        {
+            Servo_Stop(servo, SERVO_OUTPUT_ERROR, now);
+            return;
+        }
+        next = point.done ? target : servo->origin_mdeg + (int32_t)lround(point.position / SERVO_RAD_PER_MDEG);
+        /* 浮点取整只可能改变末位；单调夹紧，不越过目标。 */
+        if (current < target)
+            next = next < current ? current : next > target ? target : next;
+        else
+            next = next > current ? current : next < target ? target : next;
+    }
     servo->pending.id = servo->goal.id;
     servo->pending.zero_version = servo->goal.zero_version;
     servo->pending.sequence = ++servo->output_sequence;
@@ -270,10 +296,13 @@ void Servo_Applied(Servo *servo, uint32_t id, uint32_t sequence, uint8_t ok, uin
     }
     bit = Bit(servo->goal.channel);
     servo->command_mdeg[servo->goal.channel - 1] = servo->pending.command_mdeg;
+    servo->profile_ms = servo->pending_ms;
     servo->output_mask |= bit;
     servo->confirmed_mask &= (uint8_t)~bit;
     servo->issued_ms = servo->last_step_ms = now;
-    servo->state = servo->pending.command_mdeg == servo->goal.target_mdeg ? SERVO_SETTLING : SERVO_SLEWING;
+    /* 不因末端取整提前结束减速；参考已结束后才进入原600ms等待。 */
+    servo->state = servo->pending.command_mdeg == servo->goal.target_mdeg &&
+                   servo->profile_ms / 1000.0 >= servo->profile.total ? SERVO_SETTLING : SERVO_SLEWING;
 }
 
 uint32_t Servo_Confirm(Servo *servo, const ServoEvidence *evidence, uint32_t now)

@@ -30,6 +30,12 @@ static uint32_t startup_pending, startup_ms;
 static uint32_t recovery_started, recovery_version;
 static uint32_t recovery_token;
 static uint8_t recovery_pending;
+/* 首次机构停车门槛失败；本次启动内冻结，GET/STOP均不覆盖。 */
+static struct
+{
+    uint32_t captured, tick, mask, wheel, stopped, exec_fault, bus_error, can_errors, action, channel;
+    BusWheel wheels[4];
+} park_failure;
 typedef char ExecConfigSize[(sizeof(ExecConfig) == 52) ? 1 : -1];
 typedef char ExecGoalSize[(sizeof(TrackGoal) == 96) ? 1 : -1];
 
@@ -105,6 +111,67 @@ static void Stop(void)
 static uint32_t Fault(void)
 {
     return (bus_diag.error & ~BUS_ERROR_STOP) | can_diag.errors | can_diag.rx_overflow;
+}
+
+static void Park_Capture(uint32_t now)
+{
+    uint32_t id, channel, mask = 0, first = 0;
+    const BusWheel *wheels = Bus_Wheels();
+    if (park_failure.captured || !MechPort_Active(&id, &channel))
+        return;
+    for (unsigned i = 0; i < 4; i++)
+    {
+        uint32_t reason = 0;
+        const BusWheel *w = wheels + i;
+        if (!w->speed.valid || !w->status.valid || !w->position.valid)
+            reason |= 1;
+        if ((uint32_t)(now - w->speed.tick) > 250 || (uint32_t)(now - w->status.tick) > 250 ||
+            (uint32_t)(now - w->position.tick) > 250)
+            reason |= 2;
+        if (llabs(w->speed.value) > 1)
+            reason |= 4;
+        if (w->status.value & 12)
+            reason |= 8;
+        if (reason && !first)
+            first = i + 1;
+        mask |= reason;
+    }
+    if (!executor.stop_confirmed)
+        mask |= 16;
+    if (Fault() || executor.fault)
+        mask |= 32;
+    if (!mask)
+        return;
+    park_failure.tick = now;
+    park_failure.mask = mask;
+    park_failure.wheel = first;
+    park_failure.stopped = executor.stop_confirmed;
+    park_failure.exec_fault = executor.fault;
+    park_failure.bus_error = bus_diag.error;
+    park_failure.can_errors = can_diag.errors;
+    park_failure.action = id;
+    park_failure.channel = channel;
+    memcpy(park_failure.wheels, wheels, sizeof(park_failure.wheels));
+    park_failure.captured = 1;
+}
+
+static uint16_t Park_Read(uint8_t *reply)
+{
+    uint32_t fields[10] = {1, park_failure.captured, park_failure.tick, park_failure.mask,
+        park_failure.wheel, park_failure.stopped, park_failure.exec_fault,
+        park_failure.can_errors, park_failure.action, park_failure.channel};
+    memcpy(reply, fields, sizeof(fields));
+    for (unsigned i = 0; i < 4; i++)
+    {
+        const BusWheel *w = park_failure.wheels + i;
+        uint8_t *p = reply + sizeof(fields) + i * 20;
+        Frame_Put(p, (uint32_t)w->speed.value, 4);
+        Frame_Put(p + 4, (uint32_t)w->status.value, 4);
+        Frame_Put(p + 8, w->speed.valid ? (uint32_t)(park_failure.tick - w->speed.tick) : UINT32_MAX, 4);
+        Frame_Put(p + 12, w->position.valid ? (uint32_t)(park_failure.tick - w->position.tick) : UINT32_MAX, 4);
+        Frame_Put(p + 16, w->status.valid ? (uint32_t)(park_failure.tick - w->status.tick) : UINT32_MAX, 4);
+    }
+    return 120;
 }
 
 static int Rearm(void)
@@ -192,6 +259,13 @@ static uint8_t Command(uint8_t type, const uint8_t *data, uint16_t size, uint8_t
                        uint32_t now)
 {
     uint32_t configured = executor.config.version;
+    if (type == 69)
+    {
+        if (size)
+            return COMM_FORMAT;
+        *reply_size = Park_Read(reply);
+        return COMM_OK;
+    }
     Select_Run(&zone_switch, now, HAL_GPIO_ReadPin(ZONE_SWITCH_GPIO_Port, ZONE_SWITCH_Pin) == GPIO_PIN_SET);
     Start_Check(&start_key, &zone_switch, now);
     if (type == 65)
@@ -328,6 +402,7 @@ void Base_Init(void)
     CAN_FilterTypeDef filter = {0};
     ExecIo io = {Ready, EnableWheel, Bus_Start, Send, Stop, Fault, Stopped, Rearm};
     CommHooks hooks = {StopCommand, Command};
+    memset(&park_failure, 0, sizeof(park_failure));
     query_slot = 0;
     recovery_pending = 0;
     recovery_token = 0;
@@ -499,6 +574,7 @@ void Base_Run(void)
             start_failure = executor.gate;
     }
     HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, start_key.beep ? GPIO_PIN_RESET : GPIO_PIN_SET);
+    Park_Capture(HAL_GetTick());
     MechPort_Run(HAL_GetTick(), (uint8_t)(executor.stop_confirmed && Ready(HAL_GetTick(), 0, 0)),
                  Fault() | executor.fault);
     Query(now);

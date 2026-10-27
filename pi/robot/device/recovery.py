@@ -40,7 +40,7 @@ class Recovery:
 
     def start(self, link, args, now):
         m = link.actual
-        if (self.active or link.firmware not in ('GC-BASE-0.3.33','GC-BASE-0.3.34') or not link.commissioning or
+        if (self.active or link.firmware not in ('GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35') or not link.commissioning or
                 link.latched or not link.bound or not link.action_locked or not link.stop_acknowledged or
                 now-link.actual_at >= .25 or now-link.base_at >= .25 or not link.base.get('stopped') or
                 not m.get('attached') or m.get('config_mask') != 3 or
@@ -99,7 +99,7 @@ class Recovery:
                 return None
             if str(link.boot) == self.record['boot']:
                 return self.fail('未确认新的启动身份，恢复未完成')
-            if link.firmware not in ('GC-BASE-0.3.33','GC-BASE-0.3.34') or link.base.get('fault') or link.actual.get('fault'):
+            if link.firmware not in ('GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35') or link.base.get('fault') or link.actual.get('fault'):
                 return self.fail('重启后故障仍存在；检查线路，不自动重试')
             if not link.base.get('stopped'):
                 return None

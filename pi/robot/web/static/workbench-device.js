@@ -1,7 +1,7 @@
-import {initSequence} from './workbench-sequence.js?v=1';
+import {initSequence} from './workbench-sequence.js?v=4';
 import {stateName, samePose, rejectionText} from './workbench-mech-guide.js?v=3';
-import {actuators, freshDevice, blockedReasons, allowed, moveArgs, manualTuning, armMaximum, canRecover} from './workbench-remote-state.js?v=12';
-import {mechanismNotice} from './workbench-mech-status.js?v=1';
+import {actuators, freshDevice, blockedReasons, allowed, moveArgs, manualTuning, armMaximum, canRecover} from './workbench-remote-state.js?v=13';
+import {mechanismNotice} from './workbench-mech-status.js?v=2';
 
 /* 仅访问实车网关；页面初始化只读取，不自动取得控制权或恢复动作。 */
 export function initDevice(root) {
@@ -193,7 +193,14 @@ export function initDevice(root) {
         catch(error){message(error.message);}
     };
     el('next').onclick=()=>act('next',{action_id:state.mechanism?.pose_id,revision:state.mechanism?.revision,step_index:state.mechanism?.step_index});
-    const sequenceUi=initSequence(card,current,act,message,()=>!!token,()=>pending||renewalUncertain);
+    const sequenceUi=initSequence(card,current,act,message,()=>!!token,()=>pending||renewalUncertain||sending,async record=>{
+        if(sending)return;sending=true;
+        try{
+            await send('sequence_delete',{id:record.id,revision:record.revision,sha256:record.sha256,confirmed:true});
+            const text=`已删除 ${record.id} · v${record.revision}；历史已归档，当前编辑内容保留，未执行动作`;
+            message(text);log(text);
+        }finally{sending=false;draw();}
+    },()=>({...state,connected:state.connected===true&&performance.now()-receivedAt<1500}));
     card.addEventListener('input',draw);el('poses').onchange=draw;
     function draw(){
         sequenceUi.draw();
@@ -220,7 +227,7 @@ export function initDevice(root) {
         el('prepare').disabled=!permit('prepare');
         el('home').disabled=!permit('home');el('home-confirm').disabled=!permit('home_confirm');
         el('home-state').textContent=({0:'未初始化',1:'等待输出',2:'已输出 · 等待稳定',3:'等待实物确认',4:'0°参考已确认',5:'已中止'})[value.home?.state]||'待核对';
-        el('home-note').textContent=value.firmware!=='GC-BASE-0.3.34'?'一键回零需要GC-BASE-0.3.34；当前固件仍可使用高级手动参考。':value.home?.state===3?'请目视确认三个舵机均已到命令0°且停止，再勾选现场确认并建立参考；软件等待时间不代表真实到位。':value.home?.state===4?'本次0°参考已由人工确认，后续可直接输入目标角和指令速度。':'先完成两轴人工建零并进入手动调试；确认三路可安全回0度后才点击，不会自动回零。';
+        el('home-note').textContent=!['GC-BASE-0.3.34','GC-BASE-0.3.35'].includes(value.firmware)?'一键回零需要GC-BASE-0.3.34；当前固件仍可使用高级手动参考。':value.home?.state===3?'请目视确认三个舵机均已到命令0°且停止，再勾选现场确认并建立参考；软件等待时间不代表真实到位。':value.home?.state===4?'本次0°参考已由人工确认，后续可直接输入目标角和指令速度。':'先完成两轴人工建零并进入手动调试；确认三路可安全回0度后才点击，不会自动回零。';
         el('recover').disabled=!canRecover(value,!!token,pending||renewalUncertain);
         el('recovery-note').textContent=value.recovery?.status && value.recovery.status!=='IDLE'
             ? `恢复 ${value.recovery.status}：${value.recovery.reason}`
@@ -231,7 +238,7 @@ export function initDevice(root) {
         el('mode').textContent=value.manual_debug?'返回互锁模式':'进入手动调试';
         el('mode-state').textContent=value.manual_debug?'手动调试 · 人工核对避让':'姿态互锁模式';
         const tuning=manualTuning(value),armMax=armMaximum(value);
-        el('angle-note').textContent=tuning?`转臂手动0～${armMax}°，0°直接使用原PWM换算，不重定义当前姿态；实际角度仍需核对。`:'转臂当前按83～180°校验；进入0.3.32手动模式后开放0～359°。';
+        el('angle-note').textContent=tuning?`转臂手动0～${armMax}°，0°直接使用原PWM换算，不重定义当前姿态；实际角度仍需核对。${value.firmware==='GC-BASE-0.3.35'?' 当前采用S曲线平滑起停，所填速度为上限。':''}`:'转臂当前按83～180°校验；进入0.3.32手动模式后开放0～359°。';
         el('range-note').textContent=tuning?'手动取消49/50mm上限；0为最高/最近端，下降和伸出为正。':'0.3.31手动模式支持扩展行程和速度；自动姿态沿用已验证范围。';
         el('zero').disabled=!permit('zero')||!!m?.zero_valid;el('anchor').disabled=!permit('anchor');
         for(const a of actuators){

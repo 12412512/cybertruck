@@ -1,5 +1,5 @@
 import {canAct, targetError} from './workbench-mech-guide.js?v=3';
-import {faultText} from './workbench-mech-status.js?v=1';
+import {faultText} from './workbench-mech-status.js?v=2';
 
 /* 实车机械页纯显示规则；不保存令牌、零点或模型状态。 */
 export const actuators = [
@@ -9,8 +9,8 @@ export const actuators = [
     {id:'arm', name:'转臂', pin:'PE11', unit:'°', min:83, max:180, initial:180},
     {id:'gripper', name:'夹爪', pin:'PE13', unit:'°', min:0, max:98, initial:98}
 ];
-export const manualTuning = state => ['GC-BASE-0.3.31','GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34'].includes(state.firmware) && state.manual_debug === true;
-export const armMaximum = state => ['GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34'].includes(state.firmware) && state.manual_debug ? 359 : manualTuning(state) ? 270 : 180;
+export const manualTuning = state => ['GC-BASE-0.3.31','GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35'].includes(state.firmware) && state.manual_debug === true;
+export const armMaximum = state => ['GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35'].includes(state.firmware) && state.manual_debug ? 359 : manualTuning(state) ? 270 : 180;
 export function freshDevice(state, receivedAt, now) {
     const age = state.state_age_ms;
     return state.connected === true && state.domain === 'physical' &&
@@ -28,7 +28,7 @@ export function blockedReasons(state, owned, pending) {
     if (m?.attached && m.config_mask !== 3) reasons.push('两轴驱动配置尚未核对完整');
     if (m?.attached && !m.zero_valid) reasons.push('零点无效：需在最高 / 最近端人工建零');
     if ([1,2,3].includes(state.home?.state)) reasons.push('舵机回零初始化中；实际到0度后确认，或停止取消');
-    if (['GC-BASE-0.3.31','GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34'].includes(state.firmware) && m?.zero_valid && !state.manual_debug)
+    if (['GC-BASE-0.3.31','GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35'].includes(state.firmware) && m?.zero_valid && !state.manual_debug)
         reasons.push('先进入手动调试，再执行单轴或舵机；完成后可继续下一角度');
     return reasons;
 }
@@ -39,7 +39,7 @@ export function allowed(state, owned, pending, action) {
     if (action === 'prepare') {
         const m=state.mechanism;
         return !owned && !pending && state.connected === true && state.site_ready === true &&
-            ['GC-BASE-0.3.26','GC-BASE-0.3.27','GC-BASE-0.3.28','GC-BASE-0.3.29','GC-BASE-0.3.30','GC-BASE-0.3.31','GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34'].includes(state.firmware) && state.action_locked === true &&
+            ['GC-BASE-0.3.26','GC-BASE-0.3.27','GC-BASE-0.3.28','GC-BASE-0.3.29','GC-BASE-0.3.30','GC-BASE-0.3.31','GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35'].includes(state.firmware) && state.action_locked === true &&
             !state.latched && state.stop_acknowledged === true && state.base?.stopped === true &&
             state.base?.fault === 0 && m?.fault === 6 && m.attached === 1 &&
             m.config_mask === 3 && m.base_stopped === 1 && !m.zero_valid && m.pwm_mask === 0;
@@ -47,22 +47,22 @@ export function allowed(state, owned, pending, action) {
     if (action === 'claim') return state.connected === true && !pending && !state.action_locked;
     if (action === 'load') return true;
     if (state.action_locked) return false;
-    if (action==='home' || action==='home_confirm') return state.firmware==='GC-BASE-0.3.34' &&
+    if (action==='home' || action==='home_confirm') return ['GC-BASE-0.3.34','GC-BASE-0.3.35'].includes(state.firmware) &&
         state.manual_debug===true && !!state.home &&
         (action!=='home_confirm'||state.home.state===3) && canAct(state,owned,pending,'move');
     if (state.sequence?.status==='RUNNING' || state.group?.state===1) return false;
     if (action === 'program_save') return owned && state.connected===true && !pending;
-    if (action === 'program_run') return ['GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34'].includes(state.firmware) && state.manual_debug===true &&
+    if (action === 'program_run') return ['GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35'].includes(state.firmware) && state.manual_debug===true &&
         !!state.group && canAct(state,owned,pending,'move');
     if (action === 'attach' || action === 'teach') return owned && state.connected === true && !pending &&
         (action !== 'attach' || (!state.base?.fault && !state.mechanism?.fault && state.base?.stopped && !state.mechanism?.attached));
-    if (action === 'mode' && !['GC-BASE-0.3.27','GC-BASE-0.3.28','GC-BASE-0.3.29','GC-BASE-0.3.30','GC-BASE-0.3.31','GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34'].includes(state.firmware)) return false;
-    if (action === 'move' && ['GC-BASE-0.3.31','GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34'].includes(state.firmware) && !state.manual_debug) return false;
+    if (action === 'mode' && !['GC-BASE-0.3.27','GC-BASE-0.3.28','GC-BASE-0.3.29','GC-BASE-0.3.30','GC-BASE-0.3.31','GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35'].includes(state.firmware)) return false;
+    if (action === 'move' && ['GC-BASE-0.3.31','GC-BASE-0.3.32','GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35'].includes(state.firmware) && !state.manual_debug) return false;
     return canAct(state, owned, pending, action);
 }
 export function canRecover(state, owned, pending) {
     const m=state.mechanism, busy=['CAPTURE','REQUEST','REBOOT','VERIFY','ATTACH'].includes(state.recovery?.status);
-    return state.domain==='physical' && ['GC-BASE-0.3.33','GC-BASE-0.3.34'].includes(state.firmware) && state.connected===true && state.site_ready===true &&
+    return state.domain==='physical' && ['GC-BASE-0.3.33','GC-BASE-0.3.34','GC-BASE-0.3.35'].includes(state.firmware) && state.connected===true && state.site_ready===true &&
         !owned && !pending && !busy && !state.latched && state.action_locked===true &&
         state.stop_acknowledged===true && state.base?.stopped===true && m?.attached===1 && m.config_mask===3;
 }

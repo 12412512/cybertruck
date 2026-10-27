@@ -49,6 +49,9 @@
 #define MECH_SERVO_STEP_MDEG         900L
 #define MECH_SERVO_SPEED_MIN       1000U
 #define MECH_SERVO_SPEED_MAX     360000U
+/* 初始平滑档，实物验收后再调；不是舵机实际转速/力矩反馈。 */
+#define MECH_SERVO_ACCEL_DEG_S2    180.0f
+#define MECH_SERVO_JERK_DEG_S3     720.0f
 #define MECH_SERVO_TIMEOUT_MS    420000U
 #define MECH_SERVO_WAIT_MS           600U
 #define MECH_SERVO_OUTPUT_MS          50U
