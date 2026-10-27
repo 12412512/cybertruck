@@ -23,6 +23,8 @@ def create_app(runtime=DEFAULT_RUNTIME, core_client=None, acceptance_path=None):
     app.include_router(lidar_router())
     from .vision import router as vision_router
     app.include_router(vision_router())
+    from .connections import router as connection_router
+    app.include_router(connection_router())
     snapshot = Path(runtime) / 'state.json'
     app.mount('/static', StaticFiles(directory=STATIC), name='static')
 

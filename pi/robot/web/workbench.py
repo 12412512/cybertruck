@@ -12,20 +12,21 @@ from ..workbench.contracts import Command
 
 
 class CoreClient:
-    def __init__(self, url='http://127.0.0.1:8090', headers=None):
+    def __init__(self, url='http://127.0.0.1:8090', headers=None, timeout=.6):
         parsed = urlsplit(url)
         if parsed.scheme != 'http' or parsed.hostname != '127.0.0.1' or parsed.path not in ('', '/'):
             raise ValueError('控制核心必须是本机回环HTTP服务')
         self.url = url.rstrip('/')
         self.opener = build_opener(ProxyHandler({}))
         self.headers = {'Content-Type': 'application/json', **(headers or {})}
+        self.timeout = timeout
 
     def request(self, path, body=None):
         data = None if body is None else json.dumps(body, allow_nan=False).encode()
         request = HttpRequest(self.url + path, data=data,
                               headers=self.headers)
         try:
-            with self.opener.open(request, timeout=.6) as response:
+            with self.opener.open(request, timeout=self.timeout) as response:
                 return json.load(response)
         except HTTPError as exc:
             try:

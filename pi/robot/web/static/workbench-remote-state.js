@@ -1,4 +1,5 @@
 import {canAct, targetError} from './workbench-mech-guide.js?v=3';
+import {faultText} from './workbench-mech-status.js?v=1';
 
 /* 实车机械页纯显示规则；不保存令牌、零点或模型状态。 */
 export const actuators = [
@@ -18,7 +19,7 @@ export function freshDevice(state, receivedAt, now) {
 export function blockedReasons(state, owned, pending) {
     const reasons = [], m = state.mechanism;
     if (!state.connected || !m) reasons.push(state.reason || '设备反馈未就绪');
-    if (state.base?.fault || m?.fault) reasons.push(`故障锁存：底盘 ${state.base?.fault || 0} / 机构 ${m?.fault || 0}`);
+    if (state.base?.fault || m?.fault) reasons.push(`故障锁存：底盘 ${state.base?.fault || 0} / 机构 ${m?.fault?faultText(m.fault):0}`);
     if (state.action_locked) reasons.push(state.reason || '动作已锁定，只读反馈保留');
     if (state.site_ready === false) reasons.push('设备核心保持只读，现场动作许可未开放');
     if (!owned) reasons.push('尚未取得实车控制权');

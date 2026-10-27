@@ -1,6 +1,7 @@
 import {initSequence} from './workbench-sequence.js?v=1';
 import {stateName, samePose, rejectionText} from './workbench-mech-guide.js?v=3';
-import {actuators, freshDevice, blockedReasons, allowed, moveArgs, manualTuning, armMaximum, canRecover} from './workbench-remote-state.js?v=11';
+import {actuators, freshDevice, blockedReasons, allowed, moveArgs, manualTuning, armMaximum, canRecover} from './workbench-remote-state.js?v=12';
+import {mechanismNotice} from './workbench-mech-status.js?v=1';
 
 /* 仅访问实车网关；页面初始化只读取，不自动取得控制权或恢复动作。 */
 export function initDevice(root) {
@@ -21,6 +22,7 @@ export function initDevice(root) {
         <details class="remote-recovery-help"><summary>停止与恢复说明</summary><p id="real-recovery-note" class="hint">恢复先保存故障记录，再关闭PWM并重启STM32。请先修复线路，确认机构静止、空爪且已有支撑；恢复后重新取得控制权、建零和记录参考，不自动续跑。</p></details>
         <div class="remote-toolbar"><span id="real-mode-state">姿态互锁模式</span><button id="real-mode">进入手动调试</button></div>
         <p class="hint">手动模式支持单轴、舵机和顺序 / 同时联调。输入只编辑目标，点击执行才动作。</p>
+        <p id="real-progress" class="remote-progress" role="status" aria-live="polite"></p>
         <p id="real-blockers" class="remote-blockers"></p>
         <p id="real-message" role="status" aria-live="polite">输入只修改目标；点击执行才发送实车请求。</p>
         <label class="remote-confirm"><input id="real-confirm" type="checkbox">现场已核对，允许切换模式或下一项准备操作</label>
@@ -211,6 +213,8 @@ export function initDevice(root) {
             item.className=done?'ready':'';return item;
         }));
         el('owner').textContent=token?'本页持有控制权':'未持有控制权';
+        const notice=mechanismNotice(value,pending?pendingLabel:'');
+        el('progress').textContent=notice.text;el('progress').dataset.kind=notice.kind;
         el('blockers').textContent=blockedReasons(value,!!token,pending||renewalUncertain).join('；')||'接口就绪；每项动作仍由板端复核';
         const permit=action=>!sending&&allowed(value,!!token,pending||renewalUncertain,action);
         el('prepare').disabled=!permit('prepare');
@@ -262,7 +266,7 @@ export function initDevice(root) {
         try{
             const response=await fetch('/api/device/state',{cache:'no-store'});if(!response.ok)throw Error('设备状态读取失败');
             state=await response.json();receivedAt=performance.now();const nextIdentity=`${state.boot_id}:${state.session_id}`;
-            if(identity&&identity!==nextIdentity){token='';pending='';renewalUncertain=false;acceptedEnables.clear();message('设备身份已变化，旧控制权和参考无效；不自动恢复');}
+            if(identity&&identity!==nextIdentity){token='';pending='';renewalUncertain=false;acceptedEnables.clear();el('confirm').checked=false;message('设备身份已变化，旧控制权和参考无效；不自动恢复');}
             identity=nextIdentity;const result=(state.results||[]).find(r=>r.request_id===pending);
             if(result){
                 const text=result.result?`${pendingLabel}：${rejectionText(pendingAction,result.result,state)}`:`${pendingLabel}：板端已接受，完成以反馈为准`;
