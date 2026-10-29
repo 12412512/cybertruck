@@ -1,0 +1,22 @@
+# Git 统一文本内容；生成工具可以保留其本机换行。
+* text=auto
+*.c text
+*.h text
+*.s text
+*.S text
+*.ioc text
+*.uvprojx text
+*.xml text
+*.md text
+*.py text
+*.json text
+*.yaml text
+*.yml text
+*.toml text
+*.ps1 text
+*.sh text eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.zip binary

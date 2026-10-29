@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>搬运小车 · 只读工作台</title>
+    <link rel="stylesheet" href="/static/style.css?v=16">
+</head>
+<body>
+    <header>
+        <div>
+            <p class="eyebrow">智能搬运小车 / 只读调试</p>
+            <h1>搬运小车调试工作台</h1>
+        </div>
+        <span class="badge">只读工作台</span>
+    </header>
+    <main>
+        <section class="notice" id="source" role="status">正在读取控制核心状态…</section>
+        <section class="panel" aria-label="实车短段准备">
+            <h2>实车短段准备</h2>
+            <p id="base-ready">单段执行已初测；短组合路线正在离线联调，本页不发送运动。</p>
+            <p class="muted">已验证基础单段方向与停车；组合路线共用同一会话和连续里程计，网页只读，实车仍需本次现场确认。</p>
+            <dl>
+                <dt>执行状态</dt><dd id="base-state">未连接新执行固件</dd>
+                <dt>当前动作</dt><dd id="base-action">未下发</dd>
+                <dt>停止确认</dt><dd id="base-stop">待实车反馈</dd>
+                <dt>CAN错误 / 接收序号</dt><dd id="base-can">未接入</dd>
+                <dt>IMU原始航向 / 陀螺Z</dt><dd id="base-imu">未接入，方向待核对</dd>
+                <dt>后续顺序</dt><dd>同会话短组合 → 实物场地单路 → 整图</dd>
+            </dl>
+        </section>
+        <section class="panel" id="site-panel">
+            <h2>启停区1 → 扫码预停点 · 现场核对</h2>
+            <p class="muted">map原点在场地左下角，X向右、Y向上；启停区1车头沿+X。O取四轮轮心矩形中心。下面是测量准备，不会改变车辆位置或启用路线。</p>
+            <dl>
+                <dt>当前状态</dt><dd id="site-status">读取测量记录…</dd>
+                <dt>完整包络（前/后/左/右）</dt><dd id="site-body">待测</dd>
+                <dt>场地 / 启停区1尺寸</dt><dd id="site-field">待测</dd>
+                <dt>起点O距左边 / 上边</dt><dd id="site-start">待测；上边距离不是map Y</dd>
+                <dt>扫码预停点</dt><dd id="site-target">north与qr尚待确认</dd>
+                <dt>道路 / 摆放误差</dt><dd id="site-corridor">待核对</dd>
+            </dl>
+            <svg viewBox="0 0 560 240" role="img" aria-label="四轮中心O至整车四个最外缘测量示意，非实际比例">
+                <rect x="120" y="28" width="310" height="178" fill="#edf4fa" stroke="#738da3"/>
+                <path d="M260 116H430 M260 116H120 M260 116V28 M260 116V206" stroke="#3e729f" stroke-width="2"/>
+                <circle cx="260" cy="116" r="5" fill="#263e50"/>
+                <text x="270" y="110">O（四轮中心）</text><text x="440" y="120">前 +X</text>
+                <text x="42" y="120">后</text><text x="240" y="20">左 +Y</text><text x="240" y="228">右</text>
+                <text x="132" y="190" fill="#526579" font-size="13">示意框不是实车尺寸；计入所有突出件和线束</text>
+            </svg>
+        </section>
+        <section class="panel" id="route-panel">
+            <h2>短组合路线 · 同会话执行准备</h2>
+            <p class="muted">直线 → 斜线 → 固定车头弧线 → 边走边转姿。局部odom坐标，尚未与场地地图配准。段间停车稳定后交接，保持串口、使能和里程计连续。</p>
+            <dl>
+                <dt>路线状态</dt><dd id="route-status">读取冻结路线…</dd>
+                <dt>当前段 / 完成数</dt><dd id="route-progress">等待</dd>
+                <dt>起点与轨迹</dt><dd>起点(0,0,0)，X前/Y左/逆时针正；蓝线为名义参考，橙线为模型或实车反馈</dd>
+                <dt>当前位置</dt><dd id="route-pose">尚无反馈</dd>
+                <dt>执行边界</dt><dd id="route-boundary">网页不下发运动；实际每段锚定新鲜实测起点，显示累计偏差。</dd>
+            </dl>
+            <button type="button" id="route-replay">播放离线闭环（2倍速，不连接实车）</button>
+            <svg id="route-map" viewBox="0 0 640 300" role="img" aria-label="短组合路线名义参考与反馈轨迹"></svg>
+        </section>
+        <section class="panel" id="nav-panel" hidden>
+            <h2>场地路径 · 两批离线导航</h2>
+            <p class="muted">名义场地＋主体轮廓，完整突出物及实测坐标待补。以下只模拟导航，不执行扫码或搬运，不代表比赛耗时。</p>
+            <dl>
+                <dt>起点 / 坐标约定</dt><dd id="nav-frame">未接入</dd>
+                <dt>导航状态 / 当前路段</dt><dd id="nav-state">未接入</dd>
+                <dt>模型位姿 X / Y / 航向</dt><dd id="nav-pose">未接入</dd>
+                <dt>参考估计 / 模拟耗时</dt><dd id="nav-time">未接入</dd>
+                <dt>60秒预算 / 建模范围</dt><dd id="nav-budget">未接入</dd>
+                <dt>统一轨迹接入</dt><dd id="nav-export">等待规划包</dd>
+                <dt>返航朝向</dt><dd id="nav-return">未接入</dd>
+                <dt>模拟巡航 / 轮速峰值</dt><dd id="nav-speed">未接入</dd>
+                <dt>转姿与行程</dt><dd id="nav-turns">未接入</dd>
+                <dt>连续里程原点</dt><dd id="nav-origin">未接入</dd>
+                <dt>道路与部署条件</dt><dd id="nav-conditions">未接入</dd>
+                <dt>异常原因</dt><dd id="nav-reason">—</dd>
+            </dl>
+            <p class="muted">蓝区可通行；黄区和工作台包络禁入。蓝线：规划参考；橙线：模拟里程计；白色车身：模拟位置与朝向。原点在左下角，X向右、Y向上。</p>
+            <svg id="nav-map" viewBox="0 0 650 650" role="img" aria-label="启停区1车头沿地图正X的两批导航模拟"></svg>
+            <div class="table-scroll"><table><thead><tr><th>导航段</th><th>状态 / 道路依赖</th><th>动作类型</th><th>参考估计</th></tr></thead><tbody id="nav-legs"></tbody></table></div>
+        </section>
+        <section class="grid" aria-label="通信状态">
+            <article>
+                <h2>通信链路</h2>
+                <strong id="connection">未知</strong>
+                <p id="message">等待状态</p>
+            </article>
+            <article>
+                <h2>控制核心</h2>
+                <strong id="core">未知</strong>
+                <p id="age">状态时效：—</p>
+            </article>
+            <article>
+                <h2>下位机固件</h2>
+                <strong id="firmware">—</strong>
+                <p id="uptime">运行时间：—</p>
+            </article>
+            <article>
+                <h2>设备故障</h2>
+                <strong id="fault">未知</strong>
+                <p>故障值来自当前有效设备状态</p>
+            </article>
+        </section>
+        <section class="panel">
+            <h2>协议诊断</h2>
+            <dl>
+                <dt>启动身份</dt><dd id="boot">—</dd>
+                <dt>会话身份</dt><dd id="session">—</dd>
+                <dt>主控接收</dt><dd id="frames">—</dd>
+                <dt>有效保活</dt><dd id="heart">—</dd>
+                <dt>实体 PC0 输入</dt><dd id="key">未知</dd>
+            </dl>
+        </section>
+        <section class="panel">
+            <h2>实车只读反馈</h2>
+            <p class="muted">以下为旧服务报告值。精确采集时刻尚未接入；编码器和IMU未转换为本车位姿，不用于闭环。</p>
+            <dl>
+                <dt>CAN错误 / 最近错误 / 接收</dt><dd id="can">未接入</dd>
+                <dt>锁存CAN错误快照</dt><dd id="can-event">未接入</dd>
+                <dt>当前CAN / 历史错误</dt><dd id="can-decoded">未接入</dd>
+                <dt>旧串口CRC / 格式错误</dt><dd id="legacy-uart">未接入</dd>
+                <dt>旧服务控制权</dt><dd id="legacy-owner">未接入</dd>
+                <dt>已知观察时间链</dt><dd id="timing">未接入</dd>
+                <dt>IMU航向</dt><dd id="imu">未接入</dd>
+                <dt>IMU角速度</dt><dd id="gyro">未接入</dd>
+                <dt>停车证据</dt><dd id="stopped">未接入</dd>
+            </dl>
+            <ul id="wheels"></ul>
+        </section>
+        <section class="panel">
+            <h2>任务与物理状态</h2>
+            <div class="facts">
+                <p>位姿 <b>未接入</b></p>
+                <p>机构零点 <b>未建立</b></p>
+                <p>抓取 / 放置计数 <b>未接入</b></p>
+                <p>实物停稳证据 <b>未接入</b></p>
+            </div>
+            <p class="muted">本阶段验证通信。设备在线不表示已具备运动或搬运条件。</p>
+        </section>
+        <section class="panel" id="odom-panel">
+            <h2>连续里程计 · 离线模型</h2>
+            <p class="muted">仅合成反馈回放。下列位置属于模拟odom，本车真实位姿仍未接入。</p>
+            <dl>
+                <dt>模型状态</dt><dd id="odom-status">未运行</dd>
+                <dt>X / Y / 航向</dt><dd id="odom-pose">未接入</dd>
+                <dt>参考对照差</dt><dd id="odom-error">未接入</dd>
+                <dt>共同时间 / 提交 / 等待</dt><dd id="odom-timing">未接入</dd>
+                <dt>反馈帧 / 数据源</dt><dd id="odom-source">未接入</dd>
+            </dl>
+            <svg id="odom-trace" viewBox="0 0 600 240" role="img" aria-label="模拟里程轨迹，非真实地图"></svg>
+        </section>
+        <section class="panel">
+            <h2>轨迹跟踪与到位 · 离线闭环</h2>
+            <p class="muted">蓝线为参考，橙线为模拟里程计。车体真值由轮命令、电机滞后与载荷差异独立产生；所有参数均为合成测试参数。</p>
+            <dl>
+                <dt>动作 / 状态</dt><dd id="track-state">未运行</dd>
+                <dt>模拟位姿 X / Y / 航向</dt><dd id="track-pose">未接入</dd>
+                <dt>终点位置 / 航向误差</dt><dd id="track-error">未接入</dd>
+                <dt>参考结束 / 确认完成</dt><dd id="track-times">未接入</dd>
+                <dt>零速发送确认 / 新反馈稳定</dt><dd id="track-proof">未接入</dd>
+                <dt>当前未满足条件</dt><dd id="track-blockers">未接入</dd>
+                <dt>轮目标 RPM（FL/FR/RL/RR）</dt><dd id="track-targets">未接入</dd>
+                <dt>模型真实轮速 RPM</dt><dd id="track-speeds">未接入</dd>
+                <dt>模拟状态过程</dt><dd id="track-history">未接入</dd>
+            </dl>
+            <svg id="track-trace" viewBox="0 0 600 240" role="img" aria-label="蓝色参考与橙色闭环模拟轨迹，非真实地图"></svg>
+        </section>
+        <section class="panel">
+            <h2>离线任务账本</h2>
+            <p class="muted">以下任务与计数均来自模拟物料模型，实车成绩未接入。</p>
+            <dl>
+                <dt>完整任务码</dt><dd id="task-code">未接入</dd>
+                <dt>状态 / 阶段</dt><dd id="task-stage">未接入</dd>
+                <dt>模拟抓取 / 放置</dt><dd id="task-counts">未接入</dd>
+                <dt>车载料位 S1/S2/S3</dt><dd id="task-tray">未接入</dd>
+                <dt>同色第一层映射</dt><dd id="task-mapping">未接入</dd>
+                <dt>确认进度</dt><dd id="task-progress">未接入</dd>
+                <dt>中断 / 对账原因</dt><dd id="task-reason">—</dd>
+            </dl>
+        </section>
+        <section class="panel">
+            <h2>最近通信事件</h2>
+            <ul id="events"><li>暂无事件</li></ul>
+        </section>
+    </main>
+    <footer>浏览器仅观察状态 · 参数与动作接口尚未开放</footer>
+    <script type="module" src="/static/app.js?v=17"></script>
+</body></html>

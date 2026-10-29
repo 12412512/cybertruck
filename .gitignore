@@ -1,0 +1,51 @@
+# 本机输出与临时文件
+/output/
+*.tmp
+*.bak
+~$*
+.DS_Store
+Thumbs.db
+
+# Keil 编译产物和用户界面状态
+**/Objects/
+**/Listings/
+**/DebugConfig/
+*.uvguix.*
+*.uvgui.*
+*.uvopt
+*.uvoptx
+*.opt.bak
+*.plg
+*.lnp
+*.crf
+*.d
+*.o
+*.obj
+*.axf
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+*.build_log.htm
+
+# Python 缓存和本地环境
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+htmlcov/
+.venv/
+venv/
+
+# 本地编辑器状态、凭据和环境配置
+.vscode/
+.idea/
+.env
+.env.*
+!.env.example

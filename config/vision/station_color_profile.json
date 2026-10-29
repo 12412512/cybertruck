@@ -1,0 +1,1093 @@
+{
+  "version": 1,
+  "device": "/dev/v4l/by-id/usb-SYD_USB_Camera_200901010001-video-index0",
+  "resolution": [
+    1280,
+    720
+  ],
+  "plate_roi": [
+    478,
+    2,
+    1248,
+    713
+  ],
+  "grasp_roi": [
+    512,
+    234,
+    757,
+    531
+  ],
+  "colors": {
+    "1": {
+      "lab": [
+        79.0,
+        176.0,
+        154.0
+      ],
+      "scale": [
+        8.0,
+        8.0,
+        8.0
+      ],
+      "calibrated": true,
+      "sample_count": 1018,
+      "v95": 145.14999999999998,
+      "sampled_at_unix": 1792429141.1033201,
+      "examples": [
+        {
+          "lab": [
+            110.0,
+            183.0,
+            153.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 2437,
+          "v95": 192.0,
+          "sampled_at_unix": 1792427791.6268816
+        },
+        {
+          "lab": [
+            87.0,
+            178.0,
+            154.0
+          ],
+          "scale": [
+            14.825999999999999,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 2558,
+          "v95": 163.0,
+          "sampled_at_unix": 1792428347.9779205
+        },
+        {
+          "lab": [
+            102.0,
+            186.0,
+            160.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 1209,
+          "v95": 184.0,
+          "sampled_at_unix": 1792429141.1023128
+        },
+        {
+          "lab": [
+            79.0,
+            176.0,
+            154.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 1018,
+          "v95": 145.14999999999998,
+          "sampled_at_unix": 1792429141.1033201
+        }
+      ]
+    },
+    "2": {
+      "lab": [
+        215.0,
+        118.0,
+        177.0
+      ],
+      "scale": [
+        8.0,
+        8.0,
+        8.0
+      ],
+      "calibrated": true,
+      "sample_count": 989,
+      "v95": 223.0,
+      "sampled_at_unix": 1792479754.8453217,
+      "examples": [
+        {
+          "lab": [
+            205.0,
+            117.0,
+            189.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 992,
+          "v95": 215.0,
+          "sampled_at_unix": 1792431712.967663
+        },
+        {
+          "lab": [
+            173.0,
+            119.0,
+            184.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 989,
+          "v95": 184.0,
+          "sampled_at_unix": 1792431712.9691172
+        },
+        {
+          "lab": [
+            215.0,
+            118.0,
+            177.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 989,
+          "v95": 223.0,
+          "sampled_at_unix": 1792479754.8453217
+        }
+      ]
+    },
+    "3": {
+      "lab": [
+        104.0,
+        127.0,
+        95.0
+      ],
+      "scale": [
+        14.825999999999999,
+        8.0,
+        8.0
+      ],
+      "calibrated": true,
+      "sample_count": 460,
+      "v95": 156.0,
+      "sampled_at_unix": 1792439219.851968,
+      "examples": [
+        {
+          "lab": [
+            92.0,
+            133.0,
+            85.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 2002,
+          "v95": 157.0,
+          "sampled_at_unix": 1792427791.6280017
+        },
+        {
+          "lab": [
+            69.0,
+            135.0,
+            89.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 2396,
+          "v95": 126.0,
+          "sampled_at_unix": 1792428347.9779205
+        },
+        {
+          "lab": [
+            77.0,
+            134.0,
+            89.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 1653,
+          "v95": 136.0,
+          "sampled_at_unix": 1792429141.1033201
+        },
+        {
+          "lab": [
+            87.0,
+            128.0,
+            98.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 360,
+          "v95": 132.0,
+          "sampled_at_unix": 1792429141.1033201
+        },
+        {
+          "lab": [
+            104.0,
+            127.0,
+            95.0
+          ],
+          "scale": [
+            14.825999999999999,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 460,
+          "v95": 156.0,
+          "sampled_at_unix": 1792439219.851968
+        }
+      ]
+    },
+    "4": {
+      "lab": [
+        143.0,
+        80.0,
+        154.0
+      ],
+      "scale": [
+        8.0,
+        8.0,
+        8.0
+      ],
+      "calibrated": true,
+      "sample_count": 1070,
+      "v95": 157.0,
+      "sampled_at_unix": 1792479428.5617697,
+      "examples": [
+        {
+          "lab": [
+            129.0,
+            78.0,
+            166.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 757,
+          "v95": 141.0,
+          "sampled_at_unix": 1792431712.9691172
+        },
+        {
+          "lab": [
+            100.0,
+            87.0,
+            159.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 909,
+          "v95": 110.0,
+          "sampled_at_unix": 1792431712.9691172
+        },
+        {
+          "lab": [
+            143.0,
+            80.0,
+            154.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 1070,
+          "v95": 157.0,
+          "sampled_at_unix": 1792479428.5617697
+        }
+      ]
+    },
+    "5": {
+      "lab": [
+        58.0,
+        129.0,
+        125.0
+      ],
+      "scale": [
+        11.1195,
+        8.0,
+        8.0
+      ],
+      "calibrated": true,
+      "sample_count": 187,
+      "v95": 64.0,
+      "sampled_at_unix": 1792431712.9691172,
+      "examples": [
+        {
+          "lab": [
+            25.0,
+            130.0,
+            124.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 1053,
+          "v95": 34.0,
+          "sampled_at_unix": 1792431712.9691172
+        },
+        {
+          "lab": [
+            58.0,
+            129.0,
+            125.0
+          ],
+          "scale": [
+            11.1195,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 187,
+          "v95": 64.0,
+          "sampled_at_unix": 1792431712.9691172
+        }
+      ]
+    },
+    "6": {
+      "lab": [
+        102.0,
+        116.0,
+        109.0
+      ],
+      "scale": [
+        8.0,
+        8.0,
+        8.0
+      ],
+      "calibrated": true,
+      "sample_count": 1157,
+      "v95": 129.0,
+      "sampled_at_unix": 1792429141.104313,
+      "examples": [
+        {
+          "lab": [
+            150.0,
+            112.0,
+            107.0
+          ],
+          "scale": [
+            14.825999999999999,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 2240,
+          "v95": 187.0,
+          "sampled_at_unix": 1792427791.6298854
+        },
+        {
+          "lab": [
+            89.0,
+            119.0,
+            109.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 1911,
+          "v95": 118.0,
+          "sampled_at_unix": 1792428347.9789205
+        },
+        {
+          "lab": [
+            129.0,
+            112.0,
+            107.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 894,
+          "v95": 158.0,
+          "sampled_at_unix": 1792429141.104313
+        },
+        {
+          "lab": [
+            102.0,
+            116.0,
+            109.0
+          ],
+          "scale": [
+            8.0,
+            8.0,
+            8.0
+          ],
+          "calibrated": true,
+          "sample_count": 1157,
+          "v95": 129.0,
+          "sampled_at_unix": 1792429141.104313
+        }
+      ]
+    }
+  },
+  "shape_reference": [
+    [
+      597,
+      320
+    ],
+    [
+      594,
+      322
+    ],
+    [
+      586,
+      322
+    ],
+    [
+      584,
+      325
+    ],
+    [
+      578,
+      325
+    ],
+    [
+      576,
+      328
+    ],
+    [
+      573,
+      328
+    ],
+    [
+      568,
+      333
+    ],
+    [
+      565,
+      333
+    ],
+    [
+      552,
+      346
+    ],
+    [
+      552,
+      349
+    ],
+    [
+      546,
+      354
+    ],
+    [
+      546,
+      357
+    ],
+    [
+      544,
+      360
+    ],
+    [
+      544,
+      365
+    ],
+    [
+      541,
+      368
+    ],
+    [
+      541,
+      376
+    ],
+    [
+      538,
+      378
+    ],
+    [
+      538,
+      397
+    ],
+    [
+      541,
+      400
+    ],
+    [
+      541,
+      408
+    ],
+    [
+      544,
+      410
+    ],
+    [
+      544,
+      416
+    ],
+    [
+      546,
+      418
+    ],
+    [
+      546,
+      421
+    ],
+    [
+      554,
+      429
+    ],
+    [
+      554,
+      432
+    ],
+    [
+      562,
+      440
+    ],
+    [
+      568,
+      440
+    ],
+    [
+      570,
+      442
+    ],
+    [
+      570,
+      445
+    ],
+    [
+      573,
+      445
+    ],
+    [
+      576,
+      448
+    ],
+    [
+      578,
+      448
+    ],
+    [
+      581,
+      450
+    ],
+    [
+      586,
+      450
+    ],
+    [
+      589,
+      453
+    ],
+    [
+      624,
+      453
+    ],
+    [
+      626,
+      450
+    ],
+    [
+      632,
+      450
+    ],
+    [
+      634,
+      448
+    ],
+    [
+      637,
+      448
+    ],
+    [
+      640,
+      445
+    ],
+    [
+      642,
+      445
+    ],
+    [
+      645,
+      442
+    ],
+    [
+      648,
+      442
+    ],
+    [
+      661,
+      429
+    ],
+    [
+      661,
+      426
+    ],
+    [
+      666,
+      421
+    ],
+    [
+      666,
+      418
+    ],
+    [
+      669,
+      416
+    ],
+    [
+      669,
+      410
+    ],
+    [
+      672,
+      408
+    ],
+    [
+      672,
+      402
+    ],
+    [
+      674,
+      400
+    ],
+    [
+      674,
+      376
+    ],
+    [
+      672,
+      373
+    ],
+    [
+      672,
+      365
+    ],
+    [
+      669,
+      362
+    ],
+    [
+      669,
+      360
+    ],
+    [
+      666,
+      357
+    ],
+    [
+      666,
+      354
+    ],
+    [
+      664,
+      352
+    ],
+    [
+      664,
+      349
+    ],
+    [
+      645,
+      330
+    ],
+    [
+      642,
+      330
+    ],
+    [
+      640,
+      328
+    ],
+    [
+      637,
+      328
+    ],
+    [
+      634,
+      325
+    ],
+    [
+      629,
+      325
+    ],
+    [
+      626,
+      322
+    ],
+    [
+      618,
+      322
+    ],
+    [
+      616,
+      320
+    ]
+  ],
+  "min_area_px": 300.0,
+  "max_area_fraction": 0.25,
+  "min_score": 0.55,
+  "max_frame_age_ms": 250,
+  "max_track_gap_ms": 300,
+  "stable_frames": 5,
+  "stable_span_ms": 500,
+  "stable_jitter_px": 4.0,
+  "max_speed_px_s": 8.0,
+  "request_timeout_ms": 8000,
+  "metric_calibration": null,
+  "calibration_source": {
+    "real_frame": "fresh_snapshot_raw.jpg",
+    "sha256": "7fd2d58b3d29fe34154590b9b811712bc07ca5bd982eef16185babf23dbbe71d",
+    "annotations": "surface_annotations.json",
+    "surface_labels": "human visual annotation",
+    "accuracy_evaluation": false
+  },
+  "calibration_note": "New camera pose: user regions saved and preserved exactly. Rectangle uses full selected observation bounds. Colors 1/3/6 re-sampled on visible cap/side surfaces; colors 2/4/5 and black shape await recalibration. Camera-edge cyan cap clipping remains unaccepted.",
+  "plate_roi_shape": "rectangle",
+  "processing_width": 480,
+  "frame_margin_px": 20,
+  "component_color_dominance": 0.85,
+  "component_min_support": 0.35,
+  "shape_references": [
+    [
+      [
+        597,
+        320
+      ],
+      [
+        594,
+        322
+      ],
+      [
+        586,
+        322
+      ],
+      [
+        584,
+        325
+      ],
+      [
+        578,
+        325
+      ],
+      [
+        576,
+        328
+      ],
+      [
+        573,
+        328
+      ],
+      [
+        568,
+        333
+      ],
+      [
+        565,
+        333
+      ],
+      [
+        552,
+        346
+      ],
+      [
+        552,
+        349
+      ],
+      [
+        546,
+        354
+      ],
+      [
+        546,
+        357
+      ],
+      [
+        544,
+        360
+      ],
+      [
+        544,
+        365
+      ],
+      [
+        541,
+        368
+      ],
+      [
+        541,
+        376
+      ],
+      [
+        538,
+        378
+      ],
+      [
+        538,
+        397
+      ],
+      [
+        541,
+        400
+      ],
+      [
+        541,
+        408
+      ],
+      [
+        544,
+        410
+      ],
+      [
+        544,
+        416
+      ],
+      [
+        546,
+        418
+      ],
+      [
+        546,
+        421
+      ],
+      [
+        554,
+        429
+      ],
+      [
+        554,
+        432
+      ],
+      [
+        562,
+        440
+      ],
+      [
+        568,
+        440
+      ],
+      [
+        570,
+        442
+      ],
+      [
+        570,
+        445
+      ],
+      [
+        573,
+        445
+      ],
+      [
+        576,
+        448
+      ],
+      [
+        578,
+        448
+      ],
+      [
+        581,
+        450
+      ],
+      [
+        586,
+        450
+      ],
+      [
+        589,
+        453
+      ],
+      [
+        624,
+        453
+      ],
+      [
+        626,
+        450
+      ],
+      [
+        632,
+        450
+      ],
+      [
+        634,
+        448
+      ],
+      [
+        637,
+        448
+      ],
+      [
+        640,
+        445
+      ],
+      [
+        642,
+        445
+      ],
+      [
+        645,
+        442
+      ],
+      [
+        648,
+        442
+      ],
+      [
+        661,
+        429
+      ],
+      [
+        661,
+        426
+      ],
+      [
+        666,
+        421
+      ],
+      [
+        666,
+        418
+      ],
+      [
+        669,
+        416
+      ],
+      [
+        669,
+        410
+      ],
+      [
+        672,
+        408
+      ],
+      [
+        672,
+        402
+      ],
+      [
+        674,
+        400
+      ],
+      [
+        674,
+        376
+      ],
+      [
+        672,
+        373
+      ],
+      [
+        672,
+        365
+      ],
+      [
+        669,
+        362
+      ],
+      [
+        669,
+        360
+      ],
+      [
+        666,
+        357
+      ],
+      [
+        666,
+        354
+      ],
+      [
+        664,
+        352
+      ],
+      [
+        664,
+        349
+      ],
+      [
+        645,
+        330
+      ],
+      [
+        642,
+        330
+      ],
+      [
+        640,
+        328
+      ],
+      [
+        637,
+        328
+      ],
+      [
+        634,
+        325
+      ],
+      [
+        629,
+        325
+      ],
+      [
+        626,
+        322
+      ],
+      [
+        618,
+        322
+      ],
+      [
+        616,
+        320
+      ]
+    ]
+  ],
+  "shape_reference_source": {
+    "file": "adjusted_snapshot_raw.jpg",
+    "color_id": 5,
+    "purpose": "actual black material positive reference; not obstacle classifier"
+  },
+  "shape_reference_sources": [
+    {
+      "file": "../six_color_black_20261020/actual_mount_readback/snapshot_raw.jpg",
+      "color_id": 5,
+      "view": "user confirmed true black at actual grasp position"
+    }
+  ],
+  "installation_note": "user restored final actual camera mounting; geometry must be recalibrated by operator"
+}

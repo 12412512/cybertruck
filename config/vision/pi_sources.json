@@ -1,0 +1,19 @@
+[
+  {
+    "source": "/home/pi/robotcarrier_vision_live_20261020/profiles/material_profile.json",
+    "sha256": "bdf2431adb8a6175705be83e04f3e56e1c538f52ceb0888e55f7132983711a6a"
+  },
+  {
+    "source": "/home/pi/robotcarrier_vision_live_20261020/profiles/ring_profile.json",
+    "sha256": "04fd0a4b857ad8c887da2be16c71c43821efaa27b0732c1e00b5c328c476a1ca"
+  },
+  {
+    "source": "/home/pi/robotcarrier_vision_live_20261020/profiles/station_color_profile.json",
+    "sha256": "10bded6441d34b5c617532293f6061692141084b8f5aea8559cfc6eae9101b99"
+  },
+  {
+    "source": "/home/pi/robotcarrier_alignment_vision_20261020/alignment_vision/state/active_reference.json",
+    "sha256": "f223cc2622364488d5decb2e88aad1a2a21adacd40bdf2659c6353133adef0f1",
+    "historical_only": true
+  }
+]

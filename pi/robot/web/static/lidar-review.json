@@ -1,0 +1,356 @@
+{
+  "schema": 1,
+  "domain": "lidar_commissioning_review",
+  "live": false,
+  "historical": true,
+  "real_map_registered": false,
+  "authorizes_motion": false,
+  "auto_execution_ready": false,
+  "applied": false,
+  "installation": {
+    "schema": 1,
+    "version": "lidar-installation-draft-2",
+    "review_date": "2026-10-25",
+    "domain": "physical_installation_draft",
+    "parent_frame": "base_link",
+    "origin_definition": "O为四轮轮心矩形中心；雷达原点为旋转中心",
+    "axis_definition": "X车头、Y车体左侧、Z向上；米、弧度",
+    "translation_m": {
+      "x": 0.0,
+      "y": -0.145,
+      "z": null
+    },
+    "translation_source": "用户确认旋转中心前后对称、位于车体右侧约145mm；扫描面离地50mm为此前用户读数",
+    "scan_plane_height_above_ground_m": 0.05,
+    "height_reference": "base_link原点离地高度未测，因此三维z平移未知；50mm单独记录为扫描面离地高度",
+    "translation_is_approximate": true,
+    "translation_uncertainty_m": null,
+    "mount_yaw_rad": -1.5707963267948966,
+    "mount_yaw_source": "用户确认雷达正前方向朝车体-Y，盲区朝车体+Y；按X前/Y左逆时针为正，安装偏航名义值-90度",
+    "mount_yaw_uncertainty_rad": null,
+    "blind_direction_body": "+Y",
+    "vendor_axis_convention": "unresolved",
+    "real_map_registered": false,
+    "runtime_device_enabled": false,
+    "authorizes_motion": false
+  },
+  "nominal_body_pose_m_rad": [
+    0.15,
+    2.25,
+    0.0
+  ],
+  "nominal_radar_pose_m_rad": [
+    0.15,
+    2.105,
+    -1.5707963267948966
+  ],
+  "body_pose_is_nominal": true,
+  "information": {
+    "firmware": "1.37",
+    "protocol": 6,
+    "zone": 1,
+    "x_mm": 156,
+    "y_mm": 2254,
+    "heading_deg": 198.40625,
+    "running": 0,
+    "max_scan_points": 768
+  },
+  "board_identity": [
+    "4238763712413174319",
+    "4005951207622912034"
+  ],
+  "points": [
+    {
+      "label": "P1复测",
+      "scan_id": "58b5cbd8897d406f83fd46b62c26dd40",
+      "map_m": [
+        0.45,
+        1.95
+      ],
+      "vendor_m": [
+        0.48012499999999997,
+        1.8094999999999999
+      ],
+      "spread_m": 0.0010077822185373042,
+      "measurement_uncertainty_m": 0.005,
+      "used_for_fit": true
+    },
+    {
+      "label": "P2",
+      "scan_id": "58acc4beeb0548f4af3984d8ad0922d8",
+      "map_m": [
+        0.75,
+        1.95
+      ],
+      "vendor_m": [
+        0.502625,
+        1.506875
+      ],
+      "spread_m": 0.0018456028825291448,
+      "measurement_uncertainty_m": 0.005,
+      "used_for_fit": true
+    },
+    {
+      "label": "P3",
+      "scan_id": "eac033c8aac74702988e7289831dc6b0",
+      "map_m": [
+        0.45,
+        1.65
+      ],
+      "vendor_m": [
+        0.771,
+        1.818
+      ],
+      "spread_m": 0.0014142135623730178,
+      "measurement_uncertainty_m": 0.005,
+      "used_for_fit": true
+    },
+    {
+      "label": "P4独立点",
+      "scan_id": "ab5873825c3b470e9c05f51dd3f6a028",
+      "map_m": [
+        0.75,
+        1.65
+      ],
+      "vendor_m": [
+        0.7937500000000001,
+        1.48925
+      ],
+      "spread_m": 0.001767766952966504,
+      "measurement_uncertainty_m": 0.005,
+      "used_for_fit": false
+    }
+  ],
+  "independent_prediction_m": [
+    0.7848954497583196,
+    1.6551888978264861
+  ],
+  "independent_error_m": 0.03527913086357317,
+  "independent_limit_m": 0.03,
+  "diagnostic": {
+    "domain": "physical_lidar_calibration_diagnostic",
+    "real_map_registered": false,
+    "authorizes_motion": false,
+    "applied": false,
+    "holdout_limit_m": 0.03,
+    "samples": [
+      {
+        "scan_id": "58b5cbd8897d406f83fd46b62c26dd40",
+        "zone": 1,
+        "source_m": [
+          0.48012499999999997,
+          1.8094999999999999
+        ],
+        "spread_m": 0.0010077822185373042,
+        "vendor_pose": [
+          156,
+          2254,
+          198.40625
+        ],
+        "firmware": "1.37",
+        "board_identity": [
+          "4238763712413174319",
+          "4005951207622912034"
+        ],
+        "map_m": [
+          0.45,
+          1.95
+        ],
+        "measurement_uncertainty_m": 0.005
+      },
+      {
+        "scan_id": "58acc4beeb0548f4af3984d8ad0922d8",
+        "zone": 1,
+        "source_m": [
+          0.502625,
+          1.506875
+        ],
+        "spread_m": 0.0018456028825291448,
+        "vendor_pose": [
+          156,
+          2254,
+          198.40625
+        ],
+        "firmware": "1.37",
+        "board_identity": [
+          "4238763712413174319",
+          "4005951207622912034"
+        ],
+        "map_m": [
+          0.75,
+          1.95
+        ],
+        "measurement_uncertainty_m": 0.005
+      },
+      {
+        "scan_id": "eac033c8aac74702988e7289831dc6b0",
+        "zone": 1,
+        "source_m": [
+          0.771,
+          1.818
+        ],
+        "spread_m": 0.0014142135623730178,
+        "vendor_pose": [
+          156,
+          2254,
+          198.40625
+        ],
+        "firmware": "1.37",
+        "board_identity": [
+          "4238763712413174319",
+          "4005951207622912034"
+        ],
+        "map_m": [
+          0.45,
+          1.65
+        ],
+        "measurement_uncertainty_m": 0.005
+      }
+    ],
+    "independent": {
+      "scan_id": "ab5873825c3b470e9c05f51dd3f6a028",
+      "zone": 1,
+      "source_m": [
+        0.7937500000000001,
+        1.48925
+      ],
+      "spread_m": 0.001767766952966504,
+      "vendor_pose": [
+        156,
+        2254,
+        198.40625
+      ],
+      "firmware": "1.37",
+      "board_identity": [
+        "4238763712413174319",
+        "4005951207622912034"
+      ],
+      "map_m": [
+        0.75,
+        1.65
+      ],
+      "measurement_uncertainty_m": 0.005
+    },
+    "pairs": [
+      {
+        "scan_ids": [
+          "58b5cbd8897d406f83fd46b62c26dd40",
+          "58acc4beeb0548f4af3984d8ad0922d8"
+        ],
+        "source_distance_m": 0.3034602784962143,
+        "map_distance_m": 0.3
+      },
+      {
+        "scan_ids": [
+          "58b5cbd8897d406f83fd46b62c26dd40",
+          "eac033c8aac74702988e7289831dc6b0"
+        ],
+        "source_distance_m": 0.29099916773935974,
+        "map_distance_m": 0.30000000000000004
+      },
+      {
+        "scan_ids": [
+          "58b5cbd8897d406f83fd46b62c26dd40",
+          "ab5873825c3b470e9c05f51dd3f6a028"
+        ],
+        "source_distance_m": 0.44824179091758054,
+        "map_distance_m": 0.42426406871192857
+      },
+      {
+        "scan_ids": [
+          "58acc4beeb0548f4af3984d8ad0922d8",
+          "eac033c8aac74702988e7289831dc6b0"
+        ],
+        "source_distance_m": 0.4108818641045137,
+        "map_distance_m": 0.42426406871192857
+      },
+      {
+        "scan_ids": [
+          "58acc4beeb0548f4af3984d8ad0922d8",
+          "ab5873825c3b470e9c05f51dd3f6a028"
+        ],
+        "source_distance_m": 0.291658029634022,
+        "map_distance_m": 0.30000000000000004
+      },
+      {
+        "scan_ids": [
+          "eac033c8aac74702988e7289831dc6b0",
+          "ab5873825c3b470e9c05f51dd3f6a028"
+        ],
+        "source_distance_m": 0.3295362271435419,
+        "map_distance_m": 0.3
+      }
+    ],
+    "hypotheses": [
+      {
+        "hypothesis": "original_xy",
+        "status": "REJECTED",
+        "authorizes_motion": false,
+        "reason": "坐标存在镜像或点位对应错误，拒绝用旋转强行配准"
+      },
+      {
+        "hypothesis": "diagnostic_flip_vendor_y",
+        "status": "REJECTED",
+        "authorizes_motion": false,
+        "map_transform": [
+          2.2214035598177198,
+          2.5408237405994942,
+          -1.5080060014313141
+        ],
+        "rms_m": 0.006690540045821952,
+        "max_residual_m": 0.00903194977258443,
+        "predicted_m": [
+          0.7848954497583196,
+          1.6551888978264861
+        ],
+        "holdout_error_m": 0.03527913086357317,
+        "reason": "独立复核误差超过30mm，不能标记配准通过"
+      }
+    ]
+  },
+  "checks": [
+    {
+      "name": "安装参数",
+      "status": "RECORDED",
+      "detail": "右侧约145mm；正前方向−Y，盲区＋Y；误差未量化"
+    },
+    {
+      "name": "静态扫描",
+      "status": "HISTORY_PASS",
+      "detail": "已结束样本完整、停止确认有效；不代表当前设备在线"
+    },
+    {
+      "name": "地图坐标",
+      "status": "PENDING",
+      "detail": "独立复核误差超过30mm，不能标记配准通过"
+    },
+    {
+      "name": "道路覆盖",
+      "status": "PENDING",
+      "detail": "已证明局部目标响应；未确认全场道路覆盖"
+    },
+    {
+      "name": "树莓派自动执行",
+      "status": "PENDING",
+      "detail": "复用现有规划与执行链，坐标和覆盖验收后再接入"
+    }
+  ],
+  "next_run_contract": [
+    "PC1选择起点与匹配雷达区号",
+    "PC0启动后取得本轮停车扫描",
+    "校验坐标版本、覆盖、反馈、场景与速度",
+    "同一规划器生成本轮路线",
+    "唯一执行器运行并保留故障停车"
+  ],
+  "version": "bf27e0a82df2de8d39466d688d0f9e14123ce07048d7f62969a033eb48d2627d",
+  "preserved_first_p1": {
+    "scan_id": "3411071a5acc4a21aa09f2fdc6d07664",
+    "source_m": [
+      0.48975,
+      1.7755
+    ],
+    "difference_after_reposition_m": 0.03648672703874643,
+    "fixed_repeat_difference_m": 0.0011524430571616465,
+    "reason": "首次读数差异未定因，原始记录保留；使用固定同点复测作为当前诊断参考"
+  }
+}

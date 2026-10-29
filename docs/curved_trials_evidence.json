@@ -1,0 +1,394 @@
+{
+  "date": "2026-10-24",
+  "base_commit": "6519df2",
+  "milestone_tag": "v0.15.0-curved-trials",
+  "profile_version": 2,
+  "profile_hardware_verified": false,
+  "archive": {
+    "path": "output/field/curved_20261024/curved_trials.tar.gz",
+    "sha256": "7989370f5d570f9c7793e861fdcae27bccc3ef802d4c9083e8a3d08752108f1c"
+  },
+  "cases": [
+    {
+      "case": "diagonal",
+      "firmware": "GC-BASE-0.3.3",
+      "boot_id": 1846281546294004086,
+      "action_id": 1,
+      "goal_count": 1,
+      "controller_elapsed_s": 5.5102710889987065,
+      "stop": {
+        "kind": "stop_result",
+        "mono_s": 18106.780644735,
+        "requested": true,
+        "confirmed": true,
+        "execution": {
+          "mode": 1,
+          "fault": 0,
+          "action_id": 1,
+          "action_state": 4,
+          "action_fault": 0,
+          "stop_confirmed": 1,
+          "board_ms": 6623,
+          "config_version": 2,
+          "can_errors": 0,
+          "can_rx_sequence": 2784,
+          "odom_valid": 1,
+          "x_m": 0.06012464314699173,
+          "y_m": 0.06111772358417511,
+          "yaw_rad": 0.009127192199230194,
+          "position_error_m": 0.0011451676255092025,
+          "yaw_error_rad": 0.006902910768985748,
+          "fl_rpm": 0.0,
+          "fr_rpm": 0.0,
+          "rl_rpm": 0.0,
+          "rr_rpm": 0.0,
+          "mode_name": "OBSERVING",
+          "action_name": "COMPLETE"
+        }
+      },
+      "can_errors_max": 0,
+      "maximum_chord_deviation_m": 0.0016757056818412273,
+      "user_observation": {
+        "path_normal": true,
+        "heading_visually_stable": true,
+        "visually_stopped": true,
+        "independent_distance_mm": null,
+        "independent_angle_deg": null
+      },
+      "evidence": {
+        "path": "output/field/curved_20261024/evidence/output/runtime/trial-f3ad3831f5024768b62a3944f7c82b3d.jsonl",
+        "sha256": "0efdd8f3e7aff0e5b82eb45776b3bc7001180a8ea42f417e0d18528ce13dae74"
+      }
+    },
+    {
+      "case": "arc",
+      "firmware": "GC-BASE-0.3.4",
+      "boot_id": 2135366264763595346,
+      "action_id": 1,
+      "goal_count": 1,
+      "controller_elapsed_s": 11.843377346001944,
+      "stop": {
+        "kind": "stop_result",
+        "mono_s": 18317.552662529,
+        "requested": true,
+        "confirmed": true,
+        "execution": {
+          "mode": 1,
+          "fault": 0,
+          "action_id": 1,
+          "action_state": 4,
+          "action_fault": 0,
+          "stop_confirmed": 1,
+          "board_ms": 12972,
+          "config_version": 2,
+          "can_errors": 0,
+          "can_rx_sequence": 5678,
+          "odom_valid": 1,
+          "x_m": 0.07772030681371689,
+          "y_m": 0.07745303958654404,
+          "yaw_rad": 0.017161406576633453,
+          "position_error_m": 0.0036461895797401667,
+          "yaw_error_rad": 0.01696965843439102,
+          "fl_rpm": 0.0,
+          "fr_rpm": 0.0,
+          "rl_rpm": 0.0,
+          "rr_rpm": 0.0,
+          "mode_name": "OBSERVING",
+          "action_name": "COMPLETE"
+        }
+      },
+      "can_errors_max": 0,
+      "maximum_chord_deviation_m": 0.0299579260784885,
+      "user_observation": {
+        "path_normal": true,
+        "heading_visually_stable": true,
+        "visually_stopped": true,
+        "independent_distance_mm": null,
+        "independent_angle_deg": null
+      },
+      "evidence": {
+        "path": "output/field/curved_20261024/evidence/output/runtime/trial-dc7691c5e98b43d8a695f395675e845b.jsonl",
+        "sha256": "17bd7ddbb11b9a33788edfec6f7d9e2a0ee42018d52e23e71638b038d71aad08"
+      }
+    }
+  ],
+  "flash": {
+    "probe": "8801490222005A504E413836",
+    "target": "stm32f407zg",
+    "pack": "C:\\Users\\RISI\\Desktop\\工创搬运小车\\output\\flash\\Keil.STM32F4xx_DFP.1.0.8.sram.pack",
+    "auto_unlock": false,
+    "chip_erase": false,
+    "started_wall_s": 1792820471.8472896,
+    "programmed": true,
+    "flash_algorithms": [
+      {
+        "load_address": 537001652,
+        "stack": 536999600
+      }
+    ],
+    "device_id": "413",
+    "revision": "101f",
+    "flash_kb": 1024,
+    "uid": "550040001951333136363733",
+    "image_sha256": "328d45cf9980958c77f7a494c455eb7b726f1cff589f5da739ca52a84d16cc0c",
+    "backup_sha256": "3e32e2527fb0f43405dc2fdd4fa041fbdf4349084c2e56de30df03344914db94",
+    "verified_bytes": 103904,
+    "verified": true,
+    "initial_sp": "20006ce8",
+    "initial_pc": "08000228",
+    "resumed_after_verify": true
+  },
+  "readonly_acceptance": {
+    "passed": true,
+    "checks": {
+      "firmware": true,
+      "no_actions": true,
+      "disabled": true,
+      "startup_stop": true,
+      "can_healthy": true,
+      "can_advancing": true,
+      "wheel_feedback": true,
+      "imu_feedback": true,
+      "readonly_commands": true,
+      "uart_clean": true,
+      "crc_clean": true
+    },
+    "wheels": [
+      {
+        "address": 1,
+        "speed_samples": 15,
+        "position_samples": 15,
+        "status_samples": 15,
+        "rpm_range": [
+          0,
+          0
+        ],
+        "position_range": [
+          11949,
+          11949
+        ],
+        "status_values": [
+          3
+        ]
+      },
+      {
+        "address": 2,
+        "speed_samples": 15,
+        "position_samples": 15,
+        "status_samples": 15,
+        "rpm_range": [
+          0,
+          0
+        ],
+        "position_range": [
+          -79989,
+          -79987
+        ],
+        "status_values": [
+          3
+        ]
+      },
+      {
+        "address": 3,
+        "speed_samples": 15,
+        "position_samples": 15,
+        "status_samples": 15,
+        "rpm_range": [
+          0,
+          0
+        ],
+        "position_range": [
+          69819,
+          69819
+        ],
+        "status_values": [
+          3
+        ]
+      },
+      {
+        "address": 4,
+        "speed_samples": 14,
+        "position_samples": 14,
+        "status_samples": 14,
+        "rpm_range": [
+          0,
+          0
+        ],
+        "position_range": [
+          -20193,
+          -20185
+        ],
+        "status_values": [
+          3
+        ]
+      }
+    ],
+    "can_rx_delta": 5997,
+    "firmware": "GC-BASE-0.3.4",
+    "boot_id": "e0889cb569b8100c",
+    "uart_diag": [
+      {
+        "rx_bytes": 66792,
+        "overflows": 0,
+        "errors": 0,
+        "restart_errors": 0,
+        "first_error_code": 0,
+        "first_error_ms": 0,
+        "last_error_code": 0,
+        "last_error_ms": 0,
+        "startup_flags": 0
+      },
+      {
+        "rx_bytes": 33264,
+        "overflows": 0,
+        "errors": 0,
+        "restart_errors": 0,
+        "first_error_code": 0,
+        "first_error_ms": 0,
+        "last_error_code": 0,
+        "last_error_ms": 0,
+        "startup_flags": 0
+      }
+    ],
+    "requests": {
+      "1": 1,
+      "2": 1,
+      "3": 274,
+      "35": 539,
+      "16": 715,
+      "36": 30,
+      "4": 372,
+      "5": 95
+    },
+    "states": 294,
+    "feedback_samples": 715,
+    "first_execution": {
+      "mode": 0,
+      "fault": 0,
+      "action_id": 0,
+      "action_state": 0,
+      "action_fault": 0,
+      "stop_confirmed": 1,
+      "board_ms": 535,
+      "config_version": 0,
+      "can_errors": 0,
+      "can_rx_sequence": 110,
+      "odom_valid": 0,
+      "x_m": 0.0,
+      "y_m": 0.0,
+      "yaw_rad": 0.0,
+      "position_error_m": 0.0,
+      "yaw_error_rad": 0.0,
+      "fl_rpm": 0.0,
+      "fr_rpm": 0.0,
+      "rl_rpm": 0.0,
+      "rr_rpm": 0.0,
+      "mode_name": "DISABLED",
+      "action_name": "IDLE"
+    },
+    "last_execution": {
+      "mode": 0,
+      "fault": 0,
+      "action_id": 0,
+      "action_state": 0,
+      "action_fault": 0,
+      "stop_confirmed": 1,
+      "board_ms": 30518,
+      "config_version": 0,
+      "can_errors": 0,
+      "can_rx_sequence": 6107,
+      "odom_valid": 0,
+      "x_m": 0.0,
+      "y_m": 0.0,
+      "yaw_rad": 0.0,
+      "position_error_m": 0.0,
+      "yaw_error_rad": 0.0,
+      "fl_rpm": 0.0,
+      "fr_rpm": 0.0,
+      "rl_rpm": 0.0,
+      "rr_rpm": 0.0,
+      "mode_name": "DISABLED",
+      "action_name": "IDLE"
+    },
+    "physical_direction": "沿用用户顺时针增加确认；本次只读静止，实体转向响应留到短转验证"
+  },
+  "reference": {
+    "maximum": {
+      "velocity": 0.017999999225139618,
+      "acceleration": 0.07294418662786484,
+      "jerk": 0.30000001192092896,
+      "wheel_rpm": 3.4377466227975075
+    },
+    "target_m_rad": [
+      0.0801536813378334,
+      0.0801536813378334,
+      0.0
+    ],
+    "samples": 3001
+  },
+  "tests": {
+    "execution": 24,
+    "readonly": 23,
+    "acceptance": 9,
+    "static_checks": 941,
+    "keil_errors": 0,
+    "keil_warnings": 0
+  },
+  "evidence": [
+    {
+      "path": "output/flash/program_034_20261024/manifest.json",
+      "sha256": "94c6c58111b3226d20671b25402a8faac796f019e5aeaf4da51da84f010af375"
+    },
+    {
+      "path": "output/field/curved_20261024/diagonal-tests.log",
+      "sha256": "0b99bf0d8d38436a9c44dab4c2017f8e42d70a403ab3238682cf8696685b25d4"
+    },
+    {
+      "path": "output/field/curved_20261024/diagonal-tests-final.log",
+      "sha256": "ad594b309e4c13d623617c66940a305f98a86c036655b9bc4e70aab1a9332a00"
+    },
+    {
+      "path": "output/field/curved_20261024/arc-tests-final.log",
+      "sha256": "12eb7aaddcf2ac0484d48ef449ab93d026e374428f0290dee6e69bedadb6c56a"
+    },
+    {
+      "path": "output/field/curved_20261024/readonly-tests.log",
+      "sha256": "dbdfe1c29e2479ac087619d1ee8d5f4ee7d94c595f52209daef1c8b6f247e17c"
+    },
+    {
+      "path": "output/field/curved_20261024/acceptance-tests.log",
+      "sha256": "d58eafac5159763443ffa1e9d517d833f210ecc78e954f17b76ff03c9a1a75f3"
+    },
+    {
+      "path": "output/field/curved_20261024/keil.log",
+      "sha256": "c3d4bc01b06003f1df7567eb08367c54a82bafc35fc2e97a941b71b2c848f9dd"
+    },
+    {
+      "path": "output/tests/arc-reference.json",
+      "sha256": "f09826c74b24ed911f769eeadfb1f85ec9dcf4a65508782db60224ae15770202"
+    }
+  ],
+  "not_verified": [
+    "距离与角度独立测量及重复性",
+    "随弧转姿",
+    "完整外形、连续地图配准、整图",
+    "机构与真实搬运计数"
+  ],
+  "source_sha256": {
+    "firmware/User/Control/exec.c": "2c8d52eae67223d76dcf263af0d82383ac2d1afc3b945720be1c4fee805b0952",
+    "firmware/User/Comm/comm.c": "e5215f694a9d500d128973a79883dca29870df9a2be968631212e185018c844d",
+    "pi/robot/device/execution.py": "2a4db87ae591bca106320f98416ac6aa35f474ea5286a7027ecd9fc330daa2a4",
+    "pi/robot/drive_core.py": "e444b17596cc858843c3169a6b26f9a433f8b91daedf0ff20d54f6475bff1ff8",
+    "tools/accept_base.py": "a041069da7651082b3499bd260f502668e562dbaf7661d2a28616b3273a3cf2e",
+    "tests/test_execution.py": "6914e58556ee249c6e210022d1169240dfb8bbf420dfbd372e3fb9f6b4262286",
+    "tests/execution_native.c": "1ad29b4544f41d972cea44335c33271f518aafbc04450ee4af92b320531a18cf"
+  },
+  "post_flash_workflow": "本轮实测结束后用户新增约定：每次烧录完成先报告，等待该次烧录后的用户放地/允许实测确认，不沿用烧录前确认；未确认前只读、不使能、不下发目标。",
+  "end_state": {
+    "serial_owners": 0,
+    "old_web": "inactive",
+    "observer": "inactive",
+    "readonly_web": "active",
+    "motion_auto_resumed": false
+  }
+}

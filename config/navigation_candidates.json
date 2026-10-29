@@ -1,0 +1,104 @@
+{
+  "domain": "simulation",
+  "physical_validated": false,
+  "profiles": {
+    "balanced": {
+      "speed_m_s": 0.45,
+      "max_rpm": 150.0,
+      "dynamics": {
+        "acceleration_m_s2": 0.5,
+        "jerk_m_s3": 1.5,
+        "dock_m_s": 0.04,
+        "turn_rate_rad_s": 1.2
+      }
+    },
+    "fast": {
+      "speed_m_s": 0.6,
+      "max_rpm": 200.0,
+      "dynamics": {
+        "acceleration_m_s2": 0.7,
+        "jerk_m_s3": 2.0,
+        "dock_m_s": 0.05,
+        "turn_rate_rad_s": 1.2
+      }
+    },
+    "fast_safe": {
+      "speed_m_s": 0.6,
+      "max_rpm": 200.0,
+      "dynamics": {
+        "acceleration_m_s2": 0.5,
+        "jerk_m_s3": 1.2,
+        "dock_m_s": 0.025,
+        "turn_rate_rad_s": 1.4
+      }
+    },
+    "target": {
+      "speed_m_s": 0.7,
+      "max_rpm": 220.0,
+      "dynamics": {
+        "acceleration_m_s2": 0.5,
+        "jerk_m_s3": 1.2,
+        "dock_m_s": 0.025,
+        "turn_rate_rad_s": 1.6
+      }
+    },
+    "target_segmented": {
+      "speed_m_s": 0.8,
+      "max_rpm": 240.0,
+      "dynamics": {
+        "acceleration_m_s2": 0.8,
+        "jerk_m_s3": 3.0,
+        "dock_m_s": 0.025,
+        "turn_rate_rad_s": 1.6,
+        "staging_slowdown": true
+      }
+    },
+    "target_safe": {
+      "speed_m_s": 0.7,
+      "max_rpm": 220.0,
+      "dynamics": {
+        "acceleration_m_s2": 0.7,
+        "jerk_m_s3": 2.5,
+        "dock_m_s": 0.025,
+        "turn_rate_rad_s": 1.6,
+        "staging_slowdown": true
+      }
+    },
+    "target_slew": {
+      "speed_m_s": 0.8,
+      "max_rpm": 240.0,
+      "dynamics": {
+        "acceleration_m_s2": 0.7,
+        "jerk_m_s3": 2.5,
+        "dock_m_s": 0.025,
+        "turn_rate_rad_s": 1.6,
+        "wheel_slew_rpm_s": 600.0,
+        "staging_slowdown": false
+      }
+    },
+    "target_ff": {
+      "speed_m_s": 0.8,
+      "max_rpm": 300.0,
+      "dynamics": {
+        "acceleration_m_s2": 0.7,
+        "jerk_m_s3": 2.5,
+        "dock_m_s": 0.025,
+        "turn_rate_rad_s": 1.6,
+        "wheel_slew_rpm_s": 600.0,
+        "lag_ff_s": 0.09
+      }
+    },
+    "target_ff_high": {
+      "speed_m_s": 0.9,
+      "max_rpm": 300.0,
+      "dynamics": {
+        "acceleration_m_s2": 0.8,
+        "jerk_m_s3": 3.0,
+        "dock_m_s": 0.025,
+        "turn_rate_rad_s": 1.8,
+        "wheel_slew_rpm_s": 600.0,
+        "lag_ff_s": 0.09
+      }
+    }
+  }
+}

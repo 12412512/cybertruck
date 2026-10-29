@@ -1,0 +1,33 @@
+{
+  "domain": "commissioning",
+  "version": 9,
+  "wheel_radius_m": 0.05,
+  "half_length_m": 0.094,
+  "half_width_m": 0.11,
+  "counts_per_rev": 65536,
+  "addresses": [
+    1,
+    2,
+    3,
+    4
+  ],
+  "command_sign": [
+    1,
+    -1,
+    1,
+    -1
+  ],
+  "feedback_sign": [
+    1,
+    -1,
+    1,
+    -1
+  ],
+  "yaw_sign": -1,
+  "yaw_sign_source": "2026-10-24用户确认：旧Web航向角顺时针增加；转换到新工程逆时针为正",
+  "angle_scale_rad": 9.587379924285257e-05,
+  "gyro_scale_rad_s": 0.0010652644360316954,
+  "max_rpm": 100,
+  "hardware_verified": false,
+  "source": "PC1选择区1新50mm停靠路线或区2倒车路线；候选，待新固件实测"
+}

@@ -1,0 +1,9 @@
+{
+  "host": "172.20.10.4",
+  "username": "pi",
+  "helper_root": "/home/pi/gongchuang_connection_20261027",
+  "python": "/home/pi/gongchuang_v0131/.venv/bin/python",
+  "device_root": "/home/pi/gongchuang_mech_commission_0334_20261026",
+  "vision_root": "/home/pi/gongchuang_vision_v025",
+  "serial": "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0"
+}

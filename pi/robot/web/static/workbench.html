@@ -1,0 +1,672 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>
+            工创小车 · 控制工作台
+        </title>
+        <link rel="stylesheet" href="/static/workbench.css?v=3">
+        <link rel="stylesheet" href="/static/workbench-mechanism.css?v=13">
+        <link rel="stylesheet" href="/static/workbench-vision.css?v=3">
+        <link rel="stylesheet" href="/static/workbench-connections.css?v=1">
+    </head>
+    <body>
+        <aside class="sidebar">
+            <a class="brand" href="/" aria-label="工作台首页">
+                <span class="brand-mark">
+                    GC
+                </span>
+                <span>
+                    工创小车
+                    <small>
+                        ROBOT WORKBENCH
+                    </small>
+                </span>
+            </a>
+            <div class="nav-label">
+                工作空间
+            </div>
+            <nav aria-label="工作空间">
+                <button class="nav-item active" data-page="drive">
+                    <span>
+                        ⌘
+                    </span>
+                    底盘与导航
+                </button>
+                <button class="nav-item" data-page="mechanism">
+                    <span>
+                        ⚙
+                    </span>
+                    机械控制
+                    <span class="soon">
+                        实车
+                    </span>
+                </button>
+                <button class="nav-item" data-page="vision"><span>◎</span>相机与标定</button>
+                <button class="nav-item" data-page="logs">
+                    <span>
+                        ≡
+                    </span>
+                    运行记录
+                </button>
+            </nav>
+            <div class="sidebar-note">
+                <span class="status-dot">
+                </span>
+                PC控制工作台
+                <p>
+                    地图 X 向右，Y 向上
+                    <br>
+                    车体 X 向前，Y 向左
+                    <br>
+                    逆时针转角为正
+                </p>
+            </div>
+            <div class="sidebar-bottom">
+                GC / CONTROL LAB
+                <span>
+                    参数有版本 · 动作有反馈
+                </span>
+            </div>
+        </aside>
+        <main>
+            <header class="topbar">
+                <div>
+                    <div class="eyebrow">
+                        CONTROL WORKSPACE
+                    </div>
+                    <h1>
+                        底盘与导航
+                    </h1>
+                </div>
+                <div class="header-actions">
+                    <button id="connections-open" class="secondary">设备连接</button>
+                    <span id="connection" class="badge muted">
+                        离线核心连接中
+                    </span>
+                    <span class="badge lab" id="workspace-domain">
+                        离线模型 · 实车控制见独立区
+                    </span>
+                    <button id="defaults" class="secondary controlled">恢复初始设置</button>
+                    <button id="stop" class="danger">
+                        ■ 停止模拟
+                        <kbd>
+                            Space
+                        </kbd>
+                    </button>
+                    <button id="global-real-stop" class="danger" hidden>■ 停止实车</button>
+                </div>
+            </header>
+            <div id="notice" role="status" aria-live="polite">
+                正在连接离线核心。所有操控与路线仅作用于合成车体。
+            </div>
+            <details id="workspace-connections" class="workspace-connections"></details>
+            <section id="page-drive" class="page">
+                <div class="metrics">
+                    <article>
+                        <span>
+                            当前模式
+                        </span>
+                        <strong id="mode">
+                            等待核心
+                        </strong>
+                        <small id="stop-state">
+                            未获取模型状态
+                        </small>
+                    </article>
+                    <article>
+                        <span>
+                            模型位姿 / m
+                        </span>
+                        <strong id="pose">
+                            — / —
+                        </strong>
+                        <small id="yaw">
+                            航向 —
+                        </small>
+                    </article>
+                    <article>
+                        <span>
+                            已完成动作
+                        </span>
+                        <strong id="progress">
+                            0
+                            <em>
+                                / —
+                            </em>
+                        </strong>
+                        <small id="elapsed">
+                            模型运行 — s
+                        </small>
+                    </article>
+                    <article>
+                        <span>
+                            轮速峰值 / RPM
+                        </span>
+                        <strong id="rpm">
+                            —
+                        </strong>
+                        <small>
+                            合成反馈 · 非实车数据
+                        </small>
+                    </article>
+                </div>
+                <div class="workspace">
+                    <div class="main-column">
+                        <section class="card map-card">
+                            <div class="card-head">
+                                <div>
+                                    <h2>
+                                        场地与路径
+                                    </h2>
+                                    <p>
+                                        2.4 × 2.4 m · 蓝色启停区可通行
+                                    </p>
+                                </div>
+                                <span id="map-status" class="badge muted">
+                                    等待路线
+                                </span>
+                            </div>
+                            <div class="scene-toolbar">
+                                <label>地图操作
+                                    <select id="map-mode" class="scene-input">
+                                        <option value="view">查看路线</option>
+                                        <option value="add">点击添加黑色障碍</option>
+                                        <option value="remove">点击删除障碍</option>
+                                    </select>
+                                </label>
+                                <label>新增直径 / mm
+                                    <input id="obstacle-diameter" class="scene-input" type="number" min="10" max="300" value="50">
+                                </label>
+                                <label class="check-label"><input id="auto-plan" type="checkbox" checked>修改后自动重规划</label>
+                            </div>
+                            <div class="map-wrap">
+                                <svg id="map" viewBox="-95 -65 2630 2575" role="img" aria-label="场地、规划路径和模型轨迹">
+                                </svg>
+                                <div class="map-stamp">
+                                    SIMULATION
+                                    <br>
+                                    <span>
+                                        连续里程计 / 正式 C 跟踪器
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="map-footer">
+                                <span>
+                                    <i class="legend planned">
+                                    </i>
+                                    规划参考
+                                </span>
+                                <span>
+                                    <i class="legend actual">
+                                    </i>
+                                    模型实走
+                                </span>
+                                <span>
+                                    <i class="legend body">
+                                    </i>
+                                    车体与朝向
+                                </span>
+                                <span class="map-coord">
+                                    原点：地图左下角 · X → / Y ↑
+                                </span>
+                            </div>
+                        </section>
+                        <section class="card scene-card">
+                            <div class="card-head">
+                                <div><h2>工位停靠与障碍</h2><p>间隙：车体面向工位的外缘，到工作区边缘；不是夹爪中心距离</p></div>
+                                <span class="badge lab">默认间隙50 mm</span>
+                            </div>
+                            <div class="scene-grid">
+                                <label>原料区间隙 / mm<input id="gap-raw" class="scene-input" type="number" min="0" max="250" step="5" value="50"></label>
+                                <label>粗加工区间隙 / mm<input id="gap-rough" class="scene-input" type="number" min="0" max="250" step="5" value="50"></label>
+                                <label>暂存区间隙 / mm<input id="gap-staging" class="scene-input" type="number" min="0" max="250" step="5" value="50"></label>
+                            </div>
+                            <p class="help">50 mm 为模拟初值。相机与机构尚未标定，精对准和机械可达性在下一阶段验证。</p>
+                            <details><summary>障碍物坐标与尺寸 <span id="obstacle-empty">（尚未设置）</span></summary>
+                                <div class="obstacle-table"><table><thead><tr><th>编号</th><th>X / mm</th><th>Y / mm</th><th>直径 / mm</th><th></th></tr></thead><tbody id="obstacle-list"></tbody></table></div>
+                                <button id="clear-obstacles" class="text-button scene-input">清空全部障碍物</button>
+                            </details>
+                        </section>
+                        <section class="card scene-card" id="lidar-panel">
+                            <div class="card-head"><div><h2>雷达扫描与自动绕障</h2><p>实机通信状态与PC扫描回放；规划和执行联调仍为离线模型</p></div><span class="badge lab">通信实机 / 规划离线</span></div>
+                            <details open><summary>实机雷达通信 · 只读接入</summary>
+                                <p id="lidar-live-state" role="status">等待读取实机雷达</p>
+                                <p id="lidar-live-details" class="help"></p>
+                                <p id="lidar-live-saved" class="help"></p>
+                                <p id="lidar-live-reason" class="help">等待读取状态；历史静扫与地图配准核对分开展示。</p>
+                                <p id="lidar-live-scan" class="help">本次尚未进行实机扫描</p>
+                                <details><summary>实机最近静扫点云 · 厂家坐标/mm（非地图）</summary><svg id="lidar-live-cloud" viewBox="-500 -2800 3500 3500" width="100%" height="180" aria-label="实机雷达静扫点云" style="background:#edf4f5;border-radius:8px"></svg></details>
+                            </details>
+                            <details open><summary>安装与坐标核对 · 已结束样本</summary>
+                                <p id="lidar-review-install" class="help">正在读取本地核对摘要</p>
+                                <p id="lidar-review-error" class="help"></p>
+                                <svg id="lidar-review-map" viewBox="-80 -2470 1250 1100" width="100%" height="280" aria-label="启停区1雷达与四点核对示意" style="background:#edf4f5;border-radius:8px"></svg>
+                                <p class="help">启停区1邻域：黑点为尺量标记，橙圈为未通过验收的独立点预测；O及雷达是安装参数推算的名义位置。此图不测量照片、不自动封路。</p>
+                                <ul id="lidar-review-checks" class="help"></ul>
+                                <p id="lidar-review-contract" class="help"></p>
+                                <p id="lidar-review-source" class="help"></p>
+                                <button id="lidar-review-refresh" class="text-button">刷新核对记录</button>
+                            </details>
+                            <details open><summary>厂家两点校准 · 分步受控</summary>
+                                <p id="lidar-cal-state" class="help">等待读取校准能力</p><p id="lidar-cal-backup" class="help"></p>
+                                <label class="check-label help"><input id="lidar-cal-fixed" type="checkbox"> 本轮雷达已人工展开固定，两柱按所选区摆放；不输出PE14 PWM</label>
+                                <button id="lidar-cal-prepare" class="secondary" disabled>只读准备：重新备份旧位姿</button>
+                                <label class="check-label help"><input id="lidar-cal-save" type="checkbox"> 确认启动两点校准并保存当前区位姿</label>
+                                <div class="button-row"><button id="lidar-cal-commit" class="secondary" disabled>校准并保存当前区</button><button id="lidar-cal-cancel" class="text-button" disabled>取消校准事务</button></div>
+                                <p id="lidar-cal-gateway" class="help"></p><p id="lidar-cal-message" class="help"></p>
+                            </details>
+                            <p id="lidar-state" role="status">尚未回放</p>
+                            <div class="plan-inputs">
+                                <label>合成扫描案例<select id="lidar-case">
+                                    <option value="detour">上侧道路有障碍 · 自动绕行</option><option value="clear">完整空场</option>
+                                    <option value="blocked">起点被占用 · 无路</option><option value="partial">覆盖不足 · 未知</option>
+                                    <option value="bad_crc">CRC损坏</option><option value="missing">点云缺块</option>
+                                    <option value="low_quality">低置信度</option><option value="unregistered">缺少标定</option><option value="wrong_zone">区号不符</option>
+                                </select></label>
+                                <label>外部报文（可选，仅未配准诊断）<input id="lidar-file" type="file" accept=".json,.hex,.txt"></label>
+                            </div>
+                            <label class="check-label help"><input id="lidar-auto-plan" type="checkbox" checked> 有效回放后自动规划；不自动启动执行器</label>
+                            <div class="button-row"><button id="lidar-replay" class="secondary">回放扫描</button><button id="lidar-plan" class="secondary">自动绕障规划</button><button id="lidar-clear" class="text-button">清空回放</button></div>
+                            <p id="lidar-details" class="help"></p><p id="lidar-reason" class="help"></p><p id="lidar-roads" class="help"></p>
+                            <ul id="lidar-objects" class="help"></ul>
+                            <details><summary>原始抽样点云 · 厂家坐标/mm（不代表完整LaserScan）</summary><svg id="lidar-cloud" viewBox="-2500 -2500 5000 5000" width="100%" height="180" aria-label="雷达原始抽样点云" style="background:#edf4f5;border-radius:8px"></svg></details>
+                            <p class="help">地图青点为配准后的模拟抽样点；黑圈为50mm名义障碍，橙圈为含不确定度的规划包络。真实外参、遮挡和道路覆盖仍待实测。</p>
+                        </section>
+                        <section class="card plan-card">
+                            <div class="card-head">
+                                <div>
+                                    <h2>
+                                        路线与速度
+                                    </h2>
+                                    <p>
+                                        按场景自动选路；规划和执行分别触发
+                                    </p>
+                                </div>
+                                <span id="plan-status" class="badge muted">
+                                    尚未规划
+                                </span>
+                            </div>
+                            <div class="plan-inputs">
+                                <label>
+                                    起点
+                                    <select id="start">
+                                        <option value="start_1">
+                                            启停区 1 · 车头 +X
+                                        </option>
+                                        <option value="start_2">
+                                            启停区 2 · 车头 +X，倒车离开
+                                        </option>
+                                    </select>
+                                </label>
+                                <label>
+                                    路线方案
+                                    <select id="source">
+                                        <option value="batch">
+                                            两批完整导航
+                                        </option>
+                                        <option value="tour">
+                                            五站巡回
+                                        </option>
+                                        <option value="raw">
+                                            扫码 → 原料
+                                        </option>
+                                        <option value="custom">
+                                            自选站点与封路
+                                        </option>
+                                    </select>
+                                </label>
+                            </div>
+                            <div class="route-sequence" id="route-sequence">
+                            </div>
+                            <div id="custom-editor" hidden>
+                                <div class="add-target">
+                                    <label>
+                                        追加站点
+                                        <select id="target">
+                                        </select>
+                                    </label>
+                                    <button id="add-target" class="secondary">
+                                        ＋ 添加
+                                    </button>
+                                </div>
+                                <ol id="targets">
+                                </ol>
+                                <details>
+                                    <summary>
+                                        模拟封路设置
+                                    </summary>
+                                    <div id="roads" class="roads">
+                                    </div>
+                                    <small>
+                                        未勾选道路按开放场景计算；这不是雷达实测结果。
+                                    </small>
+                                </details>
+                            </div>
+                            <div class="speed-editor">
+                                <div>
+                                    <label for="route-speed">
+                                        巡航速度上限
+                                    </label>
+                                    <small>
+                                        弯道与转姿仍受轮速、加速度和加加速度限制
+                                    </small>
+                                </div>
+                                <div class="speed-number">
+                                    <input id="route-speed" type="number" min="0.03" max="1.00" step="0.01" value="0.30">
+                                    <span>
+                                        m/s
+                                    </span>
+                                </div>
+                                <input id="speed-range" aria-label="巡航速度滑块" type="range" min="0.03" max="1.00" step="0.01" value="0.30">
+                            </div>
+                            <div class="model-settings">
+                                <label>模型轮速上限 / RPM<input id="model-rpm" class="scene-input" type="number" min="20" max="350" step="10" value="100"></label>
+                                <p class="help">100 RPM 沿用原模型上限。提高此值仅用于离线探索，不更改实车固件；1 m/s 是请求上限，不保证每段达到。</p>
+                            </div>
+                            <details>
+                                <summary>分段速度与S曲线参数（离线候选，输入不驱动实车）</summary>
+                                <label>动力滞后前馈 / s（0关闭） <input id="route-lag-ff" class="scene-input" type="number" min="0" max="0.15" step="0.01" value="0"></label>
+                                <label>轮速变化率 / RPM/s <input id="route-wheel-slew" class="scene-input" type="number" min="60" max="800" step="20" value="180"></label>
+                                <label><input id="route-staging-slow" class="scene-input" type="checkbox">暂存入站使用保守档：加速度≤0.45、加加速度≤1.2、靠站≤0.025、转姿≤1.2</label>
+                                <label>平移加速度 / m/s² <input id="route-acceleration" class="scene-input" type="number" min="0.1" max="1.5" step="0.05" value="0.25"></label>
+                                <label>平移加加速度 / m/s³ <input id="route-jerk" class="scene-input" type="number" min="0.2" max="5" step="0.1" value="0.8"></label>
+                                <label>返回蓝区末段速度 / m/s <input id="route-dock-speed" class="scene-input" type="number" min="0.015" max="0.1" step="0.005" value="0.025"></label>
+                                <label>转姿角速度上限 / rad/s <input id="route-turn-rate" class="scene-input" type="number" min="0.3" max="2" step="0.1" value="1.2"></label>
+                                <p class="help">直线、弯道、转姿和靠站分别计算限速；需重新规划并通过闭环，不能直接发送实车。</p>
+                            </details>
+                            <div class="plan-summary">
+                                <span>
+                                    参考时间
+                                    <b id="plan-time">
+                                        — s
+                                    </b>
+                                </span>
+                                <span>
+                                    动作段数
+                                    <b id="plan-count">
+                                        —
+                                    </b>
+                                </span>
+                                <span>
+                                    参数版本
+                                    <b id="plan-hash">
+                                        未生成
+                                    </b>
+                                </span>
+                            </div>
+                            <div id="draft-state" class="help">
+                                两批累计导航预算 60 s；参考估计不能代替整机实测。
+                            </div>
+                            <div id="limit-reason" class="limit-note">请求速度、轨迹峰值和轮速限制在规划后显示。</div>
+                            <div id="nav-budget" class="limit-note">导航预算在规划后分解；模拟预留不等于实测停车耗时。</div>
+                            <div class="button-row">
+                                <button id="plan" class="secondary controlled">
+                                    生成离线路线
+                                </button>
+                                <button id="save" class="secondary controlled" disabled>
+                                    保存版本
+                                </button>
+                                <button id="run" class="primary controlled" disabled>
+                                    ▶ 运行离线闭环
+                                </button>
+                            </div>
+                            <div class="version-row">
+                                <label>已保存的路线配置<select id="saved-version"><option value="">尚无当前格式版本</option></select></label>
+                                <button id="load-version" class="secondary controlled">读取配置</button>
+                            </div>
+                            <div class="limit-note">
+                                <b>正式执行链 · 仅离线</b>
+                                <p id="execution-check-state">等待联调：复用通信、PC0门控、执行器及STOP，不连接设备。</p>
+                                <div class="button-row">
+                                    <button id="verify-execution" class="secondary controlled" disabled>执行链联调（合成PC0）</button>
+                                    <button id="cancel-execution" class="secondary controlled" disabled>取消联调</button>
+                                </div>
+                                <small>限0.30m/s、100RPM基线；紫色为执行链模型轨迹。通过也不授权实车动作。</small>
+                            </div>
+                            <p class="help">设置与最新路线保存在本机工作区；读取只恢复配置和模型待命，不自动运行。</p>
+                            <details id="segments">
+                                <summary>
+                                    路线分段与速度曲线
+                                </summary>
+                                <div id="leg-list">
+                                </div>
+                                <svg id="speed-chart" viewBox="0 0 640 145" role="img" aria-label="正式参考平移速度曲线">
+                                </svg>
+                                <small>
+                                    曲线来自正式 C 参考采样；横轴为参考时间，纵轴为平移速度。
+                                </small>
+                            </details>
+                        </section>
+                    </div>
+                    <div class="control-column">
+                        <section class="card ownership">
+                            <div>
+                                <h2>
+                                    操控权限
+                                </h2>
+                                <p id="owner">
+                                    当前无人控制
+                                </p>
+                            </div>
+                            <button id="claim" class="primary">
+                                获取控制权
+                            </button>
+                            <button id="release" class="secondary" hidden>
+                                释放
+                            </button>
+                        </section>
+                        <section class="card manual-card">
+                            <div class="card-head">
+                                <div>
+                                    <h2>
+                                        实时操控
+                                    </h2>
+                                    <p>
+                                        车体坐标 · 按住运动，松开停车
+                                    </p>
+                                </div>
+                                <span class="badge lab">
+                                    离线
+                                </span>
+                            </div>
+                            <div class="jog-pad" aria-label="方向控制">
+                                <button class="jog controlled" data-dir="1,1,0" aria-label="前左">
+                                    ↖
+                                </button>
+                                <button class="jog controlled" data-dir="1,0,0" aria-label="前进">
+                                    ↑
+                                    <kbd>
+                                        W
+                                    </kbd>
+                                </button>
+                                <button class="jog controlled" data-dir="1,-1,0" aria-label="前右">
+                                    ↗
+                                </button>
+                                <button class="jog controlled" data-dir="0,1,0" aria-label="左移">
+                                    ←
+                                    <kbd>
+                                        A
+                                    </kbd>
+                                </button>
+                                <button id="pad-stop" class="pad-stop" aria-label="停止模拟">
+                                    ■
+                                </button>
+                                <button class="jog controlled" data-dir="0,-1,0" aria-label="右移">
+                                    →
+                                    <kbd>
+                                        D
+                                    </kbd>
+                                </button>
+                                <button class="jog controlled" data-dir="-1,1,0" aria-label="后左">
+                                    ↙
+                                </button>
+                                <button class="jog controlled" data-dir="-1,0,0" aria-label="后退">
+                                    ↓
+                                    <kbd>
+                                        S
+                                    </kbd>
+                                </button>
+                                <button class="jog controlled" data-dir="-1,-1,0" aria-label="后右">
+                                    ↘
+                                </button>
+                            </div>
+                            <div class="rotate-row">
+                                <button class="jog controlled" data-dir="0,0,1">
+                                    ↶ 逆时针
+                                    <kbd>
+                                        Q
+                                    </kbd>
+                                </button>
+                                <button class="jog controlled" data-dir="0,0,-1">
+                                    ↷ 顺时针
+                                    <kbd>
+                                        E
+                                    </kbd>
+                                </button>
+                            </div>
+                            <div class="plan-inputs">
+                                <label>
+                                    点动速度 / m/s
+                                    <input id="jog-speed" type="number" min="0.01" max="0.15" step="0.01" value="0.05">
+                                </label>
+                                <label>
+                                    角速度 / °/s
+                                    <input id="jog-yaw" type="number" min="1" max="28" step="1" value="10">
+                                </label>
+                            </div>
+                            <div class="help">
+                                松开、失焦、页面隐藏即停止；断网后核心点动续约保护在 350 ms 内请求停车。物理惯性由模型继续计算。
+                            </div>
+                        </section>
+                        <section class="card quant-card">
+                            <div class="card-head">
+                                <div>
+                                    <h2>
+                                        定距 / 定角
+                                    </h2>
+                                    <p>
+                                        显式执行 · S 曲线与闭环到位
+                                    </p>
+                                </div>
+                            </div>
+                            <div class="three-inputs">
+                                <label>
+                                    前进 X / mm
+                                    <input id="move-x" type="number" min="-500" max="500" value="100">
+                                </label>
+                                <label>
+                                    左移 Y / mm
+                                    <input id="move-y" type="number" min="-500" max="500" value="0">
+                                </label>
+                                <label>
+                                    逆时针 / °
+                                    <input id="move-yaw" type="number" min="-180" max="180" value="0">
+                                </label>
+                            </div>
+                            <button id="move" class="secondary controlled full">
+                                执行离线动作
+                            </button>
+                        </section>
+                        <section class="card feedback-card">
+                            <div class="card-head">
+                                <h2>
+                                    执行反馈
+                                </h2>
+                                <span id="session" class="mono">
+                                    —
+                                </span>
+                            </div>
+                            <dl>
+                                <div>
+                                    <dt>
+                                        位置误差
+                                    </dt>
+                                    <dd id="error-xy">
+                                        —
+                                    </dd>
+                                </div>
+                                <div>
+                                    <dt>
+                                        航向误差
+                                    </dt>
+                                    <dd id="error-yaw">
+                                        —
+                                    </dd>
+                                </div>
+                                <div>
+                                    <dt>
+                                        模型故障
+                                    </dt>
+                                    <dd id="fault">
+                                        —
+                                    </dd>
+                                </div>
+                                <div>
+                                    <dt>
+                                        里程计原点
+                                    </dt>
+                                    <dd id="odom">
+                                        —
+                                    </dd>
+                                </div>
+                            </dl>
+                            <button id="reset" class="text-button controlled">
+                                    仅重置模型位置，保留路径设置
+                            </button>
+                        </section>
+                        <div class="device-note">
+                            <b>
+                                实车暂未接入本控制页
+                            </b>
+                            <p>
+                                当前固件的已验证路线继续保留。按住点动、修改路线或速度下发实车前，需完成设备适配与现场验证。
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            <section id="page-mechanism" class="page" hidden><div id="mechanism-root"></div></section>
+            <section id="page-vision" class="page" hidden></section>
+            <section id="page-logs" class="page" hidden>
+                <div id="workspace-health" class="card"></div>
+                <div class="section-intro">
+                    <span class="eyebrow">
+                        RUN HISTORY
+                    </span>
+                    <h2>
+                        运行记录
+                    </h2>
+                    <p>
+                        控制权、规划版本、开始与停车原因，共用核心时间轴。这里只记录离线运行。
+                    </p>
+                </div>
+                <div class="card">
+                    <div class="card-head">
+                        <h2>
+                            最近事件
+                        </h2>
+                        <span class="badge lab">
+                            最多 100 条
+                        </span>
+                    </div>
+                    <div class="log-tools"><input id="events-filter" aria-label="筛选运行记录" placeholder="搜索阶段、故障或停止原因"><button id="events-export">导出模型事件</button></div>
+                    <div id="events" class="event-list">
+                    </div>
+                </div>
+            </section>
+            <footer>
+                离线联调 / 真实任务、机构抓放和成功计数不受本模型影响
+                <span>
+                    唯一控制核心 · 网页不占用设备
+                </span>
+            </footer>
+        </main>
+        <script type="module" src="/static/workbench.js?v=50.1">
+        </script>
+        <script type="module" src="/static/workbench-vision.js?v=6"></script>
+        <script type="module" src="/static/workbench-shell.js?v=2"></script>
+        <script type="module" src="/static/workbench-connections.js?v=2"></script>
+    </body>
+</html>

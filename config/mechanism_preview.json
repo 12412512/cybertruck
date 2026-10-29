@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "version": "mech-preview-1",
+  "domain": "simulation",
+  "physical_validated": false,
+  "source": "智能搬运小车/User/Config/mech_cfg.h、Mech/axis.c、servo.c、pose.c、grip.c；只读核对，未复制设备入口",
+  "baseline": "升降最高、伸缩最近端；下降/伸出为正",
+  "axes": {
+    "lift": {"min_m": 0.0, "max_m": 0.049, "speed_m_s": 0.003, "accel_m_s2": 0.02},
+    "reach": {"min_m": 0.0, "max_m": 0.05, "speed_m_s": 0.005, "accel_m_s2": 0.03}
+  },
+  "servos": {
+    "arm": {"min_deg": 83, "max_deg": 180, "anchor_deg": 180, "rate_deg_s": 45, "range_deg": 359, "reverse": true},
+    "tray": {"min_deg": 0, "max_deg": 270, "anchor_deg": 30, "rate_deg_s": 45, "range_deg": 270, "reverse": false},
+    "gripper": {"min_deg": 0, "max_deg": 98, "anchor_deg": 0, "rate_deg_s": 45, "range_deg": 270, "reverse": false}
+  },
+  "settle_s": 0.6,
+  "feedback_max_age_s": 0.25,
+  "jog_lease_s": 0.35,
+  "interlocks": {"rotation_lift_max_m": 0.001, "rotation_reach_max_m": 0.001, "extension_lift_min_m": 0.045, "extension_arm_deg": 180},
+  "candidates": [
+    {"id": "transport", "name": "收拢观察（候选）", "lift_m": 0.0, "reach_m": 0.0, "arm_deg": 180, "tray_deg": 30, "gripper_deg": 98},
+    {"id": "car_drop", "name": "存车43mm（候选）", "lift_m": 0.043, "reach_m": 0.0, "arm_deg": 83, "tray_deg": 30, "gripper_deg": 98},
+    {"id": "raw_pick", "name": "取料49/50mm（候选）", "lift_m": 0.049, "reach_m": 0.05, "arm_deg": 180, "tray_deg": 30, "gripper_deg": 98}
+  ],
+  "slots": [],
+  "notes": ["49/50mm沿用旧验证范围；速率与互锁阈值只是离线保守假设", "舵机命令缓动和600ms等待不代表真实角度反馈", "三个料位角度等待用户补充；不以30度推算其余料位"]
+}

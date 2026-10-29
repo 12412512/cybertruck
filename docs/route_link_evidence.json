@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-24",
+  "base_commit": "5993ab6",
+  "tag": "v0.16.0-route-link",
+  "firmware": "GC-BASE-0.3.6",
+  "firmware_hex_sha256": "c314b2f33e5a7c209b05deae63225901ecadde03575a4390d4d946ae87cbc2c5",
+  "physical_route_executed": false,
+  "plan_sha256": "96d4e17989fbe7c89abb12c7f26d39d19ed8a268a642cc59548f3e91cdbe07bf",
+  "protocol_request_counts": {
+    "OPEN": 1,
+    "CONFIG": 1,
+    "ARM": 1,
+    "GOAL": 4,
+    "STOP": 1
+  },
+  "completed_segments": 4,
+  "model_end_m_rad": [
+    0.30406905357811376,
+    0.13972837745703126,
+    0.17617874869833705
+  ],
+  "model_board_ms": 27160,
+  "model_stopped": true,
+  "tests": {
+    "route": 8,
+    "execution": 28,
+    "readonly": 23,
+    "acceptance": 9,
+    "static_checks": 941
+  },
+  "evidence": [
+    {
+      "path": "output/route-link/tests.log",
+      "sha256": "3ddcfda97e91f62390fd16f4f27a99439cc4a4c13219abf0199c04efabde965a"
+    },
+    {
+      "path": "output/route-link/execution-tests.log",
+      "sha256": "a841799a946e95419e818bb6555e842f5f169b206262792f54588c93cd16fc7f"
+    },
+    {
+      "path": "output/route-link/readonly-tests.log",
+      "sha256": "61e4d912e2d887f2586855e5f1e9a6cc8bf75604fe4f1e8aa789e6d226380372"
+    },
+    {
+      "path": "output/route-link/acceptance-tests.log",
+      "sha256": "d58eafac5159763443ffa1e9d517d833f210ecc78e954f17b76ff03c9a1a75f3"
+    },
+    {
+      "path": "output/route-link/closed-loop.json",
+      "sha256": "07c859b76121837c7847669a3ccbe2ce02dd9cc8a02a4963b68586fefd9d0627"
+    },
+    {
+      "path": "output/route-link/field-export.json",
+      "sha256": "1cc625260f74b26fa70dd4f6a0eac92f826bc33521fac85e00c101c6cf607d46"
+    },
+    {
+      "path": "output/route-link/prior-field.tar.gz",
+      "sha256": "894e48488a31a2eba10090dc0ba189fd17eaed99d19ec8e19940f0004d09cf8c"
+    },
+    {
+      "path": "output/field/pose_20261024/keil.log",
+      "sha256": "bae3f12c9d0415e57440e544c67ee6d8e7fc7aef78f1a32c81db6226dc1fe501"
+    },
+    {
+      "path": "output/route-link/short-route-web.png",
+      "sha256": "aed4f67a034e93e6b31c45c07d570441010a7718cc7929571da5215577b5ca8d"
+    }
+  ],
+  "source_sha256": {
+    "pi/robot/drive_core.py": "d85469b0ab3026389e71a534bc442b214c43b797237cf438770790b9bb470052",
+    "pi/robot/nav/route.py": "4ae3b8445e9aae9d2814161779d31570eace6e0bce3ff7a084cfea657e4b19b7",
+    "pi/robot/runtime.py": "adafcd6b96e685b8f77d411de41d21d27412127bfe795175444766f79a8f907b",
+    "pi/robot/route_sim.py": "4cb3ee9bb7e2bda391dcd774bdd83f82406f4270644e5f50e6698bff051d47c5",
+    "config/short_route.json": "a25bf868c3beaf7b16b49200c6716312ab99e5fc5f32f35f68612ff220d354f7",
+    "firmware/User/Comm/comm.c": "c87c6b1555a16ee888b1b0eb6ee8ee2f64aa897c0dadb615cf559e10a7496bf9",
+    "firmware/User/Control/exec.c": "c289db7ecc64c242e97e8b9323733a7a1093e7a6e3dc49dd1b62ef5bdd420370"
+  },
+  "limitations": [
+    "段间停车稳定交接，尚非非零速度连续交接",
+    "每段实际起点锚定，非地图绝对路径纠偏",
+    "完整外形/地图配准/独立精度未验收，整图不执行"
+  ],
+  "route_step_reflashed": false,
+  "includes_prior_firmware_updates": [
+    "GC-BASE-0.3.5",
+    "GC-BASE-0.3.6"
+  ]
+}

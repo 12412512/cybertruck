@@ -1,0 +1,192 @@
+{
+  "date": "2026-10-24",
+  "base_commit": "4ce36ab",
+  "milestone_tag": "v0.14.1-short-trials",
+  "firmware": "GC-BASE-0.3.3",
+  "profile_version": 2,
+  "profile_hardware_verified": false,
+  "firmware_reflashed": false,
+  "archive": {
+    "path": "output/field/short_trials_20261024.tar.gz",
+    "sha256": "cb7edda569184ba69f15ec46905a2bffd106595b97d40672b4faf8d9b859d805"
+  },
+  "cases": [
+    {
+      "case": "straight",
+      "action_id": 1,
+      "boot_id": 3685372962475046266,
+      "target_m_rad": [
+        0.1,
+        0,
+        0
+      ],
+      "controller_elapsed_s": 4.278103022999858,
+      "goal_count": 1,
+      "controller_complete": true,
+      "stop_confirmed_by_core": true,
+      "final_stop_frame_saved": false,
+      "final_or_last_periodic_execution": {
+        "mode": 5,
+        "fault": 0,
+        "action_id": 1,
+        "action_state": 4,
+        "action_fault": 0,
+        "stop_confirmed": 0,
+        "board_ms": 5298,
+        "config_version": 2,
+        "can_errors": 0,
+        "can_rx_sequence": 2196,
+        "odom_valid": 1,
+        "x_m": 0.10273833572864532,
+        "y_m": -8.86098641785793e-05,
+        "yaw_rad": -0.0010546445846557617,
+        "position_error_m": 0.0027754369657486677,
+        "yaw_error_rad": 0.0010546445846557617,
+        "fl_rpm": 0.0,
+        "fr_rpm": 0.0,
+        "rl_rpm": 0.0,
+        "rr_rpm": 0.0,
+        "mode_name": "STOPPING",
+        "action_name": "COMPLETE"
+      },
+      "can_errors_max": 0,
+      "user_observation": {
+        "direction_ok": true,
+        "visually_stopped": true,
+        "heading_stable": null,
+        "distance_mm": null,
+        "angle_deg": null,
+        "turn_visual_estimate_deg": null
+      },
+      "evidence": {
+        "path": "output/field/short_trials_20261024/output/runtime/trial-73f3e5f8620e43e5b01ecce19a218946.jsonl",
+        "sha256": "04980e8e8c05a4a8b165237779b22a04ffa580ed5aedf03f3ac41cec7984fdc9"
+      }
+    },
+    {
+      "case": "side",
+      "action_id": 1,
+      "boot_id": 10352227144067716516,
+      "target_m_rad": [
+        0,
+        0.08,
+        0
+      ],
+      "controller_elapsed_s": 3.6039215640012117,
+      "goal_count": 1,
+      "controller_complete": true,
+      "stop_confirmed_by_core": true,
+      "final_stop_frame_saved": true,
+      "final_or_last_periodic_execution": {
+        "mode": 1,
+        "fault": 0,
+        "action_id": 1,
+        "action_state": 4,
+        "action_fault": 0,
+        "stop_confirmed": 1,
+        "board_ms": 4696,
+        "config_version": 2,
+        "can_errors": 0,
+        "can_rx_sequence": 1898,
+        "odom_valid": 1,
+        "x_m": -1.8304441255168058e-05,
+        "y_m": 0.08245373517274857,
+        "yaw_rad": 9.584426879882812e-05,
+        "position_error_m": 0.0024651302956044674,
+        "yaw_error_rad": 9.584426879882812e-05,
+        "fl_rpm": 0.0,
+        "fr_rpm": 0.0,
+        "rl_rpm": 0.0,
+        "rr_rpm": 0.0,
+        "mode_name": "OBSERVING",
+        "action_name": "COMPLETE"
+      },
+      "can_errors_max": 0,
+      "user_observation": {
+        "direction_ok": true,
+        "visually_stopped": true,
+        "heading_stable": true,
+        "distance_mm": null,
+        "angle_deg": null,
+        "turn_visual_estimate_deg": null
+      },
+      "evidence": {
+        "path": "output/field/short_trials_20261024/output/runtime/trial-ef67e987fd234effb456b8e5dc7c0b59.jsonl",
+        "sha256": "bf6a70ba436d61b88abcadf70f139f099b6ddb6c93fd57acd721482dbbdfd95c"
+      }
+    },
+    {
+      "case": "turn",
+      "action_id": 1,
+      "boot_id": 14110840844518339241,
+      "target_m_rad": [
+        0,
+        0,
+        0.17453292519943295
+      ],
+      "controller_elapsed_s": 2.688209135001671,
+      "goal_count": 1,
+      "controller_complete": true,
+      "stop_confirmed_by_core": true,
+      "final_stop_frame_saved": true,
+      "final_or_last_periodic_execution": {
+        "mode": 1,
+        "fault": 0,
+        "action_id": 1,
+        "action_state": 4,
+        "action_fault": 0,
+        "stop_confirmed": 1,
+        "board_ms": 3772,
+        "config_version": 2,
+        "can_errors": 0,
+        "can_rx_sequence": 1475,
+        "odom_valid": 1,
+        "x_m": -2.6183184672845528e-05,
+        "y_m": 2.99034782074159e-05,
+        "yaw_rad": 0.17631196975708008,
+        "position_error_m": 4.304463436710648e-05,
+        "yaw_error_rad": 0.0016832053661346436,
+        "fl_rpm": 0.0,
+        "fr_rpm": 0.0,
+        "rl_rpm": 0.0,
+        "rr_rpm": 0.0,
+        "mode_name": "OBSERVING",
+        "action_name": "COMPLETE"
+      },
+      "can_errors_max": 0,
+      "user_observation": {
+        "direction_ok": true,
+        "visually_stopped": true,
+        "heading_stable": null,
+        "distance_mm": null,
+        "angle_deg": null,
+        "turn_visual_estimate_deg": 10
+      },
+      "evidence": {
+        "path": "output/field/short_trials_20261024/output/runtime/trial-0a0eacfcb3d6475a96c1c907bc334208.jsonl",
+        "sha256": "f4ba45b2aa6010d2ac43565ee77a280aa401872ee1a54ed54d77d18a13334cb9"
+      }
+    }
+  ],
+  "execution_regression_tests": 22,
+  "limits": {
+    "linear_velocity_m_s": 0.03,
+    "linear_acceleration_m_s2": 0.08,
+    "linear_jerk_m_s3": 0.3,
+    "angular_velocity_rad_s": 0.1,
+    "angular_acceleration_rad_s2": 0.3,
+    "angular_jerk_rad_s3": 1.0,
+    "max_rpm": 6
+  },
+  "not_verified": [
+    "尺量距离、横向精度、独立角度精度",
+    "真实Z角速度尺度与动态曲线",
+    "斜线、弧线、全图",
+    "连续地图位姿与完整车体包络"
+  ],
+  "node_files_sha256": {
+    "pi/robot/drive_core.py": "55e68fe7b9c125f1514097679d50cc66503b9fc1a4c85734f3eaa7a81b7d7be2",
+    "tests/test_execution.py": "8127d97ccf0eee1376c9b032937bf476a5336b7d9e33ebaf9b261a1c6fb9bae8",
+    "output/field/straight_100_20261024/execution-tests.log": "b0317be8811214b300afec890314439e6b23bfda263fb6556d2821cb58b149f2"
+  }
+}

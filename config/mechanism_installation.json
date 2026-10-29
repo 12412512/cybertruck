@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "review_date": "2026-10-24",
+  "mapping_source": "firmware/User/Config/mech_hw.h 与 firmware/Car.ioc",
+  "wiring_confirmed_by_user": true,
+  "zero_baseline": "升降最高点、伸缩最近端；无实体限位开关",
+  "tray_reference_deg": 0,
+  "tray_slot_deg": [30, 150, 270],
+  "tray_source": "用户确认0度为基准，另外三个角度为三个存料槽；不是四个槽",
+  "physical_revalidated": false,
+  "runtime_device_enabled": false
+}

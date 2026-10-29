@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const source=fs.readFileSync(new URL('../pi/robot/web/static/workbench-connections.js',import.meta.url),'utf8');
+const html=fs.readFileSync(new URL('../pi/robot/web/static/workbench.html',import.meta.url),'utf8');
+let count=0;const check=x=>{assert.ok(x);count++;};
+check(html.includes('id="workspace-connections"'));
+check(html.includes('workbench-connections.js'));
+check(source.includes("'/api/connections/state'"));
+check(source.includes("'/api/connections/connect'"));
+check(source.includes("'X-Workbench':'1'"));
+check(source.includes('type="password"'));
+check(source.includes("el('password').value=''"));
+check(!source.includes('localStorage')&&!source.includes('sessionStorage'));
+check(!source.includes('/api/device/command')&&!source.includes('/api/workbench/command'));
+check(source.includes('setInterval(poll,1500);poll();'));
+check(!source.includes('setInterval(connect'));
+check(source.includes("if(pending||state.busy)return"));
+console.log(`${count} connection UI contracts PASS; no network or device calls`);

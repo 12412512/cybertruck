@@ -1,0 +1,9 @@
+.workspace-connections{margin:0 0 22px;border:1px solid #dfe8ee;background:white;border-radius:12px}
+.workspace-connections>summary{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;cursor:pointer;font-weight:600}
+.connection-body{padding:0 18px 16px}.connection-status-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;border-top:1px solid #edf1f4;padding-top:14px}
+.connection-status-grid small{display:block;color:var(--muted);margin-bottom:8px}.connection-status-grid strong{font-size:13px;line-height:1.6}
+.connection-toolbar{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:18px 0}.connection-toolbar>span{align-self:center;color:var(--muted);font-size:13px}
+.connection-toolbar label{display:grid;gap:6px;font-size:12px;min-width:240px}.connection-toolbar input{width:100%}
+.connection-confirm{display:flex;gap:8px;align-items:start;font-size:12px;line-height:1.8;color:#697c89}.connection-confirm input{width:16px;height:16px;min-height:16px;flex-shrink:0;margin-top:3px}
+.connection-body p{font-size:12px;line-height:1.8}.connection-error{color:#a73d35}.connection-body .hint{color:var(--muted)}
+@media(max-width:1000px){.connection-status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
