@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {imagePoint,imageRect,parseRect,calibrationPoints,liveAge,cameraHealth,sourceName} from '../pi/robot/web/static/workbench-vision-state.js';
+import {imagePoint,imageRect,parseRect,calibrationPoints,liveAge,cameraHealth,sourceName,previewDelay} from '../pi/robot/web/static/workbench-vision-state.js';
 let count=0;
 const check=fn=>{fn();count++;};
 check(()=>assert.deepEqual(imagePoint(110,70,{left:10,top:20,width:200,height:100},[1280,720]),[640,360]));
@@ -19,4 +19,9 @@ check(()=>assert.equal(liveAge({domain:'camera_live',age_ms:-1},1000,1100,40),In
 check(()=>assert.equal(cameraHealth({cameras:{material:{available:false,reason:'断开'}}},'material').ok,false));
 check(()=>assert.equal(cameraHealth({cameras:{material:{available:true,age_ms:25}}},'material').ok,true));
 check(()=>assert.equal(sourceName({domain:'historical_replay'}),'旧样本回放'));
+check(()=>assert.equal(previewDelay(20,30),20));
+check(()=>assert.equal(previewDelay(20,80),0));
+check(()=>assert.equal(previewDelay(0,0),1000/12));
+check(()=>assert.equal(liveAge({domain:'camera_live',age_ms:150,proxy_elapsed_ms:100},1000,1020,125),195));
+check(()=>assert.equal(liveAge({domain:'camera_live',age_ms:150,proxy_elapsed_ms:200},1000,1020,125),295));
 console.log(`${count} vision coordinate, freshness and input checks PASS`);

@@ -17,6 +17,10 @@ static int Same(const GroupGoal *a, const GroupGoal *b)
     for (i = 0; i < 5; i++)
         if (a->target[i] != b->target[i] || a->speed[i] != b->speed[i])
             return 0;
+    for (i = 0; i < 2; i++)
+        if ((a->accel_set ? a->accel[i] : MECH_AXIS_DEFAULT_ACC) !=
+            (b->accel_set ? b->accel[i] : MECH_AXIS_DEFAULT_ACC))
+            return 0;
     return 1;
 }
 
@@ -46,7 +50,7 @@ uint32_t Group_Begin(Group *group, const GroupGoal *goal, uint32_t now)
         {
             AxisGoal request = {goal->id, goal->zero_version,
                 goal->timeout_ms > MECH_MANUAL_TIMEOUT_MS ? MECH_MANUAL_TIMEOUT_MS : goal->timeout_ms,
-                goal->target[i], (uint16_t)goal->speed[i], (uint8_t)i};
+                goal->target[i], (uint16_t)goal->speed[i], (uint8_t)i, goal->accel[i], goal->accel_set};
             if (!goal->speed[i] || goal->speed[i] > MECH_MANUAL_MAX_RPM || goal->target[i] < 0)
                 return MECH_RANGE;
             group->axes[i] = *group->axis;
@@ -90,6 +94,7 @@ void Group_Stop(Group *group, uint32_t reason, uint32_t now)
     unsigned i;
     if (group->state != GROUP_RUNNING)
         return;
+    Mech_Freeze(group->axis->guard, reason, group->axis_mask == 1 ? 1 : group->axis_mask == 2 ? 2 : 0, now);
     group->reason = reason;
     group->state = reason == MECH_MANUAL ? GROUP_CANCELLED : GROUP_FAILED;
     for (i = 0; i < 2; i++)
@@ -119,8 +124,8 @@ void Group_Poll(Group *group, uint32_t now, uint8_t base_stopped)
     }
     for (i = 0; i < 2; i++)
         if (!(group->axis_mask & (1U << i)) && (guard->sample[i * 4].value ||
-            guard->sample[i * 4 + 1].value - group->stationary_raw[i] > MECH_AXIS_OTHER_RAW ||
-            group->stationary_raw[i] - guard->sample[i * 4 + 1].value > MECH_AXIS_OTHER_RAW))
+            guard->sample[i * 4 + 1].value - group->stationary_raw[i] > Mech_RawTolerance((uint8_t)i, MECH_MANUAL_TOL_UM) ||
+            group->stationary_raw[i] - guard->sample[i * 4 + 1].value > Mech_RawTolerance((uint8_t)i, MECH_MANUAL_TOL_UM)))
         {
             Group_Stop(group, AXIS_OTHER, now);
             return;
@@ -142,8 +147,8 @@ void Group_Poll(Group *group, uint32_t now, uint8_t base_stopped)
             if (a->state != AXIS_COMPLETE)
                 done = 0;
             else if (guard->sample[i * 4].value ||
-                     Mech_Position(guard, (uint8_t)i) < group->goal.target[i] - MECH_FEEDBACK_TOL_UM ||
-                     Mech_Position(guard, (uint8_t)i) > (int64_t)group->goal.target[i] + MECH_FEEDBACK_TOL_UM)
+                     Mech_Position(guard, (uint8_t)i) < group->goal.target[i] - MECH_MANUAL_ENDPOINT_UM ||
+                     Mech_Position(guard, (uint8_t)i) > (int64_t)group->goal.target[i] + MECH_MANUAL_ENDPOINT_UM)
             {
                 Group_Stop(group, AXIS_TARGET, now);
                 return;

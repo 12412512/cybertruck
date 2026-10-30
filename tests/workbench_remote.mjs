@@ -14,6 +14,11 @@ check(!freshDevice(healthy(),100,335));
 check(!freshDevice({...healthy(),domain:'simulation'},100,100));
 check(!freshDevice({...healthy(),state_age_ms:null},100,100));
 check(!freshDevice(healthy(),100,99));
+// 源龄80ms加请求/解析200ms，刚收到也不能授权新动作。
+check(!freshDevice({...healthy(),state_age_ms:80},300,300,200));
+check(freshDevice({...healthy(),state_age_ms:80},300,300,169));
+check(!freshDevice({...healthy(),state_age_ms:80},300,301,169));
+for(const delay of [-1,NaN,Infinity])check(!freshDevice(healthy(),100,100,delay));
 for(const action of ['move','enable','zero','anchor','pose']) {
     check(allowed(healthy(),true,'',action));
     for(const fault of ['base','mech','stale','site','owner','pending','zero','config','parked']) {
@@ -54,7 +59,9 @@ check(!entry.includes('initTransfer'));check(!entry.includes('initCompact'));che
 check(!entry.includes("command('mechanism'"));
 const ui=fs.readFileSync(new URL('../pi/robot/web/static/workbench-device.js',import.meta.url),'utf8');
 check(ui.includes("fetch('/api/device/state'"));check(ui.includes("fetch('/api/device/command'"));
-check(!ui.includes('/api/workbench'));check(!ui.includes('localStorage'));
+check(!ui.includes('/api/workbench'));
+// .42允许持久化轴输入草稿；控制权和设备状态仍不能写入浏览器存储。
+check(!/localStorage\.setItem\([^\n]*(?:token|boot_id|session_id|zero_valid)/.test(ui));
 check(!ui.includes('initGuide'));check(!ui.includes('模拟零点'));
 check(ui.includes('if(!token)return;'));
 check(ui.includes("document.addEventListener('visibilitychange'"));

@@ -37,7 +37,9 @@ body[data-page='mechanism'] footer { display:none; }
 .remote-actuator-title b { font-size:15px; }
 .remote-actuator-title small { color:#7e8a94; font-size:11px; }
 .remote-actuator-title span { margin-left:auto; font-size:12px; color:#6d8089; }
-.remote-inputs { display:grid; grid-template-columns:minmax(85px,1fr) minmax(85px,1fr) auto auto; gap:10px; align-items:end; }
+.remote-inputs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; align-items:end; }
+.remote-inputs button { grid-row:2; }
+.remote-inputs button:last-child { grid-column:2 / 4; }
 .remote-servo-row { display:grid; grid-template-columns:minmax(80px,1fr) minmax(95px,1fr) auto; gap:10px; align-items:end; }
 .remote-inputs button,.remote-servo-row button { min-height:42px; }
 .remote-presets { display:flex; gap:8px; margin-top:10px; }
@@ -116,5 +118,5 @@ body[data-page='mechanism'] footer { display:none; }
 #transfer-events { font-size:13px; }
 
 /* PC联调参数表：顺序与目标在同一行，输入不触发动作。 */
-.seq-table{overflow-x:auto}.seq-row{display:grid;grid-template-columns:80px minmax(170px,1fr) minmax(100px,1fr) minmax(130px,1fr) 72px;gap:12px;align-items:center;margin:10px 0;min-width:650px}.seq-heading{font-size:13px;color:var(--muted)}.seq-row input,.seq-row select{width:100%;min-width:0}
+.seq-table{overflow-x:auto}.seq-row{display:grid;grid-template-columns:70px minmax(170px,1.2fr) minmax(100px,1fr) minmax(120px,1fr) 105px 72px;gap:10px;align-items:center;margin:10px 0;min-width:770px}.seq-heading{font-size:13px;color:var(--muted)}.seq-row input,.seq-row select{width:100%;min-width:0}
 .seq-delete-review{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px;border:1px solid #f0cccc;border-radius:8px;background:#fff7f6;font-size:13px}.seq-delete-review[hidden]{display:none}

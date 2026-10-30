@@ -52,6 +52,8 @@ static int Config(const TrackConfig *config)
     }
     if (!isfinite(config->lag_ff_s) || config->lag_ff_s < 0 || config->lag_ff_s > .15)
         return 0;
+    if (config->micro_steps > 1 || (config->micro_steps &&
+        (config->calibration != 10 || config->max_rpm != 6))) return 0;
     values[0] = config->kp_xy;
     values[1] = config->kp_yaw;
     values[2] = config->kd_gyro;
@@ -292,6 +294,15 @@ int Track_Start(Track *track, const TrackGoal *goal,
     {
         return -1;
     }
+    if (track->config.micro_steps && (goal->reference.kind != 1 || goal->reference.yaw_rad != 0 ||
+        (goal->reference.x_m != 0 && goal->reference.y_m != 0) ||
+        hypot(goal->reference.x_m, goal->reference.y_m) > .005001 ||
+        hypot(goal->reference.x_m, goal->reference.y_m) < .000999)) return -1;
+    if (track->config.micro_steps && !track->micro_heading_valid)
+    {
+        track->micro_heading = observation->yaw_rad;
+        track->micro_heading_valid = 1;
+    }
     track->plan = track->candidate;
     track->goal = *goal;
     memset(&track->output, 0, sizeof(track->output));
@@ -302,6 +313,9 @@ int Track_Start(Track *track, const TrackGoal *goal,
     track->have_previous = 1;
     track->have_zero_ack = track->stabilizing = 0;
     track->position_active = track->yaw_active = 0;
+    track->micro_phase = track->micro_begin_ms = track->micro_duration_ms = 0;
+    memset(track->micro_rpm, 0, sizeof(track->micro_rpm));
+    track->micro_token = track->micro_requested_ms = track->micro_acked = 0;
     Zero(track);
     return 1;
 }
@@ -309,6 +323,86 @@ int Track_Start(Track *track, const TrackGoal *goal,
 static double Clamp(double value, double limit)
 {
     return value < -limit ? -limit : value > limit ? limit : value;
+}
+
+/* 毫米级标定不在旧反馈上连续换向。每次只选一个车体系平移轴或纯转向，
+ * 四轮同幅整数RPM，消除分别取整产生的半组车轮停转。
+ * 平移最长500ms/转向200ms后经过四轮零速TXOK和150ms新反馈稳定窗口。
+ * 小步时间只限定输出预算；实际是否到位仍完全由编码器/IMU决定。 */
+static int MicroCommand(Track *track, const TrackObservation *sample, uint32_t now, double dt)
+{
+    double dx = track->plan.target[0] - sample->pose.x_m;
+    double dy = track->plan.target[1] - sample->pose.y_m;
+    double angle = track->micro_heading - sample->yaw_rad;
+    double c = cos(sample->yaw_rad), s = sin(sample->yaw_rad);
+    double x = c * dx + s * dy, y = -s * dx + c * dy;
+    double speed = 2 * 3.14159265358979323846 * track->config.geometry.radius_m / 60;
+    double budget, sign, amplitude, ceiling, duration_limit, change = 0, scale;
+    static const int pattern[3][4] = {{1,1,1,1},{-1,1,1,-1},{-1,1,-1,1}};
+    unsigned axis, i;
+    if (!Track_Reference(track, now, &track->output.reference)) return TRACK_REFERENCE;
+    track->output.reference.yaw_rad = track->micro_heading;
+    if (track->micro_phase == 1 && track->micro_token && !track->micro_acked &&
+        (uint32_t)(now-track->micro_requested_ms) >= track->config.fresh_ms) return TRACK_TIMEOUT;
+    track->output.position_error_m = hypot(dx,dy);
+    track->output.yaw_error_rad = fabs(angle);
+    track->output.scale = 1;
+    if (!isfinite(x) || !isfinite(y) || !isfinite(angle)) return TRACK_FEEDBACK;
+    track->position_active = track->yaw_active = 0;
+    if (track->micro_phase == 0)
+    {
+        if (fabs(angle) > track->config.yaw_tol_rad)
+        {
+            axis = 2; sign = angle < 0 ? -1 : 1;
+            budget = (fabs(angle) - track->config.yaw_tol_rad / 2) *
+                     (track->config.geometry.half_length_m + track->config.geometry.half_width_m);
+        }
+        else if (hypot(dx,dy) > track->config.position_tol_m)
+        {
+            axis = fabs(x) >= fabs(y) ? 0 : 1;
+            sign = (axis == 0 ? x : y) < 0 ? -1 : 1;
+            budget = fabs(axis == 0 ? x : y) - track->config.position_tol_m / 2;
+        }
+        else
+        {
+            track->micro_phase = 3;
+            budget = 0; axis = 0; sign = 0;
+        }
+        if (track->micro_phase != 3)
+        {
+            /* 复用整轮限幅和共同比例斜坡；平移2RPM，纯转向保持1RPM。
+             * 大余量留20%预算给停车响应，近终点缩短时间而非降到1RPM。 */
+            ceiling = axis == 2 ? track->config.correction_rad_s *
+                (track->config.geometry.half_length_m + track->config.geometry.half_width_m) / speed :
+                track->config.correction_m_s / speed;
+            amplitude = axis != 2 ? 2 : 1;
+            amplitude = fmin(amplitude, floor(fmin(ceiling, track->config.max_rpm)));
+            if (amplitude < 1) return TRACK_REFERENCE;
+            duration_limit = axis == 2 ? 200 : 500;
+            if (amplitude > 1 && budget > .002) budget *= .8;
+            track->micro_duration_ms = (uint32_t)fmax(40, fmin(duration_limit, budget / (speed * amplitude) * 1000));
+            track->micro_begin_ms = 0;
+            track->micro_token = track->micro_acked = 0;
+            track->micro_phase = 1;
+            for (i=0;i<4;i++) track->micro_rpm[i] = amplitude * sign * pattern[axis][i];
+        }
+    }
+    if (track->micro_phase == 1 && track->micro_acked &&
+        (uint32_t)(now-track->micro_begin_ms) >= track->micro_duration_ms)
+        track->micro_phase = 2;
+    for (i=0;i<4;i++)
+    {
+        double desired = track->micro_phase == 1 ? track->micro_rpm[i] : 0;
+        change = fmax(change, fabs(desired-track->slew[i]));
+    }
+    scale = change > track->config.slew_rpm_s * dt ? track->config.slew_rpm_s * dt / change : 1;
+    for (i=0;i<4;i++)
+    {
+        double desired = track->micro_phase == 1 ? track->micro_rpm[i] : 0;
+        track->slew[i] += scale * (desired-track->slew[i]);
+        track->output.rpm[i] = floor(fabs(track->slew[i])+.5) * (track->slew[i]<0?-1:1);
+    }
+    return TRACK_OK;
 }
 
 static int Command(Track *track, const TrackObservation *sample, uint32_t now, double dt)
@@ -329,6 +423,7 @@ static int Command(Track *track, const TrackObservation *sample, uint32_t now, d
     double change = 0;
     double scale;
     unsigned index;
+    if (track->config.micro_steps) return MicroCommand(track, sample, now, dt);
     if (!Track_Reference(track, now, &track->output.reference) ||
         !Track_Reference(track, sample->pose.tick_ms, &position) ||
         !Track_Reference(track, sample->yaw_stamp.last_ms, &heading) ||
@@ -483,6 +578,8 @@ static void Arrival(Track *track, const TrackObservation *sample, uint32_t now)
     capture = track->output.reference.done && track->output.position_error_m <= track->config.position_tol_m &&
         track->output.yaw_error_rad <= track->config.yaw_tol_rad &&
         !track->position_active && !track->yaw_active && zero;
+    if (track->config.micro_steps)
+        capture = zero && (track->micro_phase == 2 || track->micro_phase == 3);
     track->output.blockers = track->output.reference.done ? 0 : 1;
     if (!capture)
     {
@@ -519,6 +616,17 @@ static void Arrival(Track *track, const TrackObservation *sample, uint32_t now)
         track->output.stable_elapsed_ms = 0;
         return;
     }
+    if (track->config.micro_steps)
+    {
+        for (index=0;index<4;index++)
+            if (sample->rpm[index] != 0)
+            {
+                track->output.blockers |= 16;
+                track->stabilizing = 0;
+                track->output.stable_elapsed_ms = 0;
+                return;
+            }
+    }
     for (index = 0; index < 4; index++)
     {
         if (track->stabilizing && fabs(sample->counts[index] - track->stable_counts[index]) >
@@ -543,6 +651,18 @@ static void Arrival(Track *track, const TrackObservation *sample, uint32_t now)
         track->output.blockers |= 64;
         return;
     }
+    if (track->config.micro_steps &&
+        (track->output.position_error_m > track->config.position_tol_m ||
+         track->output.yaw_error_rad > track->config.yaw_tol_rad))
+    {
+        track->micro_phase = 0;
+        track->output.zero_id = track->output.zero_ack_ms = 0;
+        track->have_zero_ack = track->stabilizing = 0;
+        track->output.stable_elapsed_ms = 0;
+        track->output.state = TRACK_RUNNING;
+        return;
+    }
+    if (track->config.micro_steps && !track->output.reference.done) return;
     track->output.state = TRACK_COMPLETE;
     track->output.done_ms = now;
 }
@@ -593,6 +713,12 @@ int Track_Step(Track *track, const TrackObservation *observation, uint32_t now_m
     {
         Publish(track);
     }
+    if (track->config.micro_steps && track->micro_phase == 1 &&
+        !track->micro_token && track->output.rpm[0] != 0)
+    {
+        track->micro_token = track->output.output_id;
+        track->micro_requested_ms = now_ms;
+    }
     Arrival(track, observation, now_ms);
     if (previous_zero && !track->output.zero_id)
     {
@@ -603,8 +729,25 @@ int Track_Step(Track *track, const TrackObservation *observation, uint32_t now_m
     return track->output.state == TRACK_COMPLETE ? 1 : 0;
 }
 
+uint32_t Track_Token(const Track *track)
+{
+    if (!track) return 0;
+    return track->config.micro_steps && track->micro_phase == 1 ?
+        track->micro_token : track->output.zero_id;
+}
+
 int Track_Sent(Track *track, uint32_t id, uint32_t output_id, uint32_t sent_ms)
 {
+    if (track && track->config.micro_steps && track->micro_phase == 1 &&
+        track->output.state == TRACK_RUNNING && track->output.id == id &&
+        output_id && output_id == track->micro_token && !track->micro_acked &&
+        (uint32_t)(sent_ms - track->micro_requested_ms) < TRACK_HALF &&
+        (uint32_t)(sent_ms - track->start_ms) <= track->goal.timeout_ms)
+    {
+        track->micro_acked = 1;
+        track->micro_begin_ms = sent_ms;
+        return 1;
+    }
     if (!track || track->output.state != TRACK_SETTLING || track->output.id != id ||
         !output_id || track->output.zero_id != output_id || track->have_zero_ack ||
         (uint32_t)(sent_ms - track->zero_requested_ms) >= TRACK_HALF ||

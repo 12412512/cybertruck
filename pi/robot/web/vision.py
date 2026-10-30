@@ -2,19 +2,50 @@
 
 import json
 import base64
+import math
+import time
 from typing import Literal
 from pathlib import Path
 from urllib.request import urlopen
 from urllib.error import URLError
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response, FileResponse
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..vision.workspace import Workspace
+from ..vision.workspace import Workspace, canonical
 
 ROOT = Path(__file__).resolve().parents[3]
 LIVE = 'http://127.0.0.1:8092'
+
+
+class LiveClient:
+    """视觉专用GET连接池，避免每帧重建SSH通道；不重试、不访问设备控制。"""
+    def __init__(self):
+        import httpx
+        self.http = httpx.Client(trust_env=False, follow_redirects=False,
+            transport=httpx.HTTPTransport(retries=0),
+            limits=httpx.Limits(max_connections=2, max_keepalive_connections=2, keepalive_expiry=30))
+
+    def read(self, path, timeout=2):
+        import httpx
+        if path.split('?')[0] not in ('/state', '/frame', '/observation'):
+            raise ValueError('未知视觉只读路径')
+        try:
+            with self.http.stream('GET', LIVE + path, timeout=timeout) as response:
+                response.raise_for_status()
+                chunks, total = [], 0
+                for chunk in response.iter_bytes():
+                    total += len(chunk)
+                    if total > 6*1024*1024:
+                        raise ValueError('视觉响应超过上限')
+                    chunks.append(chunk)
+                return b''.join(chunks), response.headers.get('content-type', 'application/octet-stream')
+        except httpx.HTTPError as error:
+            raise OSError('视觉只读请求失败') from error
+
+    def close(self):
+        self.http.close()
 
 
 class Binding(BaseModel):
@@ -35,6 +66,7 @@ class Sample(BaseModel):
     slot: int | None = Field(default=None, ge=1, le=3)
     note: str = Field(default='', max_length=1000)
     binding: Binding | None = None
+    observation_order: int | None = Field(default=None, ge=1, le=999, strict=True)
 
 
 class Point(BaseModel):
@@ -55,6 +87,7 @@ class Draft(BaseModel):
     grasp_roi: list[int] | None = Field(default=None, min_length=4, max_length=4)
     points: list[Point] = Field(default_factory=list, max_length=24)
     binding: Binding | None = None
+    observation_order: int | None = Field(default=None, ge=1, le=999, strict=True)
 
 
 class Color(BaseModel):
@@ -64,9 +97,15 @@ class Color(BaseModel):
     color_id: int = Field(ge=1, le=6)
 
 
-def router(storage=None, device_client=None):
+def router(storage=None, device_client=None, live_client=None):
     api = APIRouter(prefix='/api/vision')
     store = storage or Workspace(ROOT / 'output/vision/workbench')
+
+    def read_live(path, timeout):
+        if live_client is not None:
+            return live_client.read(path, timeout)
+        with urlopen(LIVE + path, timeout=timeout) as response:
+            return response.read(6*1024*1024 + 1), (response.headers.get_content_type() if hasattr(response, 'headers') else 'application/json')
 
     def device():
         from .workbench import CoreClient
@@ -89,6 +128,29 @@ def router(storage=None, device_client=None):
         if not any(v.get('id') == binding['id'] and v.get('revision') == binding['revision'] and
                    v.get('sha256') == binding['sha256'] for v in records):
             raise ValueError('关联姿态版本已不可读取，请刷新版本；不会修改或执行姿态')
+
+    def observation_reference(data, snapshot):
+        """用户标注的组后命令姿态；不是曝光时实测姿态，也不授予执行许可。"""
+        binding, order = data.get('binding'), data.get('observation_order')
+        validate_binding(binding, snapshot)
+        if order is None:
+            return None
+        if binding is None or binding['kind'] != 'sequence':
+            raise ValueError('观察顺序号需要关联一个已保存的联调版本')
+        from ..device.mech_sequence import digest, groups
+        record = next(v for v in snapshot['sequences'] if v['id'] == binding['id'] and
+                      v['revision'] == binding['revision'] and v['sha256'] == binding['sha256'])
+        if digest(record) != record['sha256']:
+            raise ValueError('联调版本内容校验失败')
+        state = {}
+        for group in groups(record['rows']):
+            for member in group['members']:
+                state[member['axis']] = {k: member[k] for k in ('target_m', 'target_rad') if k in member}
+            if group['order'] == order:
+                return dict(kind='operator_selected_after_group', order=order,
+                            commanded_pose=state, actual_pose_verified=False,
+                            exposure_synchronized=False, motion_authority=False)
+        raise ValueError('联调版本中不存在这个顺序号；填写表中顺序号，不是行号')
 
     def save(call):
         try:
@@ -118,8 +180,8 @@ def router(storage=None, device_client=None):
     @api.get('/state')
     def state():
         try:
-            with urlopen(LIVE + '/state', timeout=1) as response:
-                live = json.load(response)
+            raw, _ = read_live('/state', 1)
+            live = json.loads(raw)
         except (OSError, ValueError, URLError):
             live = dict(available=False, reason='相机专用服务未连接；不会使用模拟画面替代实时画面')
         return dict(live=live, samples=[dict(id=s['id'], name=s['file']) for s in samples()],
@@ -141,7 +203,7 @@ def router(storage=None, device_client=None):
         snapshot = device()
         data = value.model_dump()
         def write():
-            validate_binding(data['binding'], snapshot)
+            data['observation_reference'] = observation_reference(data, snapshot)
             return store.save_sample(data, snapshot)
         return save(write)
 
@@ -150,7 +212,7 @@ def router(storage=None, device_client=None):
         same_origin(request)
         data = value.model_dump()
         def write():
-            validate_binding(data['binding'], device())
+            data['observation_reference'] = observation_reference(data, device())
             return store.save_draft(data)
         return save(write)
 
@@ -172,20 +234,19 @@ def router(storage=None, device_client=None):
     @api.get('/samples/{key}/image')
     def sample_image(key: str):
         try:
-            _, path = store.get('samples', key)
-            if not path.is_file():
-                raise ValueError('图像不存在')
+            _, data = store.image(key)
         except (ValueError, OSError):
-            raise HTTPException(404, '样本图像不存在')
-        return FileResponse(path, media_type='image/jpeg', headers={'Cache-Control': 'no-store'})
+            raise HTTPException(404, '样本图像不存在或校验失败')
+        return Response(data, media_type='image/jpeg', headers={'Cache-Control': 'no-store'})
 
     @api.get('/samples/{key}/observation')
     def sample_observation(key: str):
         try:
-            value, path = store.get('samples', key)
+            value, data = store.image(key)
             result = dict(value['observation'], domain='saved_sample', camera=value['observation'].get('camera'),
-                          original_domain=value['source_domain'], image=f'/api/vision/samples/{key}/image')
-            return store.remember(result, path.read_bytes())
+                          original_domain=value['source_domain'], image_sha256=value['image_sha256'],
+                          image=f'/api/vision/samples/{key}/image')
+            return store.remember(result, data)
         except (ValueError, OSError, KeyError):
             raise HTTPException(404, '样本无法读取')
 
@@ -217,26 +278,50 @@ def router(storage=None, device_client=None):
 
     @api.get('/live/{resource}')
     def live(resource: str, role: str = 'material', mode: str = 'material'):
-        if resource not in ('frame', 'observation') or role not in ('material', 'qr') or mode not in ('material', 'ring', 'qr'):
+        if resource not in ('frame', 'observation') or role not in ('material', 'qr') or mode not in ('preview', 'material', 'ring', 'qr'):
             raise HTTPException(400, '未知视觉请求')
         try:
-            with urlopen(f'{LIVE}/{resource}?role={role}&mode={mode}', timeout=2) as response:
-                raw = response.read(6*1024*1024 + 1)
-                if len(raw) > 6*1024*1024:
-                    raise ValueError('视觉响应超过上限')
-                if resource == 'observation':
-                    result = json.loads(raw)
-                    if (result.get('domain') != 'camera_live' or result.get('camera') != role or
-                            not isinstance(result.get('age_ms'), (int, float)) or not 0 <= result['age_ms'] <= 250):
-                        raise ValueError('视觉来源或帧龄不正确')
-                    encoded = result.get('image', '')
-                    if not encoded.startswith('data:image/jpeg;base64,'):
-                        raise ValueError('视觉图像格式错误')
-                    image = base64.b64decode(encoded.partition(',')[2], validate=True)
-                    return store.remember(dict(result, recognition_mode=mode), image)
-                return Response(raw, media_type=response.headers.get_content_type(),
-                                headers={'Cache-Control': 'no-store'})
-        except (OSError, URLError, ValueError, KeyError):
+            started = time.monotonic()
+            raw, content_type = read_live(f'/{resource}?role={role}&mode={mode}', 2)
+            if len(raw) > 6*1024*1024:
+                raise ValueError('视觉响应超过上限')
+            if resource == 'observation':
+                result = json.loads(raw)
+                if not isinstance(result, dict):
+                    raise ValueError('视觉响应结构错误')
+                # json.loads可接受NaN/Infinity或溢出的1e999；整帧须能安全序列化。
+                canonical(result)
+                source_age = result.get('age_ms')
+                if (result.get('domain') != 'camera_live' or result.get('camera') != role or
+                        type(source_age) not in (int, float) or not math.isfinite(source_age) or
+                        not 0 <= source_age <= 250):
+                    raise ValueError('视觉来源或帧龄不正确')
+                encoded = result.get('image', '')
+                if not isinstance(encoded, str) or not encoded.startswith('data:image/jpeg;base64,'):
+                    raise ValueError('视觉图像格式错误')
+                image = base64.b64decode(encoded.partition(',')[2], validate=True)
+                def final_age():
+                    # 只累加本机请求耗时；Pi与PC的单调时钟不能直接相减。
+                    elapsed = max(0., (time.monotonic() - started)*1000)
+                    # 新相机返回本次服务耗时；它已包含在源帧龄和整段RTT中，不能重复累计。
+                    # 不比较两台机器的绝对时钟，旧服务缺字段时仍使用原保守上界。
+                    server_elapsed = result.get('server_elapsed_ms', 0)
+                    if (type(server_elapsed) not in (int, float) or not math.isfinite(server_elapsed) or
+                            not 0 <= server_elapsed <= elapsed):
+                        raise ValueError('视觉服务耗时不正确')
+                    age = source_age + elapsed - server_elapsed
+                    if age > 250:
+                        raise ValueError('视觉响应传输或处理后已过期')
+                    # 前端仍叠加浏览器往返耗时，得到更保守的显示上界。
+                    return dict(source_age_ms=source_age, proxy_elapsed_ms=elapsed, age_ms=age,
+                                age_scope=('source_age_plus_transport' if 'server_elapsed_ms' in result
+                                           else 'source_age_plus_proxy_request'))
+                return store.remember(dict(result, recognition_mode=mode), image, finalize=final_age)
+            return Response(raw, media_type=content_type,
+                            headers={'Cache-Control': 'no-store'})
+        except ValueError as error:
+            raise HTTPException(503, str(error)) from error
+        except (OSError, URLError, KeyError):
             raise HTTPException(503, '实时相机不可用')
 
     return api

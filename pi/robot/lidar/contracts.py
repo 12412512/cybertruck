@@ -24,3 +24,4 @@ class CalibrationCommit(BaseModel):
     backup_version: str = Field(pattern=r'^[a-f0-9]{64}$')
     placement_id: str = Field(min_length=1, max_length=64)
     confirm_save: bool
+    allow_can_latched: bool = False

@@ -136,6 +136,15 @@ def merge_color_sample(previous,current):
     return result
 
 
+def color_distance(channels, sample):
+    """Same float32 LAB norm, using contiguous planes to avoid HWC temporaries."""
+    center, scale = np.float32(sample['lab']), np.float32(sample['scale'])
+    total = np.square((channels[0] - center[0]) / scale[0])
+    for i in (1, 2):
+        total += np.square((channels[i] - center[i]) / scale[i])
+    return np.sqrt(total, out=total)
+
+
 class MaterialDetector:
     def __init__(self,profile):
         self.profile=validate_profile(copy.deepcopy(profile));self.rejected_regions=[];self.uncertain_regions=[]
@@ -147,13 +156,14 @@ class MaterialDetector:
         ratio=min(1.,self.profile.get('processing_width',480)/width)
         small=cv2.resize(frame,None,fx=ratio,fy=ratio,interpolation=cv2.INTER_AREA) if ratio<1 else frame
         lab=cv2.cvtColor(small,cv2.COLOR_BGR2LAB).astype(np.float32)
+        channels=np.ascontiguousarray(lab.transpose(2,0,1))
         hsv=cv2.cvtColor(small,cv2.COLOR_BGR2HSV)
         scores=[]
         for color in range(1,7):
             model=self.profile['colors'][str(color)]
             distances=[]
             for sample in model.get('examples',[model]):
-                distance=np.linalg.norm((lab-np.float32(sample['lab']))/np.float32(sample['scale']),axis=2)
+                distance=color_distance(channels,sample)
                 gate=hsv[:,:,2]<=min(145,max(70,sample['v95']+20)) if color==5 else hsv[:,:,1]>=25
                 distances.append(np.where(gate,distance,1e4))
             scores.append(np.minimum.reduce(distances))

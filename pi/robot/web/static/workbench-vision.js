@@ -5,8 +5,9 @@ import {
     calibrationPoints,
     sourceName,
     liveAge,
-    cameraHealth
-} from './workbench-vision-state.js?v=1';
+    cameraHealth,
+    previewDelay
+} from './workbench-vision-state.js?v=2';
 
 // 所有保存均为样本或标定草稿；不调用控制、清故障和成功计数接口。
 const page = document.getElementById('page-vision');
@@ -17,7 +18,9 @@ page.innerHTML = `
   <div class="vision-toolbar">
    <label>来源<select id="vision-source"><option value="replay">旧样本回放</option><option value="live">实时相机</option><option value="saved">采集样本</option></select></label>
    <label>相机<select id="vision-role"><option value="material">物料相机</option><option value="qr">扫码相机</option></select></label>
-   <label>识别<select id="vision-mode"><option value="material">六色物料</option><option value="ring">圆环编号</option><option value="qr">任务码</option></select></label>
+   <label>识别<select id="vision-mode"><option value="preview">流畅预览（不识别）</option><option value="material">六色物料</option><option value="ring">圆环编号</option><option value="qr">任务码</option></select></label>
+   <label>预览上限<select id="vision-fps"><option value="6">6 FPS</option><option value="12" selected>12 FPS</option><option value="20">20 FPS</option></select></label>
+   <span id="vision-rate" class="badge muted">实际预览帧率待测</span>
    <button id="vision-read">读取一帧</button><button id="vision-live" class="primary">开始预览</button><button id="vision-freeze">冻结画面</button>
   </div><label class="vision-source-list">样本<select id="vision-sample"></select></label>
   <div class="vision-canvas-wrap"><canvas id="vision-canvas" width="1280" height="720" aria-label="相机画面，拖动可框选区域"></canvas><div id="vision-empty">请选择样本，或接通相机后读取画面</div></div>
@@ -33,8 +36,9 @@ page.innerHTML = `
   <div class="vision-fields"><label>观察工位<select id="vision-stage"><option value="raw">原料区</option><option value="car_slot">车载料位</option><option value="rough">粗加工区</option><option value="storage">暂存区</option><option value="stack">第二层码垛</option></select></label>
   <label>人工标签<select id="vision-label"><option value="unknown">待确认</option><option value="empty">空位 / 空爪</option><option value="present">目标存在</option><option value="held">持料</option><option value="stored">已存车</option><option value="released">已释放</option><option value="placed">已放置</option></select></label>
   <label>目标颜色<select id="vision-color"><option value="">未指定</option><option value="1">红色</option><option value="2">黄色</option><option value="3">蓝色</option><option value="4">绿色</option><option value="5">黑色</option><option value="6">浅蓝色</option></select></label>
-  <label>车载料位<select id="vision-slot"><option value="">未指定</option><option value="1">料位1 · 30°</option><option value="2">料位2 · 150°</option><option value="3">料位3 · 270°</option></select></label></div>
+  <label>车载料位<select id="vision-slot"><option value="">未指定</option><option value="1">料位1</option><option value="2">料位2</option><option value="3">料位3</option></select></label></div>
   <label>关联机械版本<select id="vision-binding"><option value="">暂不关联</option></select></label><button id="vision-bind-refresh" class="text-button">刷新已保存姿态 / 联调版本</button>
+  <label>观察阶段（可选）<input id="vision-order" type="number" min="1" max="999" step="1" placeholder="联调表中已完成的顺序号，如2"></label><p class="vision-help">填写顺序号，不是行号。仅标注对应组后的命令姿态，不执行动作、不证明实际到位；标定草稿也使用此关联。</p>
   <label>实物观察<textarea id="vision-note" maxlength="1000" rows="3" placeholder="如：夹持稳定；命令20mm，尺量19mm"></textarea></label>
   <button id="vision-save-sample" class="primary vision-wide">保存同帧图像与记录</button><p class="vision-help">文字标注暂存本机，图像须明确保存。人工标签不增加成功计数；设备快照采于保存时刻。</p>
  </article>
@@ -77,6 +81,7 @@ let points = [],
     },
     saving = false,
     replays = [];
+let rateWindow = 0, rateFrames = 0, rateKey = '', previewFailures = 0, previewRequested = false;
 const point = e => imagePoint(e.clientX, e.clientY, canvas.getBoundingClientRect(), [canvas.width, canvas
     .height
 ]);
@@ -120,6 +125,7 @@ function buttons() {
 }
 
 function freeze() {
+    previewRequested = false;
     stop();
     frozen = true;
     buttons();
@@ -127,9 +133,18 @@ function freeze() {
     if (current) tell('已冻结，可框选、标注和保存；不用于实时动作判断。');
 }
 
+function pausePreview() {
+    stop();
+    rateWindow = 0; rateFrames = 0; rateKey = '';
+    frozen = true;
+    buttons();
+    frameLabel();
+    if (previewRequested) tell('预览已暂停；返回相机页面后继续取新帧。');
+}
+
 function frameLabel() {
     if (!current) {
-        el('frame').textContent = '尚无画面';
+        el('frame').textContent = bitmap ? `上一帧仅供查看 · 距接收 ${Math.round(performance.now()-received)}ms · 不可采样` : '尚无画面';
         return;
     }
     const age = liveAge(current, received, performance.now(), rtt);
@@ -143,6 +158,14 @@ function draw() {
     el('empty').hidden = !!bitmap;
     if (!bitmap) return;
     ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    if (!current) {
+        ctx.fillStyle = 'rgba(18,35,47,.75)';
+        ctx.fillRect(0, 0, canvas.width, 56);
+        ctx.fillStyle = '#fff';
+        ctx.font = '24px Microsoft YaHei,sans-serif';
+        ctx.fillText('上一帧 · 数据已过期 · 等待新帧（不可采样）', 18, 36);
+        return;
+    }
     ctx.lineWidth = Math.max(2, canvas.width / 500);
     ctx.font = `${Math.max(16,canvas.width/60)}px Microsoft YaHei,sans-serif`;
     if (el('overlay').checked)
@@ -189,9 +212,10 @@ function draw() {
 }
 
 function detections(result) {
-    el('count').textContent = `${result.items.length}个候选`;
+    el('count').textContent = result.recognition_performed === false ? '未运行识别' : `${result.items.length}个候选`;
     el('detections').replaceChildren();
-    if (!result.items.length) el('detections').textContent = '本帧无候选；不能据此确认空位或释放成功。';
+    if (!result.items.length) el('detections').textContent = result.recognition_performed === false ?
+        '流畅预览只显示原图；选择六色物料或圆环编号可开启识别。' : '本帧无候选；不能据此确认空位或释放成功。';
     for (const item of result.items) {
         const row = document.createElement('div');
         row.className = 'vision-detection';
@@ -227,6 +251,8 @@ async function request(path, body) {
     return value;
 }
 async function read(loop = false) {
+    previewRequested = loop;
+    if (loop && (page.hidden || document.hidden)) { pausePreview(); return; }
     stop();
     const epoch = generation;
     controller = new AbortController();
@@ -250,9 +276,23 @@ async function read(loop = false) {
         await image.decode();
         if (epoch !== generation || page.hidden) return;
         current = result;
+        previewFailures = 0;
         bitmap = image;
         received = performance.now();
         rtt = received - started;
+        if (source === 'live') {
+            el('service').textContent = '实时图像已接通';
+            el('service').className = 'badge good';
+        }
+        if (loop && source === 'live') {
+            const key = `${result.stream_id}:${result.camera}:${result.frame_id}`;
+            if (!rateWindow) { rateWindow = received; rateKey = key; }
+            if (key !== rateKey) { rateFrames++; rateKey = key; }
+            if (received - rateWindow >= 2000) {
+                el('rate').textContent = `实际预览 ${(rateFrames*1000/(received-rateWindow)).toFixed(1)} FPS`;
+                rateWindow = received; rateFrames = 0;
+            }
+        } else { rateWindow = 0; rateFrames = 0; rateKey = ''; }
         [canvas.width, canvas.height] = result.image_size;
         if (source === 'saved') {
             if (result.camera) el('role').value = result.camera;
@@ -269,12 +309,11 @@ async function read(loop = false) {
         detections(result);
         frameLabel();
         buttons();
-        tell(`${sourceName(result)} · ${loop?'预览只展示候选，框选时自动冻结':'画面已冻结，可标注保存'}`);
-        if (loop) timer = setTimeout(() => read(true), 350);
+        tell(`${sourceName(result)} · ${loop?(result.recognition_performed===false?'只显示原图，框选时自动冻结':'预览只展示候选，框选时自动冻结'):'画面已冻结，可标注保存'}`);
+        if (loop) timer = setTimeout(() => read(true), previewDelay(Number(el('fps').value), performance.now()-started));
     } catch (error) {
         if (epoch !== generation) return;
         current = null;
-        bitmap = null;
         frozen = true;
         draw();
         buttons();
@@ -282,6 +321,14 @@ async function read(loop = false) {
         el('detections').textContent = '读取失败，无有效观测';
         el('result').textContent = '无有效观测';
         tell(error.name === 'TimeoutError' ? '读取超时，请检查相机或转发连接' : error.message, true);
+        if (loop && el('source').value === 'live' && !page.hidden && !document.hidden) {
+            previewFailures++;
+            frozen = false;
+            el('rate').textContent = '本帧无效，等待新帧';
+            buttons();
+            // 仅重取相机图像；无效数据清空，历史画面有水印且禁止采样。
+            timer = setTimeout(() => read(true), Math.min(1000, 100*previewFailures));
+        }
     }
 }
 
@@ -294,6 +341,8 @@ function sourceList() {
 
 function resetFrame() {
     stop();
+    rateWindow = 0; rateFrames = 0; rateKey = '';
+    el('rate').textContent = '实际预览帧率待测';
     current = null;
     bitmap = null;
     frozen = true;
@@ -312,11 +361,17 @@ function resetFrame() {
     tell('选择已改变，请读取新帧。');
 }
 for (const name of ['source', 'role', 'mode', 'sample']) el(name).onchange = () => {
+    const resume = previewRequested && el('source').value === 'live';
+    previewRequested = resume;
     resetFrame();
     if (name === 'source') sourceList();
+    if (resume) read(true);
 };
 el('read').onclick = () => read();
 el('live').onclick = () => {
+    previewFailures = 0;
+    rateWindow = 0; rateFrames = 0; rateKey = '';
+    el('rate').textContent = '实际预览帧率待测';
     el('source').value = 'live';
     sourceList();
     resetFrame();
@@ -462,6 +517,15 @@ el('clear-region').onclick = () => {
 };
 const binding = () => library.bindings.find(b => `${b.kind}:${b.id}:${b.revision}:${b.sha256}` === el(
     'binding').value) || null;
+el('binding').addEventListener('change', () => { el('order').value = ''; });
+function observationOrder() {
+    const raw = el('order').value.trim();
+    if (!raw) return null;
+    const order = Number(raw);
+    if (binding()?.kind !== 'sequence' || !Number.isInteger(order) || order < 1 || order > 999)
+        throw Error('观察阶段需要关联联调版本，并填写1～999整数顺序号');
+    return order;
+}
 async function save(action) {
     if (saving || !current || !frozen) return;
     saving = true;
@@ -487,7 +551,8 @@ el('save-sample').onclick = () => save(async () => {
         color_id: el('color').value ? Number(el('color').value) : null,
         slot: el('slot').value ? Number(el('slot').value) : null,
         note: el('note').value,
-        binding: binding()
+        binding: binding(),
+        observation_order: observationOrder()
     });
     tell(`已保存 ${v.name} · ${v.id.slice(0,8)}；成功计数未改变。`);
 });
@@ -503,7 +568,8 @@ el('save-draft').onclick = () => save(async () => {
             canvas.height
         ]) : null,
         points: calibrationPoints(points),
-        binding: binding()
+        binding: binding(),
+        observation_order: observationOrder()
     });
     el('fit').textContent = v.fit ?
         `拟合最大误差 ${v.fit.fit_max_mm.toFixed(2)}mm；独立检查最大误差 ${v.fit.check_max_mm.toFixed(2)}mm。未应用，须实物验证。` :
@@ -561,6 +627,10 @@ function renderLibrary() {
                         el('grasp').value = data.grasp_roi?.join(', ') || '';
                         el('draft-name').value = data.name;
                         el('plane').value = data.plane;
+                        const savedBinding = data.binding;
+                        const key = savedBinding ? `${savedBinding.kind}:${savedBinding.id}:${savedBinding.revision}:${savedBinding.sha256}` : '';
+                        el('binding').value = [...el('binding').options].some(o => o.value === key) ? key : '';
+                        el('order').value = el('binding').value ? (data.observation_order ?? '') : '';
                         points = data.points;
                         renderPoints();
                         draw();
@@ -586,6 +656,7 @@ async function refreshLibrary() {
         `${b.kind}:${b.id}:${b.revision}:${b.sha256}`)));
     if (library.bindings.some(b => `${b.kind}:${b.id}:${b.revision}:${b.sha256}` === old)) el('binding')
         .value = old;
+    if (el('binding').value !== old) el('order').value = '';
     renderLibrary();
     if (el('source').value === 'saved') {
         const id = el('sample').value;
@@ -610,7 +681,9 @@ async function health() {
         const state = await request('state');
         replays = state.samples;
         if (!el('sample').options.length) sourceList();
-        el('service').textContent = state.live.available ? '相机服务已连接' : '相机服务未就绪';
+        const recentFrame = !frozen && current?.domain === 'camera_live' && performance.now()-received < 1000;
+        el('service').textContent = state.live.available ? '相机服务已连接' :
+            recentFrame ? '图像更新中 · 状态查询暂未就绪' : '相机服务未就绪';
         el('service').className = `badge ${state.live.available?'good':'muted'}`;
         el('cameras').replaceChildren(...['material', 'qr'].map(role => {
             const p = document.createElement('p');
@@ -620,17 +693,18 @@ async function health() {
             return p;
         }));
     } catch (e) {
-        el('service').textContent = '网页接口未就绪';
-        tell(e.message, true);
+        const recentFrame = !frozen && current?.domain === 'camera_live' && performance.now()-received < 1000;
+        el('service').textContent = recentFrame ? '图像更新中 · 状态查询超时' : '网页接口未就绪';
+        if (!recentFrame) tell(e.message, true);
     }
 }
 new MutationObserver(() => {
     if (page.hidden) {
-        if (!frozen) freeze();
-        else stop();
+        pausePreview();
     } else {
         health();
         refreshLibrary().catch(e => tell(e.message, true));
+        if (previewRequested && !document.hidden) read(true);
     }
 }).observe(page, {
     attributes: true,
@@ -638,16 +712,14 @@ new MutationObserver(() => {
 });
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
-        if (!frozen) freeze();
-        else stop();
-    }
+        pausePreview();
+    } else if (previewRequested && !page.hidden) read(true);
 });
 setInterval(() => {
     if (page.hidden) return;
     frameLabel();
     if (!frozen && current && liveAge(current, received, performance.now(), rtt) > 1200) {
         current = null;
-        bitmap = null;
         draw();
         buttons();
         tell('画面已过期，等待新帧', true);

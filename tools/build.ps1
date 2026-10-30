@@ -30,4 +30,6 @@ foreach ($taskName in @('Car.axf', 'Car.hex')) {
     $taskArtifact = Get-Item -LiteralPath (Join-Path $taskRoot "firmware\MDK-ARM\Objects\$taskName")
     if ($taskArtifact.LastWriteTime -lt $taskStarted.AddSeconds(-2)) { throw "未生成本次编译产物：$taskName" }
 }
+$taskMap = Get-Item -LiteralPath (Join-Path $taskRoot 'firmware/MDK-ARM/Listings/Car.map')
+if ($taskMap.LastWriteTime -lt $taskStarted.AddSeconds(-2)) { throw '未生成本次Listings/Car.map，旧Objects/Car.map不能作为当前产物' }
 Get-FileHash -Algorithm SHA256 -LiteralPath $taskHex

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>原图对位 · 只读观察</title>
+    <link rel="stylesheet" href="/static/workbench-vision-align.css">
+</head>
+<body>
+    <main>
+        <header><div><small>VISION / READ ONLY</small><h1>原图对位</h1></div><button id="pause" disabled>开始采图</button></header>
+        <p>仅供人工摆放物料，不控制底盘或机构。相机、机构姿态和台面必须保持不变。</p>
+        <section class="summary"><strong id="delta">正在读取原始参考…</strong><span id="status">尚无实时画面</span></section>
+        <p class="legend"><span class="reference">蓝色十字：原始样本中心</span> · <span class="current">橙色圆点：当前识别中心</span>。移动物料，让两点接近；不是让夹爪运动。</p>
+        <canvas id="view" width="1280" height="720" aria-label="实时图像与原始参考中心"></canvas>
+        <details><summary>查看原始画面与使用边界</summary><p id="reference-info"></p><img id="original" alt="原始保存样本"><p>中心为颜色区域的算法中心，不代表夹爪中心。像素重合不证明抓取成功，也不建立毫米换算。相机重启、识别配置或分辨率改变时停止对位；画面过期不显示当前偏差。请勿同时在其他页面反复请求识别。</p></details>
+        <p class="note">本页只发出相机与样本的 GET 请求，不取得控制权，不发送停止、清故障或动作命令。</p>
+    </main>
+    <script type="module" src="/static/workbench-vision-align.js"></script>
+</body>
+</html>

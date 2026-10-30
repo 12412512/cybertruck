@@ -11,6 +11,7 @@ static Start key_gate;
 static ExecGate key_failure;
 static Select zone_input;
 API void Device_KeyRead(uint32_t values[21]);
+API void Device_SwitchRead(uint32_t values[27]);
 
 API int Device_StartReady(uint32_t now_ms)
 {
@@ -54,8 +55,8 @@ static uint8_t Command(uint8_t type,const uint8_t *data,uint16_t size,
 {
     if (type == 60 && size == 0)
     {
-        uint32_t values[21];
-        Device_KeyRead(values);
+        uint32_t values[27];
+        Device_SwitchRead(values);
         memcpy(reply, values, sizeof(values));
         *reply_size = sizeof(values);
         return COMM_OK;

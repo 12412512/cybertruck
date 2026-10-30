@@ -9,6 +9,7 @@ typedef struct
     uint32_t id, zero_version, timeout_ms, mask;
     int32_t target[5]; /* 升降um、伸缩um、料盘/转臂/夹爪mdeg。 */
     uint32_t speed[5]; /* 前两项RPM，后三项mdeg/s。 */
+    uint8_t accel[2], accel_set; /* 只适用于ID5/6；旧报文沿用acc=1。 */
 } GroupGoal;
 typedef struct
 {

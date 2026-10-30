@@ -47,7 +47,7 @@ typedef struct
     uint32_t output_sequence, evidence_sequence;
     uint8_t reference_mask, output_mask, confirmed_mask, taken, simulation;
     uint8_t hold_possible, confirmation_kind, manual;
-    CurvePlan profile; /* 复用底盘七段S曲线，内部转为弧度，PWM比例不变。 */
+    CurvePlan profile; /* 仅PE11复用七段S曲线；PE9/PE13匀速，PWM比例不变。 */
     int32_t origin_mdeg;
     uint32_t profile_ms, pending_ms;
 } Servo;

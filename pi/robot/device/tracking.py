@@ -37,7 +37,7 @@ class Config(c.Structure):
         'position_tol_m', 'yaw_tol_rad', 'still_rpm', 'still_m_s', 'still_rad_s')]
         + [('count_drift', c.c_double * 4)] + [(key, c.c_uint32) for key in (
             'fresh_ms', 'feedback_gap_ms', 'control_gap_ms', 'stable_ms', 'can_epoch', 'imu_epoch',
-            'imu_source_epoch', 'calibration')] + [('lag_ff_s', c.c_double)])
+            'imu_source_epoch', 'calibration')] + [('lag_ff_s', c.c_double), ('micro_steps', c.c_uint32)])
 
 
 class Observation(c.Structure):
@@ -75,6 +75,8 @@ class Tracker:
         self.lib.Track_Read.argtypes = [c.c_void_p, c.POINTER(Output)]
         self.lib.Track_Read.restype = None
         self.lib.Track_Sent.argtypes = [c.c_void_p, c.c_uint32, c.c_uint32, c.c_uint32]
+        self.lib.Track_Token.argtypes = [c.c_void_p]
+        self.lib.Track_Token.restype = c.c_uint32
         self.lib.Track_Cancel.argtypes = [c.c_void_p]
         self.lib.Track_Cancel.restype = None
         self.lib.Track_Reference.argtypes = [c.c_void_p, c.c_uint32, c.POINTER(Reference)]
@@ -116,6 +118,9 @@ class Tracker:
 
     def step(self, observation, now_ms):
         return self.lib.Track_Step(self.storage, c.byref(observation), now_ms)
+
+    def token(self):
+        return self.lib.Track_Token(self.storage)
 
     def sent(self, goal_id, output_id, now_ms):
         return self.lib.Track_Sent(self.storage, goal_id, output_id, now_ms)

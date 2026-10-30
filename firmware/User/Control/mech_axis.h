@@ -19,6 +19,7 @@ typedef struct
     int32_t target_um;
     uint16_t rpm;
     uint8_t axis;
+    uint8_t accel, accel_set; /* 未指定沿用acc=1；显式0表示驱动器直接启动。 */
 } AxisGoal;
 typedef struct
 {

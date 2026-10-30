@@ -25,7 +25,9 @@ class Detector:
         self.version = hashlib.sha256(json.dumps(self.profiles, sort_keys=True).encode()).hexdigest()
 
     def process(self, frame, mode):
-        if mode == 'material':
+        if mode == 'preview':
+            items = []
+        elif mode == 'material':
             items = cleaned(self.material.detect(frame))
         elif mode == 'ring':
             items = self.ring.detect(frame)
@@ -48,6 +50,7 @@ class Detector:
         else:
             raise ValueError('未知识别模式')
         return dict(items=items, image_size=[frame.shape[1], frame.shape[0]],
+                    recognition_performed=mode != 'preview',
                     recognition_mode=mode,
                     bbox_format='xywh' if mode == 'material' else 'xyxy',
                     profile_sha256=self.version, coordinate_frame='image_pixels',

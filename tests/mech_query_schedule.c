@@ -4,10 +4,18 @@
 #include "base_startup.c"
 
 int htim1;
+#ifdef QUERY_ALLOW_PWM
+static unsigned fixture_pwm_writes;
+uint32_t HAL_TIM_PWM_Start(int *timer, uint32_t channel)
+{ (void)timer; (void)channel; return HAL_OK; }
+void Test_Compare(uint32_t channel, uint32_t pulse)
+{ (void)channel; CHECK(pulse>=500 && pulse<=2500); fixture_pwm_writes++; }
+#else
 uint32_t HAL_TIM_PWM_Start(int *timer, uint32_t channel)
 { (void)timer; (void)channel; CHECK(0); return 1; }
 void Test_Compare(uint32_t channel, uint32_t pulse)
 { (void)channel; (void)pulse; CHECK(0); }
+#endif
 
 static void ConfigReply(unsigned address)
 {
@@ -42,7 +50,10 @@ static void FeedbackReply(unsigned address, unsigned code)
     HAL_CAN_RxFifo0MsgPendingCallback(&board_can);
 }
 
-int main(int argc, char **argv)
+#ifndef QUERY_SCHEDULE_MAIN
+#define QUERY_SCHEDULE_MAIN main
+#endif
+int QUERY_SCHEDULE_MAIN(int argc, char **argv)
 {
     unsigned which = argc > 1 ? (unsigned)atoi(argv[1]) : 0;
     unsigned attached_at = 1800, seen = 0, pending_address = 0, pending_code = 0;

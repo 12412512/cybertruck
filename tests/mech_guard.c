@@ -206,7 +206,8 @@ int main(void)
     assert(Mech_Pulse(1, 0) == 500 && Mech_Pulse(1, 30000) == 722);
     assert(Mech_Pulse(1, 150000) == 1611 && Mech_Pulse(1, 270000) == 2500);
     assert(Mech_Pulse(2, 180000) == 1497 && Mech_Pulse(2, 83000) == 2038);
-    assert(Mech_Pulse(3, 98000) == 1226 && !Mech_Pulse(3, 99000));
+    assert(Mech_Pulse(3, 98000) == 1226 && Mech_Pulse(3, 99000) == 1233);
+    assert(Mech_Pulse(3, 100000) == 1241 && !Mech_Pulse(3, 100001));
     assert(!Mech_Pulse(0, 0) && !Mech_Pulse(1, -1));
     puts("old pulse whitelist/PWM formulas: PASS");
     puts("13 passive mechanism groups: PASS; no device IO linked");

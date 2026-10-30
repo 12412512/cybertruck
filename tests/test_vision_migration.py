@@ -22,6 +22,34 @@ from robot.web.vision import router
 
 
 class VisionTests(unittest.TestCase):
+    def test_planar_color_distance_matches_legacy_norm(self):
+        from robot.vision.legacy.material_vision.core import color_distance
+        lab = np.random.default_rng(42).uniform(0, 255, (270, 480, 3)).astype(np.float32)
+        profiles = Detector().profiles['material_profile']['colors']
+        for model in profiles.values():
+            for sample in model.get('examples', [model]):
+                expected = np.linalg.norm((lab-np.float32(sample['lab']))/np.float32(sample['scale']), axis=2)
+                actual = color_distance(np.ascontiguousarray(lab.transpose(2, 0, 1)), sample)
+                np.testing.assert_array_equal(actual, expected)
+
+    def test_optimized_detector_preserves_replay_results(self):
+        import cv2
+        from robot.vision.legacy.material_vision import core
+        def legacy(channels, sample):
+            lab = channels.transpose(1, 2, 0)
+            return np.linalg.norm((lab-np.float32(sample['lab']))/np.float32(sample['scale']), axis=2)
+        files = json.loads((ROOT / 'output/vision/samples.json').read_text(encoding='utf-8'))
+        frames = [np.random.default_rng(4).integers(0, 256, (720,1280,3), dtype=np.uint8)]
+        for item in files:
+            path = ROOT / 'output/vision/samples' / item['file']
+            self.assertTrue(path.exists())
+            frames.append(cv2.imdecode(np.frombuffer(path.read_bytes(), dtype=np.uint8), cv2.IMREAD_COLOR))
+        for frame in frames:
+            actual = Detector().process(frame, 'material')
+            with patch.object(core, 'color_distance', side_effect=legacy):
+                expected = Detector().process(frame, 'material')
+            self.assertEqual(actual, expected)
+
     def test_blank_is_candidate_empty_not_success(self):
         result = Detector().process(np.full((720, 1280, 3), 220, np.uint8), 'material')
         self.assertEqual(result['items'], [])

@@ -26,7 +26,7 @@ class SequenceTests(unittest.TestCase):
     def test_native_parallel_and_protections(self):
         control=ROOT/'firmware/User/Control';output=ROOT/'output/tests/mech-group.exe'
         compile_c(output,[ROOT/'tests/mech_group.c',*(control/n for n in ('mech_guard.c','mech_axis.c','mech_servo.c','mech_group.c')),ROOT/'firmware/User/Device/drive.c'])
-        for case in range(8):
+        for case in range(10):
             with self.subTest(case=case):
                 result=subprocess.run([str(output),str(case)],capture_output=True)
                 self.assertEqual(result.returncode,0,result.stderr.decode(errors='replace'))
@@ -117,6 +117,59 @@ class SequenceTests(unittest.TestCase):
         seq.advance(link,1.01);link.commands.clear()
         link.actual_at=link.base_at=link.group_at=2.1
         self.assertTrue(seq.advance(link,2.1));self.assertEqual(seq.status,'FAILED');self.assertFalse(link.commands)
+
+    def test_waits_five_rounds_before_dispatch(self):
+        link=self.ready();link.actual['stable_samples']=3
+        seq=Sequence();seq.start(record('stable',self.rows(),1),'ordered',link,1.01)
+        self.assertFalse(seq.advance(link,1.02));self.assertFalse(link.commands)
+        link.actual['stable_samples']=5
+        self.assertFalse(seq.advance(link,1.03));self.assertEqual(len(link.commands),1)
+
+    def test_unaccepted_unstable_group_waits_new_feedback_then_retries(self):
+        link=self.ready();seq=Sequence();seq.start(record('stable',self.rows(),1),'ordered',link,1.01)
+        seq.advance(link,1.02)
+        _,_,rid=link.commands.popleft();link.results.appendleft(dict(request_id=rid,result=3))
+        self.assertFalse(seq.advance(link,1.03));self.assertEqual(seq.status,'RUNNING')
+        self.assertFalse(seq.advance(link,1.04));self.assertFalse(link.commands)
+        link.actual_at=1.05
+        self.assertFalse(seq.advance(link,1.06));self.assertEqual(len(link.commands),1)
+        self.assertNotEqual(link.commands[0][2],rid)
+
+    def test_accepted_group_is_never_retried_and_wait_is_bounded(self):
+        link=self.ready();seq=Sequence();seq.start(record('stable',self.rows(),1),'ordered',link,1.01)
+        seq.advance(link,1.02);_,_,rid=link.commands.popleft()
+        link.results.appendleft(dict(request_id=rid,result=0));link.group=dict(id=seq.group_id,state=1)
+        self.assertFalse(seq.advance(link,1.03));self.assertFalse(link.commands)
+        link=self.ready();link.actual['stable_samples']=3
+        seq=Sequence();seq.start(record('stable',self.rows(),1),'ordered',link,1.01)
+        link.actual_at=link.base_at=link.group_at=4.02
+        self.assertIn('3秒',seq.advance(link,4.02));self.assertEqual(seq.status,'FAILED')
+
+    def test_real_fault_eight_is_not_retried(self):
+        link=self.ready();seq=Sequence();seq.start(record('range',self.rows(),1),'ordered',link,1.01)
+        seq.advance(link,1.02);link.commands.clear();link.actual['fault']=8
+        self.assertTrue(seq.advance(link,1.03));self.assertEqual(seq.status,'FAILED');self.assertFalse(link.commands)
+
+    def test_ambiguous_unstable_reply_cannot_repeat_an_observed_group(self):
+        for state in (1,2,3,4):
+            link=self.ready();seq=Sequence();seq.start(record('stable',self.rows(),1),'ordered',link,1.01)
+            seq.advance(link,1.02);_,_,rid=link.commands.popleft()
+            link.results.appendleft(dict(request_id=rid,result=3))
+            link.group=dict(id=seq.group_id,state=state)
+            self.assertTrue(seq.advance(link,1.03));self.assertEqual(seq.status,'FAILED')
+            self.assertFalse(link.commands)
+
+    def test_near_zero_speed_is_capped_without_changing_saved_rows(self):
+        rows=[dict(order=1,axis='reach',target_m=0,rpm=100),
+              dict(order=1,axis='arm',target_rad=math.pi,speed_rad_s=math.pi)]
+        saved=record('return_zero',rows,1);before=copy.deepcopy(saved)
+        link=self.ready();seq=Sequence();seq.start(saved,'ordered',link,1.01);seq.advance(link,1.02)
+        _,wire,_=link.commands[0]
+        self.assertEqual(struct.unpack_from('<I',wire,44)[0],30)
+        self.assertEqual(saved,before);self.assertEqual(seq.saved,before)
+        for target,requested,expected in ((0,5,5),(.001,100,30),(.001001,100,100),(.084,100,100)):
+            _,wire=payload('move',dict(axis='reach',target_m=target,rpm=requested,_manual_tuning=True),{},1)
+            self.assertEqual(struct.unpack_from('<H',wire,20)[0],expected)
 
     def test_web_gateway_save_and_run_same_version(self):
         core=DeviceCore(clock=lambda:1.01,site_ready=True,commissioning=True);core.link=self.ready()

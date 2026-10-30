@@ -5,6 +5,11 @@
 ~$*
 .DS_Store
 Thumbs.db
+desktop.ini
+*.pem
+*.key
+id_rsa
+id_ed25519
 
 # Keil 编译产物和用户界面状态
 **/Objects/

@@ -15,9 +15,16 @@ from .observe import Detector, ROOT
 class Capture:
     """单设备独占、最新帧缓存；断开即失效，不回退到其他摄像头。"""
 
-    def __init__(self, device, size):
+    def __init__(self, device, size, fps=30, fixed_fps=False):
         self.device = device
         self.size = size
+        self.fps = fps
+        self.fixed_fps = fixed_fps
+        self.fps_control = 'unchanged'
+        self.reconnects = 0
+        self.sequence = 0
+        self.negotiated_fps = None
+        self.measured_fps = None
         self.lock = threading.Lock()
         self.stop = threading.Event()
         self.latest = None
@@ -29,6 +36,13 @@ class Capture:
         self.thread.start()
 
     def run(self):
+        while not self.stop.is_set():
+            self._run_once()
+            if self.stop.wait(1):
+                break
+            self.reconnects += 1
+
+    def _run_once(self):
         import cv2
         import fcntl
         cap = None
@@ -44,10 +58,20 @@ class Capture:
             cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.size[0])
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.size[1])
+            cap.set(cv2.CAP_PROP_FPS, self.fps)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            if self.fixed_fps:
+                import subprocess
+                try:
+                    result = subprocess.run(['v4l2-ctl', '--device='+self.device,
+                        '--set-ctrl=exposure_dynamic_framerate=0'], capture_output=True, timeout=3)
+                    self.fps_control = 'dynamic_framerate_disabled' if result.returncode == 0 else 'unsupported'
+                except (OSError, subprocess.TimeoutExpired):
+                    self.fps_control = 'unavailable'
             if not cap.isOpened():
                 raise RuntimeError('相机打开失败或被其他程序占用')
-            sequence = 0
+            window_start, window_count = time.monotonic(), 0
+            self.negotiated_fps = cap.get(cv2.CAP_PROP_FPS)
             while not self.stop.is_set():
                 ok, frame = cap.read()
                 captured = time.monotonic()
@@ -55,13 +79,19 @@ class Capture:
                     raise RuntimeError('采集失败，请检查USB连接')
                 if list(frame.shape[1::-1]) != self.size:
                     raise RuntimeError('实际分辨率与旧标定不一致')
-                sequence += 1
+                self.sequence += 1
+                window_count += 1
+                elapsed = captured - window_start
+                if elapsed >= 2:
+                    self.measured_fps = round(window_count / elapsed, 1)
+                    window_start, window_count = captured, 0
                 with self.lock:
-                    self.latest = (sequence, captured, frame)
+                    self.latest = (self.sequence, captured, frame)
                     self.error = None
         except Exception as error:
             with self.lock:
                 self.latest = None
+                self.measured_fps = None
                 self.error = str(error)
         finally:
             if cap is not None:
@@ -86,7 +116,8 @@ def create_app(config=None):
     cv2.setNumThreads(1)
 
     settings = json.loads(Path(config or ROOT / 'config/vision/cameras.json').read_text(encoding='utf-8'))
-    captures = {role: Capture(settings[role], settings['resolution']) for role in ('material', 'qr')}
+    captures = {role: Capture(settings[role], settings['resolution'], settings.get('capture_fps', 30),
+                             role in settings.get('fixed_fps_roles', [])) for role in ('material', 'qr')}
     detector = Detector()
     detect_lock = threading.Lock()
     stream_id = uuid.uuid4().hex
@@ -110,9 +141,12 @@ def create_app(config=None):
             try:
                 sequence, stamp, _ = capture.read()
                 devices[role] = dict(available=True, frame_id=sequence,
+                                     requested_fps=capture.fps, negotiated_fps=capture.negotiated_fps,
+                                     measured_fps=capture.measured_fps,
+                                     fps_control=capture.fps_control, reconnects=capture.reconnects,
                                      age_ms=round((time.monotonic()-stamp)*1000, 1))
             except ValueError as error:
-                devices[role] = dict(available=False, reason=str(error))
+                devices[role] = dict(available=False, reason=str(error), reconnects=capture.reconnects)
         return dict(available=any(v['available'] for v in devices.values()), cameras=devices,
                     stream_id=stream_id, motion_authority=False,
                     timestamp_kind='主机读取完成时刻；非曝光时刻')
@@ -126,29 +160,42 @@ def create_app(config=None):
             raise HTTPException(503, str(error))
 
     @app.get('/observation')
-    def observation(role: str = 'material', mode: str = 'material'):
-        with detect_lock:
+    def observation(role: str = 'material', mode: str = 'material', include_image: bool = True):
+        request_started = time.monotonic()
+        from contextlib import nullcontext
+        with (nullcontext() if mode == 'preview' else detect_lock):
             # 排队后再取最新帧；不能把等待识别锁的时间算成相机故障。
             sequence, stamp, frame = read(role)
+            detect_started = time.monotonic()
             try:
                 result = detector.process(frame, mode)
             except ValueError as error:
                 raise HTTPException(400, str(error))
+        detect_finished = time.monotonic()
         age = time.monotonic() - stamp
         if age > .25:
             raise HTTPException(503, '识别完成时图像已过期')
-        ok, image = cv2.imencode('.jpg', frame)
-        if not ok:
-            raise HTTPException(503, '图像编码失败')
-        encoded = 'data:image/jpeg;base64,' + base64.b64encode(image).decode()
+        encoded = None
+        if include_image:
+            ok, image = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            if not ok:
+                raise HTTPException(503, '图像编码失败')
+            encoded = 'data:image/jpeg;base64,' + base64.b64encode(image).decode()
         age = time.monotonic() - stamp
         if age > .25:
             raise HTTPException(503, '图像编码后已过期')
         # 图像与叠加绑定同一帧，避免预览和识别各拉一张产生错位。
-        return dict(result, domain='camera_live', camera=role, frame_id=sequence,
+        response = dict(result, domain='camera_live', camera=role, frame_id=sequence,
+                    device_id=settings[role],capture_epoch=captures[role].reconnects,
+                    timings=dict(queue_ms=(detect_started-request_started)*1000,
+                                 detect_ms=(detect_finished-detect_started)*1000,
+                                 encode_ms=(time.monotonic()-detect_finished)*1000),
+                    server_elapsed_ms=(time.monotonic()-request_started)*1000,
                     stream_id=stream_id, captured_s=stamp, processed_s=time.monotonic(),
                     timestamp_kind='host_read_complete_monotonic',
-                    age_ms=round(age*1000, 1), image=encoded)
+                    age_ms=round(age*1000, 1))
+        if include_image:response['image']=encoded
+        return response
 
     @app.get('/frame')
     def frame(role: str = 'material'):

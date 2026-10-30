@@ -85,7 +85,7 @@ static uint32_t Seed(Servo *servo, const int32_t initial[3], uint32_t now, uint8
     servo->zero_version = servo->guard->zero_version;
     servo->reference_mask = servo->confirmed_mask = 7;
     servo->confirmation_kind = servo->simulation ? SERVO_MODEL : SERVO_MANUAL;
-    if (initial[MECH_GRIP_CHANNEL - 1] == MECH_GRIP_MAX_MDEG)
+    if (initial[MECH_GRIP_CHANNEL - 1] >= MECH_GRIP_HOLD_MDEG)
         servo->hold_possible = 1;
     /* 参考确认并不表示PWM已输出，output_mask仍为0。 */
     return MECH_OK;
@@ -137,14 +137,19 @@ static uint32_t Begin(Servo *servo, const ServoGoal *goal, uint32_t now, uint8_t
     if (result)
         return result;
     if (goal->channel == MECH_GRIP_CHANNEL && servo->hold_possible &&
-        goal->target_mdeg != MECH_GRIP_MAX_MDEG && !goal->release_confirmed)
+        goal->target_mdeg < MECH_GRIP_HOLD_MDEG && !goal->release_confirmed)
         return SERVO_HOLD;
-    limit.velocity = (float)((goal->speed_mdeg_s ? goal->speed_mdeg_s : 45000U) * SERVO_RAD_PER_MDEG);
-    limit.acceleration = (float)(MECH_SERVO_ACCEL_DEG_S2 * 1000 * SERVO_RAD_PER_MDEG);
-    limit.jerk = (float)(MECH_SERVO_JERK_DEG_S3 * 1000 * SERVO_RAD_PER_MDEG);
-    if (!Curve_Make(&profile, (float)((goal->target_mdeg - servo->command_mdeg[goal->channel - 1]) *
-                                    SERVO_RAD_PER_MDEG), limit))
-        return MECH_RANGE;
+    memset(&profile, 0, sizeof(profile));
+    /* 仅转臂PE11平滑起停；料盘和夹爪沿用网页限速的匀速微步。 */
+    if (goal->channel == MECH_ARM_CHANNEL)
+    {
+        limit.velocity = (float)((goal->speed_mdeg_s ? goal->speed_mdeg_s : 45000U) * SERVO_RAD_PER_MDEG);
+        limit.acceleration = (float)(MECH_SERVO_ACCEL_DEG_S2 * 1000 * SERVO_RAD_PER_MDEG);
+        limit.jerk = (float)(MECH_SERVO_JERK_DEG_S3 * 1000 * SERVO_RAD_PER_MDEG);
+        if (!Curve_Make(&profile, (float)((goal->target_mdeg - servo->command_mdeg[goal->channel - 1]) *
+                                        SERVO_RAD_PER_MDEG), limit))
+            return MECH_RANGE;
+    }
     servo->profile = profile;
     servo->origin_mdeg = servo->command_mdeg[goal->channel - 1];
     servo->profile_ms = servo->pending_ms = 0;
@@ -154,8 +159,12 @@ static uint32_t Begin(Servo *servo, const ServoGoal *goal, uint32_t now, uint8_t
     servo->state = SERVO_ACCEPTED;
     servo->reason = 0;
     servo->taken = 0;
-    if (goal->channel == MECH_GRIP_CHANNEL && goal->target_mdeg == MECH_GRIP_MAX_MDEG)
+    if (goal->channel == MECH_GRIP_CHANNEL && goal->target_mdeg >= MECH_GRIP_HOLD_MDEG)
         servo->hold_possible = 1;
+    /* 已保持同一命令角不再重复写PWM或等待600ms；首次输出仍走原流程。 */
+    if (manual && (servo->output_mask & Bit(goal->channel)) &&
+        goal->target_mdeg == servo->command_mdeg[goal->channel - 1])
+        servo->state = SERVO_MANUAL_DONE;
     /* 首个微步前可使用刚才核对的参考；从第一次输出起撤销该通道确认。 */
     return MECH_OK;
 }
@@ -176,6 +185,7 @@ void Servo_Stop(Servo *servo, uint32_t reason, uint32_t now)
     if (!servo || !servo->guard || !Busy(servo))
         return;
     bit = Bit(servo->goal.channel);
+    Mech_Freeze(servo->guard, reason, 0, now);
     if (servo->state == SERVO_OUTPUT && servo->taken)
         servo->output_mask &= (uint8_t)~bit; /* 可能已部分写入，保留未知。 */
     servo->confirmed_mask &= (uint8_t)~bit;
@@ -242,7 +252,7 @@ void Servo_Poll(Servo *servo, uint32_t now, uint8_t base_stopped)
     servo->pending_ms = servo->profile_ms;
     if (!(servo->output_mask & bit))
         next = current; /* 首次显式输出必须从已核对的初始参考起步。 */
-    else
+    else if (servo->goal.channel == MECH_ARM_CHANNEL)
     {
         /* 只推进一个20ms参考步；延迟/等待稳定后不追赶跳角，写入成功才提交进度。 */
         servo->pending_ms += MECH_SERVO_STEP_MS;
@@ -257,6 +267,17 @@ void Servo_Poll(Servo *servo, uint32_t now, uint8_t base_stopped)
             next = next < current ? current : next > target ? target : next;
         else
             next = next > current ? current : next < target ? target : next;
+    }
+    else
+    {
+        uint32_t rate = servo->goal.speed_mdeg_s ? servo->goal.speed_mdeg_s : 45000U;
+        int32_t step = (int32_t)(rate * MECH_SERVO_STEP_MS / 1000U);
+        /* 每次只走一个微步，延迟后不追赶；最终一步夹紧到目标。 */
+        next = current < target ? current + step : current > target ? current - step : target;
+        if (current < target && next > target)
+            next = target;
+        if (current > target && next < target)
+            next = target;
     }
     servo->pending.id = servo->goal.id;
     servo->pending.zero_version = servo->goal.zero_version;
@@ -300,9 +321,10 @@ void Servo_Applied(Servo *servo, uint32_t id, uint32_t sequence, uint8_t ok, uin
     servo->output_mask |= bit;
     servo->confirmed_mask &= (uint8_t)~bit;
     servo->issued_ms = servo->last_step_ms = now;
-    /* 不因末端取整提前结束减速；参考已结束后才进入原600ms等待。 */
+    /* 转臂需完整走完减速；匀速通道到目标后进入原600ms等待。 */
     servo->state = servo->pending.command_mdeg == servo->goal.target_mdeg &&
-                   servo->profile_ms / 1000.0 >= servo->profile.total ? SERVO_SETTLING : SERVO_SLEWING;
+                   (servo->goal.channel != MECH_ARM_CHANNEL ||
+                    servo->profile_ms / 1000.0 >= servo->profile.total) ? SERVO_SETTLING : SERVO_SLEWING;
 }
 
 uint32_t Servo_Confirm(Servo *servo, const ServoEvidence *evidence, uint32_t now)
@@ -328,7 +350,7 @@ uint32_t Servo_Confirm(Servo *servo, const ServoEvidence *evidence, uint32_t now
     servo->confirmed_mask |= Bit(servo->goal.channel);
     servo->state = SERVO_CONFIRMED;
     if (servo->goal.channel == MECH_GRIP_CHANNEL && servo->goal.release_confirmed &&
-        servo->goal.target_mdeg != MECH_GRIP_MAX_MDEG)
+        servo->goal.target_mdeg < MECH_GRIP_HOLD_MDEG)
         servo->hold_possible = 0;
     return MECH_OK;
 }

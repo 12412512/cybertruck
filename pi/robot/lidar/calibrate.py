@@ -201,6 +201,9 @@ class Calibration:
                         self.stop_status = True
                 elif kind == 0x8A:
                     raise ValueError('厂家校准错误，保存状态不得猜测：'+payload.hex())
+                elif kind == 0x89:
+                    if len(payload) != 25 or struct.unpack('<IHHHIIIHB', payload)[-1] & 3:
+                        raise ValueError('校准STATS长度或溢出标志异常')
                 if self.phase == 'CALIBRATING' and self.result is not None and self.saved is not None:
                     self.verified = verify_saved(self.backup, self.saved, self.result, self.zone)
                     self.pending['data'] = True

@@ -145,11 +145,11 @@ class KeyTransport(SimTransport):
         self.sweep = None
         self.lib.Device_KeyPrepare.argtypes = [c.c_uint32, c.c_uint32]
         self.lib.Device_KeyTick.argtypes = [c.c_uint32, c.c_uint8]
-        self.lib.Device_KeyRead.argtypes = [c.POINTER(c.c_uint32)]
+        self.lib.Device_SwitchRead.argtypes = [c.POINTER(c.c_uint32)]
 
     def key_state(self):
-        values = (c.c_uint32 * 21)()
-        self.lib.Device_KeyRead(values)
+        values = (c.c_uint32 * 27)()
+        self.lib.Device_SwitchRead(values)
         return list(values)
 
     def write(self, wire):
@@ -160,7 +160,7 @@ class KeyTransport(SimTransport):
             if packet.kind == START_PREPARE:
                 ticket, version = struct.unpack('<II', packet.payload)
                 accepted = bool(self.lib.Device_KeyPrepare(ticket, version))
-            data = bytes([p.OK if accepted else p.READONLY]) + struct.pack('<21I', *self.key_state())
+            data = bytes([p.OK if accepted else p.READONLY]) + struct.pack('<27I', *self.key_state())
             self.replies.append(p.Packet(packet.kind | 0x80, packet.boot, packet.session,
                                          packet.request, 0, data).encode())
             return len(wire)
@@ -590,6 +590,29 @@ class ExecutionTests(unittest.TestCase):
                           clock=lambda: transport.now, sleep=transport.sleep, simulation=False)
         self.assertFalse(any(v.kind in (CONFIG, ARM, GOAL, START_PREPARE) for v in transport.requests))
 
+    def test_diagnostic_capabilities_do_not_authorize_new_motion_entries(self):
+        from robot.nav.selection import routes
+        switched = json.loads((ROOT/'config/switch_trials.json').read_text(encoding='utf-8'))
+        for firmware in ('GC-BASE-0.3.15', 'GC-BASE-0.3.16', 'GC-BASE-0.3.25',
+                         'GC-BASE-0.3.34', 'GC-BASE-0.3.41', 'GC-BASE-0.3.42',
+                         'GC-BASE-0.3.43', 'GC-BASE-0.4.0', 'GC-BASE-0.3.42-dev'):
+            class ReportedLink(MotionLink):
+                def feed(self, wire, now):
+                    super().feed(wire, now)
+                    if self.firmware:
+                        self.firmware = firmware
+            for entry in ('short', 'pc0', 'pc1'):
+                kwargs = {} if entry == 'short' else dict(wait_start=True)
+                if entry == 'pc1':
+                    kwargs['switch_routes'] = routes()
+                transport = SimTransport(self.lib)
+                with self.subTest(firmware=firmware, entry=entry), tempfile.TemporaryDirectory() as directory:
+                    with patch('robot.drive_core.MotionLink', ReportedLink), self.assertRaises(ValueError):
+                        run_trial(transport, switched if entry == 'pc1' else profile(), 'straight',
+                                  directory, lambda *a, **k: None, clock=lambda: transport.now,
+                                  sleep=transport.sleep, simulation=False, **kwargs)
+                self.assertFalse(any(v.kind in (CONFIG, ARM, GOAL, START_PREPARE) for v in transport.requests))
+
     def test_pc0_batch_cli_preview_never_opens_transport(self):
         import contextlib
         import io
@@ -992,6 +1015,8 @@ class ExecutionTests(unittest.TestCase):
         self.assertTrue(state['execution']['stop_confirmed'])
         self.assertIn('4', state['raw_imu'])
         self.assertIn('5', state['raw_imu'])
+        self.assertTrue(any(v.kind == 37 for v in transport.requests))
+        self.assertTrue(any(v.kind == START_STATE for v in transport.requests))
         self.assertFalse(any(v.kind in (CONFIG, ARM, GOAL, p.STOP) for v in transport.requests))
         self.assertEqual(self.lib.Device_Value(4), 0)
 

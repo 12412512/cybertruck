@@ -19,6 +19,11 @@
 #define MECH_STILL_RAW              16L
 #define MECH_STABLE_RAW              8L
 #define MECH_FEEDBACK_TOL_UM       300L
+/* 手动联调使用已确认的0.5mm容差；自动姿态和人工建零仍用原严格档。 */
+#define MECH_MANUAL_TOL_UM         500L
+#define MECH_MANUAL_ENDPOINT_UM   1000L /* 手动单轴/联调终点误差，独立于反向/非执行轴/零点保护。 */
+#define MECH_MANUAL_STABLE_MS      100U
+#define MECH_MANUAL_SAMPLES          2U
 
 /* 板级输出唯一来源仍为Car.ioc；这里只定义逻辑通道，不引入HAL。 */
 #define MECH_TRAY_CHANNEL            1U
@@ -26,7 +31,13 @@
 #define MECH_GRIP_CHANNEL            3U
 #define MECH_ARM_RANGE_MDEG      359000L
 #define MECH_TRAY_RANGE_MDEG     270000L
-#define MECH_GRIP_MAX_MDEG        98000L
+/* 默认夹持目标与允许范围分开，复用旧hold98/max100；不自动改写已存目标。 */
+#define MECH_GRIP_HOLD_MDEG       98000L
+#define MECH_GRIP_MAX_MDEG       100000L
+#define MECH_GRIP_RANGE_MDEG     270000L
+#if MECH_GRIP_HOLD_MDEG > MECH_GRIP_MAX_MDEG || MECH_GRIP_MAX_MDEG > MECH_GRIP_RANGE_MDEG
+#error Gripper hold target exceeds safe range
+#endif
 #define MECH_PWM_MIN_US            500U
 #define MECH_PWM_SPAN_US          2000U
 #define MECH_CLEARANCE_UM         1000L
@@ -35,6 +46,7 @@
 
 /* 复用旧axis.c的受限单轴参数；仅供未绑定IO的执行状态机。 */
 #define MECH_AXIS_MAX_RPM            30U
+#define MECH_AXIS_DEFAULT_ACC         1U
 #define MECH_MANUAL_MAX_RPM        3000U
 #define MECH_MANUAL_TIMEOUT_MS    300000U
 #define MECH_AXIS_SPEED_LIMIT        33U
@@ -49,7 +61,7 @@
 #define MECH_SERVO_STEP_MDEG         900L
 #define MECH_SERVO_SPEED_MIN       1000U
 #define MECH_SERVO_SPEED_MAX     360000U
-/* 初始平滑档，实物验收后再调；不是舵机实际转速/力矩反馈。 */
+/* 仅PE11初始平滑档；不是舵机实际转速/力矩反馈。 */
 #define MECH_SERVO_ACCEL_DEG_S2    180.0f
 #define MECH_SERVO_JERK_DEG_S3     720.0f
 #define MECH_SERVO_TIMEOUT_MS    420000U

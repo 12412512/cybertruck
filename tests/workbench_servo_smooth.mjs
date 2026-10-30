@@ -17,4 +17,15 @@ for(const action of ['move','program_run','home'])assert.ok(!allowed(state,true,
 assert.ok(allowed(state,true,'','stop'));
 state.connected=false;assert.equal(mechanismNotice(state).kind,'muted');
 assert.equal(parkingText({captured:0}), '');
-console.log('15 smooth-servo firmware / frozen evidence / fault-lock UI checks PASS; no device calls');
+state.connected=true;state.firmware='GC-BASE-0.3.36';
+state.mechanism.fault=0;state.mechanism.zero_valid=1;
+assert.ok(allowed(state,true,'','move'));
+assert.match(mechanismNotice(state).text,/已取消车轮1RPM限制/);
+state.mechanism.fault=9;
+assert.ok(!allowed(state,true,'','move')); // 新策略不能在网页偷偷清除已有锁存。
+state.firmware='GC-BASE-0.3.37';state.mechanism.fault=0;
+assert.ok(manualTuning(state));assert.equal(armMaximum(state),359);
+for(const action of ['move','program_run','home'])assert.ok(allowed(state,true,'',action));
+assert.match(mechanismNotice(state).text,/已取消车轮1RPM限制/);
+state.mechanism.fault=9;assert.ok(!allowed(state,true,'','move'));
+console.log('22 servo-channel firmware / frozen evidence / fault-lock UI checks PASS; no device calls');

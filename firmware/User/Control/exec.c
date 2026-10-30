@@ -115,7 +115,14 @@ int Exec_Config(Exec *exec, const ExecConfig *config, uint32_t now_ms)
     track.max_rpm = config->max_rpm;
     track.slew_rpm_s = 30;
     track.position_tol_m = 0.005;
-    track.yaw_tol_rad = 0.035;
+    if (config->version == 10)
+    {
+        track.position_tol_m = 0.0008;
+        /* 不提高连续纠偏增益穿过整数RPM死区；小步间先停车读新反馈。 */
+        track.micro_steps = 1;
+    }
+    /* 微调0.2度约等于260mm杠杆端0.91mm；正常路线不变。 */
+    track.yaw_tol_rad = config->version == 10 ? 0.0034906585 : 0.035;
     track.still_rpm = 1;
     track.still_m_s = 0.005;
     track.still_rad_s = 0.035;
@@ -482,11 +489,35 @@ static int GoalValid(const TrackGoal *goal)
 int Exec_Goal(Exec *exec, const TrackGoal *goal, uint32_t now_ms)
 {
     int result;
+    RefSpec micro_reference;
+    int micro = goal && exec->config.version == 10 && goal->id &&
+        goal->timeout_ms == 10000 && goal->reference.kind == 1 &&
+        goal->reference.yaw_rad == 0 &&
+        ((goal->reference.x_m == 0) != (goal->reference.y_m == 0)) &&
+        hypot(goal->reference.x_m, goal->reference.y_m) >= .001 &&
+        hypot(goal->reference.x_m, goal->reference.y_m) <= .00501 &&
+        goal->reference.linear.velocity > 0 && goal->reference.linear.velocity <= .01f &&
+        goal->reference.linear.acceleration > 0 && goal->reference.linear.acceleration <= .05f &&
+        goal->reference.linear.jerk > 0 && goal->reference.linear.jerk <= .2f;
+    memset(&micro_reference, 0, sizeof(micro_reference));
+    if (micro)
+    {
+        micro_reference.kind = 1;
+        micro_reference.x_m = goal->reference.x_m;
+        micro_reference.y_m = goal->reference.y_m;
+        micro_reference.linear.velocity = .01f;
+        micro_reference.linear.acceleration = .05f;
+        micro_reference.linear.jerk = .2f;
+        micro_reference.angular.velocity = .1f;
+        micro_reference.angular.acceleration = .3f;
+        micro_reference.angular.jerk = 1.f;
+        micro = !memcmp(&micro_reference, &goal->reference, sizeof(micro_reference));
+    }
 #ifdef EXEC_PREVIEW
-    if (!goal || (exec->preview_count ?
-        (goal->timeout_ms != 30000 || !RouteIndex(exec, &goal->reference, goal->id)) : !GoalValid(goal)))
+    if (!goal || (exec->config.version == 10 ? !micro : (exec->preview_count ?
+        (goal->timeout_ms != 30000 || !RouteIndex(exec, &goal->reference, goal->id)) : !GoalValid(goal))))
 #else
-    if (!goal || !GoalValid(goal))
+    if (!goal || (exec->config.version == 10 ? !micro : !GoalValid(goal)))
 #endif
     {
         return -1;
@@ -736,7 +767,7 @@ void Exec_Run(Exec *exec, uint32_t now_ms)
         {
             rpm[index] = (int16_t)(output.rpm[index] * exec->config.command_sign[index]);
         }
-        if (!exec->io.send(rpm, output.id, output.zero_id))
+        if (!exec->io.send(rpm, output.id, Track_Token(&exec->track)))
         {
             Exec_Stop(exec, 5, now_ms);
         }

@@ -72,7 +72,8 @@ class SSHBackend:
         client.load_host_keys(str(Path.home() / '.ssh/known_hosts'))
         try:
             client.connect(self.profile['host'], username=self.profile['username'],
-                           password=self.password or None, timeout=6, banner_timeout=8, auth_timeout=6)
+                           password=self.password or None, look_for_keys=not bool(self.password),
+                           allow_agent=not bool(self.password), timeout=6, banner_timeout=8, auth_timeout=6)
         except Exception:
             client.close()
             raise

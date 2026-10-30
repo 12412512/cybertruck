@@ -16,24 +16,41 @@ from .runtime import ProcessLock
 
 from .lidar.contracts import ScanRequest, CalibrationPrepare, CalibrationCommit
 
-def board_still(value, received, now):
-    """只读既有STM32核心，不打开其串口；反馈龄连同缓存时间不得超250ms。"""
+def _still_evidence(value, received, now):
+    """共用停车证据，不改变或覆盖真实故障字段。"""
     base, mech = value.get('base') or {}, value.get('mechanism') or {}
     age = value.get('state_age_ms')
     return (value.get('domain') == 'physical' and value.get('connected') is True and
             type(age) in (int,float) and 0 <= age+(now-received)*1000 < 250 and
             0 <= now-received < .25 and value.get('boot_id') and value.get('session_id') and
-            base.get('mode') == 0 and base.get('fault') == 0 and base.get('stopped') is True and
+            base.get('stopped') is True and
             not value.get('owner') and not value.get('site_ready') and
             all(mech.get(key) == 0 for key in ('pwm_mask','axis_state','servo_state','pose_state',
                                              'axis_id','servo_id','pose_id','zero_valid','fault')))
 
 
+def board_still(value, received, now):
+    """普通静扫保持原无故障门槛，反馈龄连同缓存时间不得超250ms。"""
+    base = value.get('base') or {}
+    return bool(_still_evidence(value, received, now) and base.get('mode') == 0 and base.get('fault') == 0)
+
+
+def calibration_still(value, received, now, allow_can_latched=False):
+    """仅人工固定雷达的独立校准可接纳已锁定CAN故障；底盘许可不改变。"""
+    if board_still(value, received, now):
+        return True
+    base = value.get('base') or {}
+    return bool(allow_can_latched and _still_evidence(value, received, now) and
+        base.get('mode') == 6 and base.get('fault') == 0x800)
+
+
 class LidarCore:
     def __init__(self, node=1, clock=time.monotonic, zone=None, runtime=None,
-                 calibration_prepare=False, calibration_write=False):
+                 calibration_prepare=False, calibration_write=False, calibration_can_locked=False):
         if calibration_write and not calibration_prepare:
             raise ValueError('校准写入必须同时开放只读准备')
+        if calibration_can_locked and not calibration_write:
+            raise ValueError('独立CAN锁存校准模式必须明确开放单次校准写入')
         self.health = Health(node)
         self.clock = clock
         self.lock = threading.RLock()
@@ -44,6 +61,8 @@ class LidarCore:
         self.last_calibration = None
         self.calibration_enabled = calibration_prepare
         self.calibration_write_enabled = calibration_write
+        self.calibration_can_locked = calibration_can_locked
+        self.job_can_locked = False
         self.placement_id = ''
         self.backup_saved = False
         self.requests = {}
@@ -96,6 +115,7 @@ class LidarCore:
                 raise ValueError('雷达握手未就绪、事务未结束或已在扫描')
             self.identity = self.witness.get('boot_id'), self.witness.get('session_id')
             self.placement_id, self.backup_saved = request.placement_id, False
+            self.job_can_locked = False
             self.job = Calibration(self.health.node, request.zone, now, self.health.sequence)
             self.requests[request.request_id] = encoded, self.job.id
             return dict(id=self.job.id, status='ACCEPTED', repeated=False)
@@ -115,7 +135,9 @@ class LidarCore:
                 raise ValueError('不是当前校准准备票据')
             if len(self.requests) >= 32 or not request.confirm_save or request.placement_id != self.placement_id:
                 raise ValueError('没有确认当前摆放/保存范围，或请求容量已满')
-            if (not board_still(self.witness, self.witness_at, now) or
+            if request.allow_can_latched and not self.calibration_can_locked:
+                raise ValueError('服务未开放人工固定雷达的独立CAN锁存校准模式')
+            if (not calibration_still(self.witness, self.witness_at, now, request.allow_can_latched) or
                     self.identity != (self.witness.get('boot_id'), self.witness.get('session_id'))):
                 raise ValueError('校准写入缺少同一启动身份的新鲜无故障停车证据')
             if not self.backup_saved or not self.runtime:
@@ -125,6 +147,9 @@ class LidarCore:
             if saved['backup_version'] != self.job.backup_version or digest(content) != self.job.backup_version:
                 raise ValueError('磁盘备份内容或版本变化，不允许写入')
             self.job.approve(request.backup_version, now)
+            self.job_can_locked = request.allow_can_latched
+            if self.job_can_locked:
+                self.calibration_write_enabled = False  # 本次许可只消费一次，不供后续自动提交。
             self.requests[request.request_id] = encoded, self.job.id
             return dict(id=self.job.id, status='ACCEPTED', repeated=False)
 
@@ -149,6 +174,8 @@ class LidarCore:
         report['observed_at_s'] = time.time()
         report['board_identity'] = self.identity
         report['placement_source'] = 'user confirmed start zone and heading; not inferred from photos'
+        if isinstance(self.job, Calibration):
+            report['radar_only_can_latched'] = self.job_can_locked
         if self.runtime:
             directory = self.runtime/('calibrations' if isinstance(self.job, Calibration) else 'scans')
             directory.mkdir(parents=True,exist_ok=True)
@@ -169,7 +196,9 @@ class LidarCore:
             now = self.clock()
             if self.job:
                 needs_still = not isinstance(self.job, Calibration) or self.job.needs_still
-                if needs_still and (not board_still(self.witness,self.witness_at,now) or
+                still = (calibration_still(self.witness, self.witness_at, now, self.job_can_locked)
+                    if isinstance(self.job, Calibration) else board_still(self.witness, self.witness_at, now))
+                if needs_still and (not still or
                         self.identity != (self.witness.get('boot_id'),self.witness.get('session_id'))):
                     self.job.abort('底盘反馈失效、故障、身份变化或失去停车证据',now)
                 wire = self.job.step(now)
@@ -200,7 +229,9 @@ class LidarCore:
             value['calibration'] = (dict(self.job.view(), placement_id=self.placement_id,
                 backup_saved=self.backup_saved) if isinstance(self.job, Calibration) else self.last_calibration)
             value['calibration_capabilities'] = dict(prepare=self.calibration_enabled,
-                write=self.calibration_write_enabled, board_ready=bool(board_still(self.witness,self.witness_at,self.clock())))
+                write=self.calibration_write_enabled, board_ready=bool(board_still(self.witness,self.witness_at,self.clock())),
+                isolated_can=self.calibration_can_locked,
+                isolated_board_ready=calibration_still(self.witness,self.witness_at,self.clock(),self.calibration_can_locked))
             if isinstance(self.job, Calibration):
                 value['reason'] = '校准事务'+self.job.phase+'；准备阶段不扫描、不写参数，提交后仍不授权车体动作'
             elif self.last_scan and not self.job:
@@ -337,11 +368,14 @@ def main():
     parser.add_argument('--stationary-zone',type=int,choices=(1,2),help='仅本次人工确认的静止摆放区，不授予车辆运动权限')
     parser.add_argument('--calibration-prepare', action='store_true', help='开放只读重新取备份；不启动09')
     parser.add_argument('--calibration-write', action='store_true', help='明确开放受控提交入口；仍需票据、确认及无故障停车')
+    parser.add_argument('--calibration-can-locked', action='store_true', help='仅本次人工固定雷达校准：保留CAN0x800和底盘锁定，许可消费一次')
     args = parser.parse_args()
     if (args.calibration_prepare or args.calibration_write) and not args.stationary_zone:
         parser.error('校准入口需要本轮明确静止区号')
     if args.calibration_write and not args.calibration_prepare:
         parser.error('写入入口必须先开放只读准备')
+    if args.calibration_can_locked and not args.calibration_write:
+        parser.error('独立校准模式需要明确单次写入许可')
     path = distinct_port(args.serial, args.stm32_serial)
     lock = ProcessLock(args.runtime/'lidar.lock')
     transport = serial.Serial(port=None, baudrate=115200, timeout=.01, write_timeout=.1, exclusive=True)
@@ -352,7 +386,8 @@ def main():
         time.sleep(.2)
         transport.reset_input_buffer()
         core = LidarCore(args.node,zone=args.stationary_zone,runtime=args.runtime,
-            calibration_prepare=args.calibration_prepare, calibration_write=args.calibration_write)
+            calibration_prepare=args.calibration_prepare, calibration_write=args.calibration_write,
+            calibration_can_locked=args.calibration_can_locked)
         uvicorn.run(create_app(core, transport),host='127.0.0.1',port=args.port,log_level='warning')
     finally:
         transport.close()

@@ -4,6 +4,22 @@
 
 ## 当前阶段
 
+2026-10-30协作基线：最新状态和双机职责以 [双机交接](docs/dual_pc_handoff_20261029.md) 与 [AGENTS.md](AGENTS.md) 为准。最后烧录0.3.50，+Y横移实物测试未通过，自动2号位对中尚未验收；下文保留历史阶段记录。
+
+## GitHub协作
+
+仓库：https://github.com/risiairline-dotcom/cybertruck 。新成员先克隆，然后在独立分支开发，通过 Pull Request 审查合并到 `main`：
+
+```powershell
+git clone https://github.com/risiairline-dotcom/cybertruck.git
+cd cybertruck
+git switch -c codex/vision-mission
+```
+
+提交源码、配置、测试和必要文档；`output/` 中的日志、编译产物、运行时保存数据与本机凭据不上传。另一台电脑不连接实车，实车控制和部署仍由A端统一执行。离线样本使用原交接包，不将历史样本作为新实物验收。
+
+## 历史阶段记录
+
 实车接入处于[映射、人工建零及被动互锁准备](docs/hardware_ready.md)。用户已确认轴/舵机接线及三个料盘角度；已补目标位置协议和无IO校验模块，仍未绑定真实机构执行器。沿用同一Web，不另建控制界面。
 
 机械页已接入[单轴、舵机、姿态示教与互锁离线联调](docs/mechanism_workbench.md)，沿用同一PC入口和控制权。显式建立模拟基准，示教按版本保存，重启不续跑；未连接设备、未改固件，不代表实物防碰撞或抓放验收。

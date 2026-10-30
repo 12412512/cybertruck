@@ -1,0 +1,20 @@
+:root {font-family: "Microsoft YaHei", sans-serif; color: #243c4a; background: #f3f6f8;}
+* {box-sizing: border-box;}
+body {margin: 0;}
+main {max-width: 1320px; padding: 24px; margin: auto;}
+header {display: flex; align-items: center; justify-content: space-between; gap: 24px;}
+small {letter-spacing: 2px; color: #687f8d;}
+h1 {font-size: 28px; margin: 8px 0;}
+p {line-height: 1.7;}
+button {border: 1px solid #b6cbd6; border-radius: 8px; background: white; padding: 12px 20px; color: inherit; cursor: pointer; font-size: 16px;}
+button:disabled {opacity: .5; cursor: default;}
+.summary {display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; padding: 18px; background: white; border: 1px solid #dce5ea; border-radius: 12px;}
+.summary strong {font-size: 21px;}
+#status, .note {color: #647b88;}
+.reference {color: #067db5; font-weight: 600;}
+.current {color: #a95400; font-weight: 600;}
+canvas {display: block; width: 100%; height: auto; background: #dce5ea; border-radius: 10px;}
+details {margin: 18px 0; padding: 18px; border: 1px solid #dce5ea; border-radius: 10px; background: white;}
+summary {cursor: pointer;}
+#original {max-width: 100%;}
+.note {font-size: 13px;}

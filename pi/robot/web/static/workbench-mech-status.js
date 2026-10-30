@@ -1,7 +1,7 @@
 /* 只解释真实反馈；不解锁故障、不推定实物到位，也不发送请求。 */
 const faults = {
     1:'人工零点未建立', 2:'机构反馈超过250毫秒', 3:'机构尚未稳定',
-    4:'驱动器状态异常', 5:'驱动器配置或使能条件不符', 6:'人工停止，需重新准备',
+    4:'驱动器状态异常', 5:'驱动器配置或使能条件不符', 6:'停止请求已执行，需重新准备',
     7:'启动或会话已变化', 8:'位置超出当前模式范围', 9:'底盘未确认停车',
     10:'姿态碰撞互锁', 11:'零点版本变化', 12:'反馈或命令格式异常',
     13:'零点已建立', 14:'底层故障锁存',
@@ -27,9 +27,19 @@ export function parkingText(record) {
 export function mechanismNotice(state, waiting='') {
     const m=state.mechanism;
     if (!state.connected || !m) return {kind:'muted',text:'等待新鲜反馈，当前不能发送动作。'};
+    if (!state.base?.fault && m.fault===6) {
+        const event=state.safety_events?.at(-1);
+        const names={'lease-expired':'控制权续约超时','page-hidden':'页面进入后台','page-exit':'页面关闭',
+            'page-leave':'离开机械页','browser-offline':'浏览器断网','panel-stop-button':'点击停止','program-failed':'联调中止'};
+        return {kind:'muted',text:`停止请求已执行（6）。${event?`来源：${names[event.source]||event.source}；${event.reason}`:'停止来源尚未取得，不能只凭6判断原因。'} 按恢复说明重新准备，不自动续跑。`};
+    }
     if (state.base?.fault || m.fault) {
         const reason=state.base?.fault?`底盘故障（${state.base.fault}）`:faultText(m.fault);
-        const detail=m.fault===9?parkingText(state.park_failure):m.fault===105?'这是板端另一轴监测触发；仅凭目测不能区分线缆牵扯与反馈变化。':'';
+        const record=state.mechanism_failure;
+        const frozen=record?.captured?` 首次触发${record.tick_ms}ms，${record.axis?`ID${record.axis+4}`:'公共条件'}；`+
+            `升降/伸缩${record.position_um.map(n=>Math.abs(n)>1e12?'未知':(n/1000).toFixed(3)).join('/')}mm，`+
+            `速度${record.rpm.join('/')}RPM，位置帧龄${record.age_ms.join('/')}ms。`:'';
+        const detail=(m.fault===9?parkingText(state.park_failure):m.fault===105?'这是板端另一轴监测触发；仅凭目测不能区分线缆牵扯与反馈变化。':'')+frozen;
         return {kind:'fault',text:`${reason}。${detail}先停止并排除干涉；确认机构静止且有支撑后，按恢复说明人工操作。不能直接继续下一动作。`};
     }
     if (state.action_locked) return {kind:'muted',text:'本轮已停止；按“正常停止后重新准备”或恢复说明操作，不会自动续跑。'};
@@ -46,5 +56,6 @@ export function mechanismNotice(state, waiting='') {
         return {kind:'busy',text:`姿态 #${m.pose_id} 执行中，按当前步骤确认或放行。`};
     if (!m.zero_valid) return {kind:'muted',text:'尚未建零；接入反馈后，核对升降最高、伸缩最近端再建零。'};
     if (!state.manual_debug) return {kind:'muted',text:'准备已就绪，请进入手动调试，再执行单轴或舵机。'};
-    return {kind:'ready',text:'上一操作已结束，可输入并执行下一目标；舵机命令完成不代表实物角度已测得。'};
+    return {kind:'ready',text:'上一操作已结束，可输入并执行下一目标；舵机命令完成不代表实物角度已测得。'+
+        (['GC-BASE-0.3.36','GC-BASE-0.3.37','GC-BASE-0.3.38','GC-BASE-0.3.39','GC-BASE-0.3.40','GC-BASE-0.3.41','GC-BASE-0.3.42','GC-BASE-0.3.43','GC-BASE-0.3.44','GC-BASE-0.3.45','GC-BASE-0.3.46','GC-BASE-0.3.47','GC-BASE-0.3.48','GC-BASE-0.3.49','GC-BASE-0.3.50'].includes(state.firmware)?' 手动机械调试已取消车轮1RPM限制，通信和驱动器保护继续生效。':'')};
 }

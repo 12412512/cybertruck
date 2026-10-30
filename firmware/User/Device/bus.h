@@ -18,6 +18,7 @@ typedef struct
      * 只读诊断，不改变调度，不表示四轮同时发送或电机已执行。 */
     int16_t sent_rpm[4];
     uint32_t sent_tick;
+    uint32_t sent_wheel_tick[4]; /* 同一完整批次每轮TXOK时间，不是物理起动时间。 */
     uint32_t finite_sequence, finite_sent_sequence, finite_sent_mask;
     uint32_t rx_overflow, stop_retries, cancel_count;
     uint32_t pending_stop_count, wait_ms;

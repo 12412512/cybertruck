@@ -38,6 +38,30 @@ class CoreClient:
             raise HTTPException(503, '离线核心未连接；本页不访问真实设备') from exc
 
 
+class DeviceClient(CoreClient):
+    """复用HTTP连接以免每次状态轮询新建SSH通道；任何请求均不自动重试。"""
+    def __init__(self):
+        super().__init__('http://127.0.0.1:8091')
+        import httpx
+        self.http = httpx.Client(trust_env=False, timeout=self.timeout,
+            follow_redirects=False, transport=httpx.HTTPTransport(retries=0),
+            limits=httpx.Limits(max_connections=8, max_keepalive_connections=8, keepalive_expiry=30))
+
+    def request(self, path, body=None):
+        import httpx
+        data=None if body is None else json.dumps(body,allow_nan=False).encode()
+        try:
+            response=self.http.request('GET' if body is None else 'POST', self.url+path,
+                content=data, headers=self.headers)
+            if response.status_code >= 300:
+                try:detail=response.json().get('detail','设备核心拒绝请求')
+                except (ValueError,AttributeError):detail='设备核心拒绝请求'
+                raise HTTPException(response.status_code,detail)
+            return response.json()
+        except (httpx.RequestError, ValueError) as exc:
+            raise HTTPException(503,'设备请求未完成；不自动重试，请核对反馈') from exc
+
+
 def router(client):
     api = APIRouter(prefix='/api/workbench')
 
@@ -80,7 +104,7 @@ def router(client):
 def device_router(client=None):
     """同一工作台的实车通道；只转发固定回环核心，网页不打开设备。"""
     from ..mech_core import DeviceCommand
-    client = client or CoreClient('http://127.0.0.1:8091')
+    client = client or DeviceClient()
     api = APIRouter(prefix='/api/device')
 
     @api.get('/state')

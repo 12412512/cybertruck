@@ -4,6 +4,7 @@ import argparse
 from contextlib import asynccontextmanager
 from collections import OrderedDict, deque
 import json
+import copy
 import hashlib
 from pathlib import Path
 import secrets
@@ -38,10 +39,33 @@ class DeviceCore:
         self.until = 0.
         self.cache = OrderedDict()
         self.safety_events = deque(maxlen=32)
+        self.stop_evidence = deque(maxlen=12)
         self.site_ready = site_ready
         self.pose_path = Path(runtime) / 'physical_poses.json' if runtime else None
         self.poses = []
         self.sequence = Sequence()
+        from .device.arrival import Arrival
+        self.arrival = Arrival()
+        from .vision.centering import Centering
+        self.centering = Centering()
+        self.vision_feed = None
+        self.centering_records_writable = True
+        self.centering_path = Path(runtime)/'rough_centering_calibration.json' if runtime else None
+        if self.centering_path and self.centering_path.exists():
+            self.load_centering()
+        if runtime:
+            samples_path=Path(runtime)/'rough_centering_samples.json'
+            if samples_path.exists():
+                try:
+                    from .vision.legacy.alignment_vision.core import fingerprint
+                    saved=json.loads(samples_path.read_text(encoding='utf-8'))
+                    if saved.get('sha256')!=fingerprint({k:v for k,v in saved.items() if k!='sha256'}):
+                        raise ValueError('已有微调记录校验失败，未覆盖原文件')
+                    self.centering.records.extend(saved['records'][-100:])
+                    self.centering.record_serial=max((r['id'] for r in self.centering.records),default=0)
+                except (ValueError,OSError,KeyError,TypeError) as exc:
+                    self.centering.reason=str(exc)
+                    self.centering_records_writable=False
         self.recovery = Recovery(runtime)
         self.sequence_path = Path(runtime)/'physical_sequences.json' if runtime else None
         self.sequences = json.loads(self.sequence_path.read_text(encoding='utf-8')) if self.sequence_path and self.sequence_path.exists() else []
@@ -54,8 +78,16 @@ class DeviceCore:
             self.poses = json.loads(self.pose_path.read_text(encoding='utf-8'))
 
     def tick(self, transport):
-        now = self.clock()
+        # 串口中已经完整到达的回复先交给解析器，再判定主机快照时效。
+        waiting=getattr(transport,'in_waiting',0)
+        if waiting:
+            data=transport.read(min(4096,waiting))
+            with self.lock:
+                received=self.clock()
+                if data and self.link.pending and received-self.link.pending[1]<.25:
+                    self.link.feed(data,received)
         with self.lock:
+            now = self.clock()
             if self.token and now >= self.until:
                 self.stop_control('控制权租约过期；动作锁定，只读反馈保留', 'lease-expired', self.owner)
             try:
@@ -63,6 +95,16 @@ class DeviceCore:
             except (OSError, ValueError) as exc:
                 self.recovery.status = 'FAILED'
                 error = self.recovery.reason = f'恢复归档/校验失败，保持停止：{exc}'
+            if not error:
+                error = self.arrival.advance(self.link,now)
+            if not error:
+                snapshot=None
+                if self.vision_feed:
+                    self.vision_feed.enable(self.arrival.active)
+                    snapshot,_,_=self.vision_feed.snapshot()
+                saved=self.centering.advance(self.arrival,self.link,snapshot,now)
+                if saved is not None and self.vision_feed and self.centering_records_writable:
+                    self.vision_feed.save(saved)
             if not error:
                 error = self.sequence.advance(self.link,now)
             if error:
@@ -83,12 +125,27 @@ class DeviceCore:
                         sequences=self.visible_sequences(), sequence=self.sequence.view(),
                         sequence_management=dict(schema=1, deleted_count=len(self.sequence_archive)),
                         recovery=self.recovery.view(),
+                        arrival=self.arrival.view(),
+                        centering=self.centering.view(),
+                        centering_records_writable=self.centering_records_writable,
+                        centering_io=self.vision_feed.snapshot()[1:] if self.vision_feed else None,
                         safety_events=list(self.safety_events),
+                        stop_evidence=list(self.stop_evidence),
                         lease_remaining_s=max(0., self.until-self.clock()) if self.token else 0.)
 
     def visible_sequences(self):
         deleted={(item['record']['id'],item['record']['revision']) for item in self.sequence_archive}
         return [item for item in self.sequences if (item['id'],item['revision']) not in deleted]
+
+    def load_centering(self):
+        try:
+            if not self.centering_path:raise ValueError('当前核心未配置标定存储目录')
+            self.centering.set_calibration(json.loads(self.centering_path.read_text(encoding='utf-8')))
+        except (ValueError,OSError,TypeError,KeyError) as exc:
+            self.centering.calibration=None
+            self.centering.calibration_error='自动对中标定不可用：'+str(exc)
+            return False
+        return True
 
     def delete_sequence(self, value, now):
         """只写版本归档；不发送UART，不改变控制权、基准或PWM。"""
@@ -105,7 +162,7 @@ class DeviceCore:
                 (value.client!=self.owner or not secrets.compare_digest(value.token,self.token))):
             raise ValueError('另一页面持有控制权，不能删除其联调版本')
         view=self.link.view(now)
-        if (not view.get('connected') or self.sequence.status=='RUNNING' or self.link.group.get('state')==1 or
+        if (not view.get('connected') or self.arrival.active or self.sequence.status=='RUNNING' or self.link.group.get('state')==1 or
                 self.recovery.active or any(1<=self.link.actual.get(k,0)<=5 for k in ('axis_state','servo_state','pose_state'))):
             raise ValueError('等待连接有效且动作空闲后删除版本；不会停止正在执行的动作')
         record=next((r for r in self.visible_sequences() if r['id']==args.get('id') and r['revision']==args.get('revision')),None)
@@ -127,18 +184,34 @@ class DeviceCore:
 
     def stop_control(self, reason, source, client):
         """由核心锁保护；不记录控制令牌，停止后仍由唯一串口读取反馈。"""
+        self.capture_stop(reason,source)
         self.link.emergency(reason)
         self.sequence.cancel(reason)
+        self.arrival.cancel(reason)
+        self.centering.cancel(reason)
+        if self.vision_feed:self.vision_feed.enable(False)
         self.recovery.cancel(reason)
         self.owner = self.token = ''
         self.until = 0.
         self.safety_events.append(dict(at_s=self.clock(), wall_s=time.time(),
             source=source, client=client, reason=reason))
 
+    def capture_stop(self,reason,source):
+        """先留最后已收状态；断串口后仍能解释，旧快照绝不用于动作许可。"""
+        now=self.clock()
+        self.stop_evidence.append(dict(wall_s=time.time(),source=source,reason=reason,
+            boot_id=str(self.link.boot),session_id=str(self.link.session),
+            mechanism=copy.deepcopy(self.link.actual),base=copy.deepcopy(self.link.base),
+            group=copy.deepcopy(self.link.group),failure=copy.deepcopy(self.link.failure),
+            sequence=copy.deepcopy(self.sequence.view()),manual_debug=self.link.manual_debug,
+            arrival=copy.deepcopy(self.arrival.view()),centering=copy.deepcopy(self.centering.view()),
+            age_ms=dict(actual=round((now-self.link.actual_at)*1000),base=round((now-self.link.base_at)*1000),
+                        group=round((now-self.link.group_at)*1000)),historical=True))
+
     def command(self, value):
         value = DeviceCommand.model_validate(value)
-        now = self.clock()
         with self.lock:
+            now = self.clock()
             if value.op == 'sequence_delete':
                 return self.delete_sequence(value,now)
             if value.op == 'stop':
@@ -159,7 +232,7 @@ class DeviceCore:
             if value.op == 'observe':
                 # 诊断附着不取得运动租约；浏览器关闭后由唯一核心继续保活与只读轮询。
                 if (self.site_ready or self.token or value.token or value.args or
-                        self.link.firmware not in ('GC-BASE-0.3.23', 'GC-BASE-0.3.24', 'GC-BASE-0.3.25', 'GC-BASE-0.3.26', 'GC-BASE-0.3.27', 'GC-BASE-0.3.28', 'GC-BASE-0.3.29', 'GC-BASE-0.3.30', 'GC-BASE-0.3.31', 'GC-BASE-0.3.32', 'GC-BASE-0.3.33', 'GC-BASE-0.3.34','GC-BASE-0.3.35')):
+                        self.link.firmware not in ('GC-BASE-0.3.23', 'GC-BASE-0.3.24', 'GC-BASE-0.3.25', 'GC-BASE-0.3.26', 'GC-BASE-0.3.27', 'GC-BASE-0.3.28', 'GC-BASE-0.3.29', 'GC-BASE-0.3.30', 'GC-BASE-0.3.31', 'GC-BASE-0.3.32', 'GC-BASE-0.3.33', 'GC-BASE-0.3.34','GC-BASE-0.3.35','GC-BASE-0.3.36','GC-BASE-0.3.37','GC-BASE-0.3.38','GC-BASE-0.3.39','GC-BASE-0.3.40','GC-BASE-0.3.41','GC-BASE-0.3.42','GC-BASE-0.3.43','GC-BASE-0.3.44','GC-BASE-0.3.45','GC-BASE-0.3.46','GC-BASE-0.3.47','GC-BASE-0.3.48','GC-BASE-0.3.49','GC-BASE-0.3.50')):
                     raise ValueError('只读附着要求独立只读模式、无人持有控制权且无附加参数')
                 key = ('readonly:' + value.client, value.request_id)
                 encoded = value.model_dump_json()
@@ -233,18 +306,56 @@ class DeviceCore:
                 return result
             args = dict(value.args)
             action = args.pop('action', '')
+            if self.arrival.active and action not in ('alignment_step','alignment_finish','alignment_auto','alignment_pause'):
+                raise ValueError('微调占有执行权，请先返回机械控制；可随时停止')
             if self.sequence.status=='RUNNING':
                 raise ValueError('联调执行中，禁止插入单项、改模式或重复执行；可停止整组')
             if not self.site_ready and action not in ('teach', 'program_save', 'attach', 'invalidate'):
                 raise ValueError('本次烧录后尚未确认实车条件；设备核心保持只读，不使能/PWM')
-            if action == 'program_save':
+            if action == 'alignment_start':
+                record=next((r for r in self.visible_sequences() if r['id']==args.get('id') and
+                             r['revision']==args.get('revision') and r['sha256']==args.get('sha256')),None)
+                if record is None:
+                    raise ValueError('观察姿态版本不存在或SHA变化')
+                package_root=Path(__file__).resolve().parents[1]
+                project_root=package_root.parent if package_root.name=='pi' else package_root
+                profile=json.loads((project_root/'config/base_trials.json').read_text(encoding='utf-8'))
+                self.arrival.start(self.link,record,args.get('order'),dict(args,profile=profile),now)
+                try:self.centering.begin(self.arrival,args.get('mode','manual'),now)
+                except ValueError:
+                    self.arrival.cancel('自动对中准备校验未通过，未下发交接')
+                    raise
+                result=dict(status='ALIGNMENT_PREPARING',domain='physical',action_sent=False)
+            elif action == 'alignment_step':
+                if self.centering.mode=='auto':raise ValueError('请先暂停自动对中，再插入手动方向目标')
+                self.arrival.move(self.link,args.get('axis'),args.get('mm'),now)
+                self.centering.note_move(self.link,args.get('axis'),args.get('mm'),now)
+                result=dict(status='MICRO_QUEUED',domain='physical',action_sent=False)
+            elif action == 'alignment_auto':
+                if self.arrival.phase!='READY' or args.get('confirmed') is not True:
+                    raise ValueError('须停车等待且明确选择自动对中')
+                self.centering.begin(self.arrival,'auto',now)
+                result=dict(status='AUTO_CENTERING_STARTED',domain='physical',action_sent=False)
+            elif action == 'alignment_pause':
+                if self.arrival.phase!='READY':raise ValueError('请等待当前小位移完成，紧急停止仍用红色按钮')
+                self.centering.begin(self.arrival,'manual',now)
+                result=dict(status='AUTO_CENTERING_PAUSED',domain='physical',action_sent=False)
+            elif action == 'alignment_reload':
+                if args.get('confirmed') is not True or not self.load_centering():
+                    raise ValueError(self.centering.calibration_error)
+                result=dict(status='CENTERING_CALIBRATION_LOADED',domain='physical',action_sent=False)
+            elif action == 'alignment_finish':
+                self.arrival.finish()
+                self.centering.cancel('用户结束微调；未声明自动对中完成')
+                result=dict(status='RETURNING_TO_MECHANISM',domain='physical',action_sent=False)
+            elif action == 'program_save':
                 name=args.get('id','')
                 revision=1+max((r['revision'] for r in self.sequences if r['id']==name),default=0)
                 saved=sequence_record(name,args.get('rows'),revision)
                 from .device.mechanism import payload
                 from .device.mech_sequence import groups
                 for stage in groups(saved['rows']):
-                    payload('group',dict(members=stage['members']),{},1)
+                    payload('group',dict(members=stage['members'],_firmware=self.link.firmware),{},1)
                 updated=[*self.sequences,saved]
                 if self.sequence_path:
                     from .workbench.storage import write_json
@@ -263,7 +374,8 @@ class DeviceCore:
                     raise ValueError('实车姿态编号无效')
                 targets = args.get('targets', {})
                 from .device.mechanism import payload
-                payload('pose', dict(targets=targets, revision=1, physical_taught=True), {}, 1)
+                payload('pose', dict(targets=targets, revision=1, physical_taught=True,
+                                     _firmware=self.link.firmware), {}, 1)
                 record = dict(id=pose_id, revision=1 + max((r['revision'] for r in self.poses if r['id'] == pose_id), default=0),
                               targets=targets, domain='physical_draft', physical_validated=False)
                 record['sha256'] = hashlib.sha256(json.dumps(record, sort_keys=True).encode()).hexdigest()
@@ -297,6 +409,9 @@ def create_app(core, transport=None):
                 core.tick(transport)
             except Exception as exc:
                 with core.lock:
+                    core.capture_stop(str(exc),'transport-error')
+                    core.arrival.cancel('传输中断，微调不续跑')
+                    core.centering.cancel('传输中断，自动对中不续跑')
                     core.link.reset(f'设备核心停止：{exc}')
                     wire = core.link.step(core.clock())
                 try:
@@ -309,8 +424,12 @@ def create_app(core, transport=None):
 
     @asynccontextmanager
     async def lifespan(app):
+        from .vision.ring_feed import RingFeed
+        feed=RingFeed(core.centering_path.parent if core.centering_path else None,core.clock)
         thread = threading.Thread(target=loop, name='device-owner', daemon=True)
         if transport:
+            core.vision_feed=feed
+            feed.start()
             thread.start()
         try:
             yield
@@ -325,6 +444,7 @@ def create_app(core, transport=None):
                     transport.write(wire)
                 finally:
                     transport.close()
+            feed.close()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
 

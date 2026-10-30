@@ -10,10 +10,25 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'pi'))
 from robot.connection_host import decide
-from robot.connection_core import Connections, ConnectCommand, create_app, ForwardHandler
+from robot.connection_core import Connections, ConnectCommand, create_app, ForwardHandler, SSHBackend
 from robot.web.connections import router
 
 PROFILE = dict(host='test-host', username='pi')
+
+
+class PasswordAuthenticationTests(unittest.TestCase):
+    def test_explicit_or_cached_password_skips_agent_and_keys(self):
+        for supplied in ('TEST_SECRET', ''):
+            backend = SSHBackend(PROFILE)
+            backend.password = 'TEST_SECRET'
+            with patch('paramiko.SSHClient') as factory:
+                client = factory.return_value
+                client.get_transport.return_value.is_active.return_value = True
+                backend.connect(supplied)
+                kwargs = client.connect.call_args.kwargs
+                self.assertFalse(kwargs['look_for_keys'])
+                self.assertFalse(kwargs['allow_agent'])
+                self.assertEqual(kwargs['password'], 'TEST_SECRET')
 
 
 class FakeBackend:

@@ -82,22 +82,32 @@ class Workspace:
         self.lock = threading.RLock()
         self.frames = OrderedDict()
 
-    def remember(self, result, image_bytes):
+    def remember(self, result, image_bytes, finalize=None):
         if not image_bytes or len(image_bytes) > 4*1024*1024:
             raise ValueError('图像为空或超过4MiB保存上限')
+        image_bytes = bytes(image_bytes)
+        digest = hashlib.sha256(image_bytes).hexdigest()
+        if result.get('image_sha256', digest) != digest:
+            raise ValueError('图像与观测记录不匹配')
         record = copy.deepcopy({k: v for k, v in result.items() if k != 'image'})
+        record['image_sha256'] = digest
         key = uuid.uuid4().hex
         with self.lock:
+            # 代理帧龄最后核对，覆盖哈希/深拷贝/等待缓存锁的时间；失败不留引用。
+            if finalize is not None:
+                record.update(finalize())
             self.frames[key] = (self.clock(), record, image_bytes)
             while len(self.frames) > 12:
                 self.frames.popitem(last=False)
-        return dict(result, observation_id=key)
+        return {**result, **record, 'observation_id': key}
 
     def frame(self, key):
         with self.lock:
             value = self.frames.get(key)
             if value is None or self.clock() - value[0] > 1200:
                 raise ValueError('画面引用已失效，请读取新帧后保存')
+            if hashlib.sha256(value[2]).hexdigest() != value[1].get('image_sha256'):
+                raise ValueError('缓存图像与观测记录不匹配')
             return copy.deepcopy(value[1]), value[2]
 
     def _write(self, folder, value, image=None):
@@ -116,6 +126,8 @@ class Workspace:
                                 if (v.get('name') or str(v.get('color_id'))) == identity), default=0)
             value = dict(value, id=uuid.uuid4().hex, created_s=time.time(),
                          revision=revision, domain='vision_draft', applied=False, physical_validated=False)
+            if image is not None:
+                value['image_sha256'] = hashlib.sha256(image).hexdigest()
             value['sha256'] = hashlib.sha256(canonical(value).encode()).hexdigest()
             path = directory / (value['id'] + '.json')
             # 新版本用独立文件名，异常退出不会覆盖旧版本。
@@ -154,12 +166,25 @@ class Workspace:
             raise ValueError('记录编号无效')
         path = self.root / folder / (key + '.json')
         value = json.loads(path.read_text(encoding='utf-8'))
-        if not isinstance(value, dict):
+        if not isinstance(value, dict) or value.get('id') != key:
             raise ValueError('记录结构无效')
         original = {k: v for k, v in value.items() if k != 'sha256'}
         if hashlib.sha256(canonical(original).encode()).hexdigest() != value.get('sha256'):
             raise ValueError('记录校验失败')
         return value, path.with_suffix('.jpg')
+
+    def image(self, key):
+        """一次读取并校验同一记录的图像；调用方直接使用这些字节，不再打开文件。"""
+        value, path = self.get('samples', key)
+        digest = value.get('image_sha256')
+        if (not isinstance(digest, str) or len(digest) != 64 or
+                any(c not in '0123456789abcdef' for c in digest)):
+            raise ValueError('样本缺少图像校验值')
+        with path.open('rb') as handle:
+            data = handle.read(4*1024*1024 + 1)
+        if not data or len(data) > 4*1024*1024 or hashlib.sha256(data).hexdigest() != digest:
+            raise ValueError('样本图像损坏或与记录不匹配')
+        return value, data
 
     def save_sample(self, data, device):
         data = copy.deepcopy(data)

@@ -18,6 +18,16 @@ static int Busy(const Axis *axis)
     return axis->state >= AXIS_ACCEPTED && axis->state <= AXIS_STOPPING;
 }
 
+static int64_t TargetTolerance(const Axis *axis)
+{
+    return axis->manual ? Mech_RawTolerance(axis->goal.axis, MECH_MANUAL_TOL_UM) : MECH_AXIS_TARGET_RAW;
+}
+
+static uint8_t Accel(const AxisGoal *goal)
+{
+    return goal->accel_set ? goal->accel : MECH_AXIS_DEFAULT_ACC;
+}
+
 static void Barrier(Axis *axis)
 {
     unsigned index;
@@ -29,6 +39,7 @@ static void Fail(Axis *axis, uint32_t reason, uint32_t now)
 {
     if (axis->state == AXIS_STOPPING)
         return;
+    Mech_Freeze(axis->guard, reason, (uint8_t)(axis->goal.axis + 1), now);
     axis->reason = reason;
     axis->state = AXIS_STOPPING;
     axis->stop_sent_mask = axis->stop_confirmed = axis->settled_samples = 0;
@@ -56,7 +67,7 @@ static int Same(const AxisGoal *first, const AxisGoal *second)
 {
     return first->id == second->id && first->zero_version == second->zero_version &&
            first->timeout_ms == second->timeout_ms && first->target_um == second->target_um &&
-           first->rpm == second->rpm && first->axis == second->axis;
+           first->rpm == second->rpm && first->axis == second->axis && Accel(first) == Accel(second);
 }
 
 static uint32_t Begin(Axis *axis, const AxisGoal *goal, uint32_t now,
@@ -90,7 +101,8 @@ static uint32_t Begin(Axis *axis, const AxisGoal *goal, uint32_t now,
     }
     sign = goal->axis ? MECH_REACH_SIGN : MECH_LIFT_SIGN;
     if (Abs(guard->sample[goal->axis * 4 + 3].value - guard->zero_target[goal->axis] -
-            sign * Raw(axis->pulse_position[goal->axis])) > MECH_AXIS_TARGET_RAW)
+            sign * Raw(axis->pulse_position[goal->axis])) >
+            (manual ? Mech_RawTolerance(goal->axis, MECH_MANUAL_TOL_UM) : MECH_AXIS_TARGET_RAW))
     {
         Fail(axis, AXIS_TARGET, now);
         return AXIS_TARGET;
@@ -146,7 +158,7 @@ uint8_t Axis_Take(Axis *axis, BusFrame frames[2], uint32_t now)
     difference = axis->goal_pulses - axis->pulse_position[axis->goal.axis];
     /* 保留旧轴FD模式0：相对上一输入目标；以目标账本检查手动/外部变更。 */
     count = Drive_Build(axis->goal.axis ? MECH_REACH_ID : MECH_LIFT_ID, 0xFD,
-                        (uint8_t)(axis->delta_raw < 0), axis->goal.rpm, 1,
+                        (uint8_t)(axis->delta_raw < 0), axis->goal.rpm, Accel(&axis->goal),
                         (uint32_t)(difference < 0 ? -difference : difference), 0, 0, frames);
     if (count != 2)
     {
@@ -203,24 +215,37 @@ static int NewRound(Axis *axis, uint32_t now)
     return 1;
 }
 
+static int64_t EndActual(const Axis *axis)
+{
+    /* 目标账本固定在建零坐标，不能把上一段的实测残差带到下一目标。 */
+    unsigned a = axis->goal.axis;
+    return axis->guard->zero_actual[a] + (a ? MECH_REACH_SIGN : MECH_LIFT_SIGN) * Raw(axis->goal_pulses);
+}
+
 static void Settle(Axis *axis, uint32_t now, uint8_t stopping)
 {
     MechGuard *guard = axis->guard;
     unsigned moving = axis->goal.axis * 4;
     int64_t actual[2] = {guard->sample[1].value, guard->sample[5].value};
+    int64_t arrive = axis->manual ? Mech_RawTolerance(axis->goal.axis, MECH_MANUAL_ENDPOINT_UM) : MECH_AXIS_ARRIVE_RAW;
     if (!NewRound(axis, now))
         return;
     if (guard->sample[0].value || guard->sample[4].value ||
         (!stopping && (!axis->ack_seen || !(guard->sample[moving + 2].value & 2) ||
-         Abs(guard->sample[moving + 1].value - axis->before_actual - axis->delta_raw) > MECH_AXIS_ARRIVE_RAW ||
-         Abs(guard->sample[moving + 3].value - axis->before_target - axis->delta_raw) > MECH_AXIS_TARGET_RAW ||
-         Abs(guard->sample[moving + 3].value - guard->sample[moving + 1].value) > MECH_AXIS_ARRIVE_RAW)))
+         Abs(guard->sample[moving + 1].value - (axis->manual ? EndActual(axis) : axis->before_actual + axis->delta_raw)) > arrive ||
+         Abs(guard->sample[moving + 3].value - (axis->manual ?
+             EndActual(axis) - guard->zero_actual[axis->goal.axis] + guard->zero_target[axis->goal.axis] :
+             axis->before_target + axis->delta_raw)) > TargetTolerance(axis) ||
+         Abs(guard->sample[moving + 3].value - guard->sample[moving + 1].value +
+             (axis->manual ? guard->zero_actual[axis->goal.axis] - guard->zero_target[axis->goal.axis] : 0)) > arrive)))
     {
         axis->settled_samples = 0;
         return;
     }
-    if (!axis->settled_samples || Abs(actual[0] - axis->anchor[0]) > MECH_STABLE_RAW ||
-        Abs(actual[1] - axis->anchor[1]) > MECH_STABLE_RAW)
+    if (!axis->settled_samples || Abs(actual[0] - axis->anchor[0]) >
+            (axis->manual && !stopping ? Mech_RawTolerance(0, MECH_MANUAL_TOL_UM) : MECH_STABLE_RAW) ||
+        Abs(actual[1] - axis->anchor[1]) >
+            (axis->manual && !stopping ? Mech_RawTolerance(1, MECH_MANUAL_TOL_UM) : MECH_STABLE_RAW))
     {
         axis->anchor[0] = actual[0];
         axis->anchor[1] = actual[1];
@@ -242,7 +267,8 @@ static void Settle(Axis *axis, uint32_t now, uint8_t stopping)
     else
     {
         axis->state = AXIS_SETTLING;
-        if (axis->settled_samples >= MECH_AXIS_ARRIVE_SAMPLES)
+        if (axis->settled_samples >= (axis->manual ? MECH_MANUAL_SAMPLES : MECH_AXIS_ARRIVE_SAMPLES) &&
+            (!axis->manual || (uint32_t)(now - axis->settled_ms) >= MECH_MANUAL_STABLE_MS))
         {
             axis->pulse_position[axis->goal.axis] = axis->goal_pulses;
             axis->state = AXIS_COMPLETE;
@@ -285,30 +311,36 @@ void Axis_Poll(Axis *axis, uint32_t now, uint8_t base_stopped)
         if (axis->state == AXIS_ACCEPTED &&
             (guard->sample[axis->goal.axis * 4].value ||
              (!(guard->concurrent_axes & (1U << (1U - axis->goal.axis))) && guard->sample[(1U - axis->goal.axis) * 4].value) ||
-             Abs(guard->sample[axis->goal.axis * 4 + 1].value - axis->before_actual) > MECH_STABLE_RAW ||
-             Abs(guard->sample[axis->goal.axis * 4 + 3].value - axis->before_target) > MECH_AXIS_TARGET_RAW ||
+             Abs(guard->sample[axis->goal.axis * 4 + 1].value - axis->before_actual) >
+                (axis->manual ? Mech_RawTolerance(axis->goal.axis, MECH_MANUAL_TOL_UM) : MECH_STABLE_RAW) ||
+             Abs(guard->sample[axis->goal.axis * 4 + 3].value - axis->before_target) > TargetTolerance(axis) ||
              (!(guard->concurrent_axes & (1U << (1U - axis->goal.axis))) &&
-              Abs(guard->sample[(1U - axis->goal.axis) * 4 + 1].value - axis->before_other) > MECH_AXIS_OTHER_RAW)))
+              Abs(guard->sample[(1U - axis->goal.axis) * 4 + 1].value - axis->before_other) >
+                (axis->manual ? Mech_RawTolerance((uint8_t)(1U - axis->goal.axis), MECH_MANUAL_TOL_UM) : MECH_AXIS_OTHER_RAW))))
             Fail(axis, AXIS_TARGET, now);
         return;
     }
     moving = axis->goal.axis * 4;
     other = (1U - axis->goal.axis) * 4;
     if (!(guard->concurrent_axes & (1U << (1U - axis->goal.axis))) &&
-        (guard->sample[other].value || Abs(guard->sample[other + 1].value - axis->before_other) > MECH_AXIS_OTHER_RAW))
+        (guard->sample[other].value || Abs(guard->sample[other + 1].value - axis->before_other) >
+            (axis->manual ? Mech_RawTolerance((uint8_t)(1U - axis->goal.axis), MECH_MANUAL_TOL_UM) : MECH_AXIS_OTHER_RAW)))
         Fail(axis, AXIS_OTHER, now);
     else if (!axis->ack_seen && (uint32_t)(now - axis->sent_ms) >= MECH_AXIS_ACK_MS)
         Fail(axis, AXIS_ACK, now);
     else
     {
         traveled = guard->sample[moving + 1].value - axis->before_actual;
-        tolerance = (MECH_FEEDBACK_TOL_UM * (int64_t)MECH_RAW_PER_320 +
+        tolerance = ((axis->manual ? MECH_MANUAL_TOL_UM : MECH_FEEDBACK_TOL_UM) * (int64_t)MECH_RAW_PER_320 +
                      (axis->goal.axis ? MECH_REACH_UM_PER_320 : MECH_LIFT_UM_PER_320) - 1) /
                     (axis->goal.axis ? MECH_REACH_UM_PER_320 : MECH_LIFT_UM_PER_320);
         int64_t speed_limit = axis->manual ? axis->goal.rpm + axis->goal.rpm / 5U + 3U : MECH_AXIS_SPEED_LIMIT;
+        int64_t direction = axis->delta_raw > 0 ? 1 : -1;
+        int64_t beyond = axis->manual ? (guard->sample[moving + 1].value - EndActual(axis)) * direction :
+                                       Abs(traveled) - Abs(axis->delta_raw);
         if (Abs(guard->sample[moving].value) > speed_limit ||
-            Abs(traveled) > Abs(axis->delta_raw) + tolerance ||
-            traveled * (axis->delta_raw > 0 ? 1 : -1) < -MECH_AXIS_REVERSE_RAW)
+            beyond > (axis->manual ? Mech_RawTolerance(axis->goal.axis, MECH_MANUAL_ENDPOINT_UM) : tolerance) ||
+            traveled * direction < -(axis->manual ? tolerance : MECH_AXIS_REVERSE_RAW))
             Fail(axis, AXIS_REVERSE, now);
         else
             Settle(axis, now, 0);

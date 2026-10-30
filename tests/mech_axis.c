@@ -10,7 +10,7 @@ static Axis axis;
 static uint32_t now = 100, sequence = 1;
 static int64_t lift = 10000, reach = -20000;
 static uint8_t status = 3;
-static AxisGoal goal = {1, 1, 5000, 2000, 30, 0};
+static AxisGoal goal = {1, 1, 5000, 2000, 30, 0, 0, 0};
 static void Feed(unsigned a, uint8_t code, int64_t value)
 {
     MotorReply reply = {0};

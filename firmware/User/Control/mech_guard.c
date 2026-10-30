@@ -12,6 +12,34 @@ static int64_t Abs(int64_t value)
     return value < 0 ? -value : value;
 }
 
+int64_t Mech_RawTolerance(uint8_t axis, int32_t tolerance_um)
+{
+    return axis < 2 && tolerance_um > 0 ? (int64_t)tolerance_um * MECH_RAW_PER_320 / distance_um[axis] : 0;
+}
+
+void Mech_Freeze(MechGuard *guard, uint32_t reason, uint8_t axis, uint32_t now)
+{
+    if (!guard || guard->failure.captured || !reason || reason == MECH_MANUAL || reason == 108 || reason == 207)
+        return;
+    MechFailure *record = &guard->failure;
+    record->tick_ms = now;
+    record->reason = reason;
+    record->axis = axis;
+    record->zero_version = guard->zero_version;
+    record->flags = (guard->zero_valid ? 1U : 0U) | (guard->manual_range ? 2U : 0U);
+    for (unsigned i = 0; i < 2; i++)
+    {
+        record->actual[i] = guard->sample[i * 4 + 1].value;
+        record->target[i] = guard->sample[i * 4 + 3].value;
+        record->zero_actual[i] = guard->zero_actual[i];
+        record->zero_target[i] = guard->zero_target[i];
+        record->position_um[i] = guard->zero_valid ? Mech_Position(guard, (uint8_t)i) : INT64_MIN;
+        record->rpm[i] = (int32_t)guard->sample[i * 4].value;
+        record->age_ms[i] = now - guard->sample[i * 4 + 1].tick;
+    }
+    record->captured = 1;
+}
+
 static uint8_t Fresh(const MechGuard *guard, uint32_t now)
 {
     uint8_t index;
@@ -33,7 +61,8 @@ static uint8_t Stationary(const MechGuard *guard)
         if ((guard->sample[index + 2].value & 0x0D) != 1)
             return MECH_DRIVER;
         if (guard->sample[index].value ||
-            Abs(guard->sample[index + 1].value - guard->sample[index + 3].value) > MECH_STILL_RAW)
+            Abs(guard->sample[index + 1].value - guard->sample[index + 3].value) >
+                (guard->manual_range ? Mech_RawTolerance(axis, MECH_MANUAL_ENDPOINT_UM) : MECH_STILL_RAW))
             return MECH_UNSTABLE;
     }
     return MECH_OK;
@@ -42,8 +71,8 @@ static uint8_t Stationary(const MechGuard *guard)
 static uint8_t Stable(const MechGuard *guard, uint32_t now)
 {
     uint8_t index;
-    if (!guard->stable_started || guard->stable_samples < MECH_STABLE_SAMPLES ||
-        (uint32_t)(now - guard->stable_since) < MECH_ZERO_STABLE_MS)
+    if (!guard->stable_started || guard->stable_samples < (guard->manual_range ? MECH_MANUAL_SAMPLES : MECH_STABLE_SAMPLES) ||
+        (uint32_t)(now - guard->stable_since) < (guard->manual_range ? MECH_MANUAL_STABLE_MS : MECH_ZERO_STABLE_MS))
         return MECH_UNSTABLE;
     for (index = 0; index < 8; index++)
         if (guard->checked_sequence[index] != guard->sample[index].rx_sequence)
@@ -98,7 +127,8 @@ uint8_t Mech_GroupReady(const MechGuard *guard, uint32_t now, uint32_t version)
         if ((guard->sample[i + 2].value & 0x0D) != 1)
             return MECH_DRIVER;
         if (!(guard->concurrent_axes & (1U << axis)) && (guard->sample[i].value ||
-            Abs(guard->sample[i + 1].value - guard->sample[i + 3].value) > MECH_STILL_RAW))
+            Abs(guard->sample[i + 1].value - guard->sample[i + 3].value) >
+                (guard->manual_range ? Mech_RawTolerance(axis, MECH_MANUAL_ENDPOINT_UM) : MECH_STILL_RAW)))
             return MECH_UNSTABLE;
     }
     return MECH_OK;
@@ -191,15 +221,22 @@ void Mech_Poll(MechGuard *guard, uint32_t now, uint8_t base_stopped)
     if (!result)
         result = Stationary(guard);
     if (guard->zero_valid && (result == MECH_STALE || result == MECH_DRIVER))
+    {
+        Mech_Freeze(guard, result, 0, now);
         Mech_Invalidate(guard, result);
+    }
     if (guard->zero_valid)
     {
         for (axis = 0; axis < 2; axis++)
         {
             int64_t position = Mech_Position(guard, axis);
-            if (position < -MECH_FEEDBACK_TOL_UM ||
+            if (position < -(guard->manual_range ? MECH_MANUAL_ENDPOINT_UM : MECH_FEEDBACK_TOL_UM) ||
                 (!guard->manual_range && position > maximum_um[axis] + MECH_FEEDBACK_TOL_UM))
+            {
+                Mech_Freeze(guard, MECH_RANGE, (uint8_t)(axis + 1), now);
                 Mech_Invalidate(guard, MECH_RANGE);
+                break; /* 零点失效后不再把另一轴的INT64_MIN当成越界。 */
+            }
         }
     }
     if (result || !guard->base_stopped || guard->config_mask != 3 || guard->fault)
@@ -213,8 +250,9 @@ void Mech_Poll(MechGuard *guard, uint32_t now, uint8_t base_stopped)
     {
         for (axis = 0; axis < 2; axis++)
         {
-            if (Abs(guard->sample[axis * 4 + 1].value - guard->anchor_actual[axis]) > MECH_STABLE_RAW ||
-                Abs(guard->sample[axis * 4 + 3].value - guard->anchor_target[axis]) > MECH_STABLE_RAW)
+            int64_t tolerance = guard->manual_range ? Mech_RawTolerance(axis, MECH_MANUAL_TOL_UM) : MECH_STABLE_RAW;
+            if (Abs(guard->sample[axis * 4 + 1].value - guard->anchor_actual[axis]) > tolerance ||
+                Abs(guard->sample[axis * 4 + 3].value - guard->anchor_target[axis]) > tolerance)
             {
                 guard->stable_started = 0;
                 guard->stable_samples = 0;
@@ -345,7 +383,8 @@ uint32_t Mech_ManualPulses(uint8_t axis, int32_t target_um)
 
 uint16_t Mech_Pulse(uint8_t channel, int32_t target_mdeg)
 {
-    int32_t range = channel == MECH_ARM_CHANNEL ? MECH_ARM_RANGE_MDEG : MECH_TRAY_RANGE_MDEG;
+    int32_t range = channel == MECH_ARM_CHANNEL ? MECH_ARM_RANGE_MDEG :
+                    channel == MECH_GRIP_CHANNEL ? MECH_GRIP_RANGE_MDEG : MECH_TRAY_RANGE_MDEG;
     if (channel < 1 || channel > 3 || target_mdeg < 0 || target_mdeg > range ||
         (channel == MECH_GRIP_CHANNEL && target_mdeg > MECH_GRIP_MAX_MDEG))
         return 0;

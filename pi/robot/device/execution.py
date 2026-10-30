@@ -7,6 +7,7 @@ from . import protocol as p
 from .link import Link
 from .feedback import Feedback, FEEDBACK
 from .can_capture import CAN_CAPTURE, CaptureReader
+from .capabilities import firmware_capabilities
 from .tracking import Spec
 
 CONFIG, ARM, GOAL, STATUS = range(32, 36)
@@ -158,6 +159,7 @@ class MotionLink(Link):
         return super().step(now)
 
     def extra_request(self, now):
+        capabilities = firmware_capabilities(self.firmware)
         if self.command:
             command = self.command
             self.command = None
@@ -165,10 +167,10 @@ class MotionLink(Link):
         if now - self.last_execution >= .05:
             self.last_execution = now
             return STATUS, b''
-        if self.firmware in ('GC-BASE-0.3.9', 'GC-BASE-0.3.10', 'GC-BASE-0.3.11', 'GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19', 'GC-BASE-0.3.20', 'GC-BASE-0.3.21', 'GC-BASE-0.3.22', 'GC-BASE-0.3.23', 'GC-BASE-0.3.24') and now - self.last_fault_query >= .2:
+        if capabilities.odom_fault and now - self.last_fault_query >= .2:
             self.last_fault_query = now
             return 37, b''
-        if (self.firmware in ('GC-BASE-0.3.20', 'GC-BASE-0.3.21', 'GC-BASE-0.3.22', 'GC-BASE-0.3.23', 'GC-BASE-0.3.24') and self.execution
+        if (capabilities.start_schema == 3 and self.execution
                 and self.execution['mode'] in (0, 1) and now-self.last_start_query >= .1):
             self.last_start_query = now
             return START_STATE, b''
@@ -177,7 +179,7 @@ class MotionLink(Link):
             self.sample_kind = 5 if self.sample_kind == 4 else 4
             return FEEDBACK, bytes([self.sample_kind, 0])
         # 仅新版本且执行器静止模式才读冻结页，不挤占运动期反馈；不扩大实车运动版本白名单。
-        if (self.firmware in ('GC-BASE-0.3.12', 'GC-BASE-0.3.13', 'GC-BASE-0.3.14', 'GC-BASE-0.3.17', 'GC-BASE-0.3.18', 'GC-BASE-0.3.19', 'GC-BASE-0.3.20', 'GC-BASE-0.3.21', 'GC-BASE-0.3.22', 'GC-BASE-0.3.23', 'GC-BASE-0.3.24') and self.execution
+        if (capabilities.can_history and self.execution
                 and self.execution['mode'] in (0, 1, 6) and self.execution['can_errors']
                 and not self.can_capture.result and not self.can_capture_error
                 and now - self.last_can_capture >= .05):

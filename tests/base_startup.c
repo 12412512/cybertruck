@@ -18,12 +18,21 @@ HAL_StatusTypeDef HAL_CAN_ActivateNotification(CAN_HandleTypeDef *can, uint32_t 
 uint32_t HAL_GPIO_ReadPin(void *port, uint32_t pin)
 { (void)pin; return port == START_KEY_GPIO_Port && physical_key ? GPIO_PIN_RESET : GPIO_PIN_SET; }
 void HAL_GPIO_WritePin(void *port, uint32_t pin, uint32_t state)
-{ CHECK(port == BUZZER_GPIO_Port && pin == BUZZER_Pin && state == GPIO_PIN_SET); }
+{
+    CHECK(port == BUZZER_GPIO_Port && pin == BUZZER_Pin);
+#ifndef QUERY_ALLOW_PWM
+    CHECK(state == GPIO_PIN_SET);
+#else
+    CHECK(state == GPIO_PIN_SET || state == GPIO_PIN_RESET);
+#endif
+}
 int Port_Imu(ImuSample *sample) { (void)sample; return 0; }
 uint16_t Port_Diag(uint8_t *data) { (void)data; return 0; }
 #ifndef BASE_REAL_MECH
 void MechPort_Init(void) { }
 static uint8_t mech_active;
+static uint8_t mech_manual;
+uint8_t MechPort_Manual(void) { return mech_manual; }
 uint8_t MechPort_Active(uint32_t *id,uint32_t *channel) { *id=mech_active?32:0;*channel=2;return mech_active; }
 static uint8_t reset_ready;
 uint8_t MechPort_CanReset(uint32_t now,uint32_t version) { (void)now;return reset_ready && version==7; }
@@ -43,6 +52,11 @@ uint8_t MechPort_Output(BusFrame frames[2], uint32_t now)
 void MechPort_Sent(uint8_t accepted, uint32_t now) { (void)accepted; (void)now; }
 void MechPort_QueryAccept(void) { CHECK(0); }
 uint8_t MechPort_Owned(void) { return 0; }
+uint8_t MechPort_Holding(void) { return 0; }
+uint8_t MechPort_HoldCheck(uint32_t now) { (void)now; return 0; }
+uint8_t MechPort_Handoff(uint8_t type, const uint8_t *data, uint16_t size,
+    uint8_t *reply, uint16_t *reply_size, uint32_t now, uint8_t stopped)
+{ (void)type; (void)data; (void)size; (void)reply; (void)reply_size; (void)now; (void)stopped; return COMM_READONLY; }
 #endif
 
 #ifndef BASE_STARTUP_NO_MAIN

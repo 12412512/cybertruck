@@ -1,3 +1,4 @@
+import {setText, setSteps} from './workbench-dom.js?v=1';
 /* 只准备连接。设备动作仍走唯一核心与原控制权、零点、故障检查。 */
 const panel=document.getElementById('workspace-connections');
 panel.innerHTML=`<summary><span>设备连接</span><span id="connections-brief" class="badge muted">读取连接管理器</span></summary>
@@ -18,14 +19,14 @@ const el=id=>document.getElementById(`connections-${id}`);
 const buttons=['all','device-button','vision'];
 function draw(){
     const d=state.device||{},c=state.cameras||{};
-    el('address').textContent=`${state.host||'172.20.10.4'} · ${state.username||'pi'}`;
-    el('ssh').textContent=state.ssh_connected?'已连接':'未连接';
-    el('device').textContent=d.connected?(d.base_fault||d.mechanism_fault?`在线 · 故障 ${d.base_fault}/${d.mechanism_fault}`:'在线 · 仅连接'):'未连接';
-    el('mech').textContent=d.connected?(d.attached?'已接入':'未附着；在机械页接入'):'未连接';
-    el('cameras').textContent=`${c.material?.available?'在线':'未就绪'} / ${c.qr?.available?'在线':'未就绪'}`;
+    setText(el('address'),`${state.host||'172.20.10.4'} · ${state.username||'pi'}`);
+    setText(el('ssh'),state.ssh_connected?'已连接':'未连接');
+    setText(el('device'),d.connected?(d.base_fault||d.mechanism_fault?`在线 · 故障 ${d.base_fault}/${d.mechanism_fault}`:'在线 · 仅连接'):'未连接');
+    setText(el('mech'),d.connected?(d.attached?'已接入':'未附着；在机械页接入'):'未连接');
+    setText(el('cameras'),`${c.material?.available?'在线':'未就绪'} / ${c.qr?.available?'在线':'未就绪'}`);
     const busy=pending||state.busy;
     for(const id of buttons)el(id).disabled=busy||!state.available;
-    el('brief').textContent=busy?'正在连接':d.connected&&state.vision_connected?'实车与视觉在线':d.connected?'实车在线':state.ssh_connected?'SSH在线 · 设备待核对':'未连接';
+    setText(el('brief'),busy?'正在连接':d.connected&&state.vision_connected?'实车与视觉在线':d.connected?'实车在线':state.ssh_connected?'SSH在线 · 设备待核对':'未连接');
     el('brief').className=`badge ${d.connected?'good':'muted'}`;
     el('password').placeholder=state.credential_cached?'已保留本次密码，无需重复填写':'首次连接填写；仅保留本机内存';
     el('errors').replaceChildren(...Object.entries(state.results||{}).filter(([,v])=>!v.ok).map(([name,v])=>{
@@ -37,8 +38,8 @@ async function poll(){
     try{
         const response=await fetch('/api/connections/state',{cache:'no-store'});
         if(!response.ok)throw Error('连接管理器状态读取失败');
-        state=await response.json();el('message').textContent=state.message;
-    }catch(error){state={available:false};el('message').textContent=error.message;}
+        state=await response.json();setText(el('message'),state.message);
+    }catch(error){state={available:false};setText(el('message'),error.message);}
     finally{polling=false;draw();}
 }
 async function connect(component){
@@ -48,8 +49,8 @@ async function connect(component){
         const response=await fetch('/api/connections/connect',{method:'POST',headers:{'Content-Type':'application/json','X-Workbench':'1'},
             body:JSON.stringify({component,password,confirmed_reopen:el('confirm').checked})});
         const value=await response.json();if(!response.ok)throw Error(value.detail||'连接准备被拒绝');
-        el('message').textContent='正在准备连接；请等待结果，不要重复点击。';el('confirm').checked=false;
-    }catch(error){el('message').textContent=error.message;}
+        setText(el('message'),'正在准备连接；请等待结果，不要重复点击。');el('confirm').checked=false;
+    }catch(error){setText(el('message'),error.message);}
     finally{pending=false;await poll();}
 }
 el('all').onclick=()=>connect('all');el('device-button').onclick=()=>connect('device');el('vision').onclick=()=>connect('vision');

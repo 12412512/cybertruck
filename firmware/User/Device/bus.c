@@ -25,6 +25,7 @@ static uint8_t job, job_wheel, batch, batch_wheel, latest, query_index, prefer_q
 static uint8_t stop_bits[32], stop_address, four_stop;
 static uint16_t stop_cursor = 1;
 static int16_t latest_rpm[4], batch_rpm[4];
+static uint32_t batch_sent_tick[4];
 static uint32_t latest_sequence, batch_sequence, batch_tick, query_tick, stop_tick;
 static uint32_t seen_errors, seen_overflow;
 static uint8_t waiting, wait_reported;
@@ -43,6 +44,18 @@ void Bus_Observe(void (*receive)(const BusFrame *frame))
 /* finite_owned直到人工确认后的BusRearm才清除；不能中途换地址或续发运动。 */
 static uint8_t finite_owned, finite_pending, finite_wheel;
 static uint8_t mech_watch;
+static uint8_t hold_watch, hold_query_index;
+static uint32_t hold_tx_tick, hold_rx_tick;
+static uint8_t hold_tx_valid, hold_rx_valid;
+static uint32_t hold_sample_tick[20];
+static uint8_t hold_sample_valid[20];
+
+void Bus_HoldWatch(uint8_t enabled)
+{
+    hold_watch = (uint8_t)!!enabled;
+    hold_query_index = 0;
+    hold_tx_valid = hold_rx_valid = 0;
+}
 static uint8_t mech_group_grant;
 static uint8_t finite_address[4], finite_dir[4];
 static uint16_t finite_rpm;
@@ -200,7 +213,7 @@ int Bus_Start(void)
         query_tick = now - BUS_QUERY_INTERVAL_MS;
     }
     bus_diag.active = 1;
-    prefer_query = BUS_QUERIES_PER_BATCH;
+    prefer_query = hold_watch ? 8U : BUS_QUERIES_PER_BATCH;
     return 1;
 }
 void Bus_End(void)
@@ -434,6 +447,24 @@ static void Receive(void)
     uint8_t i, n, finite_target;
     for (n = 0; n < CAN_RING_SIZE && Can_Read(&frame); n++)
     {
+        uint8_t address = (uint8_t)(frame.id >> 8);
+        if (address >= 1 && address <= 6 && Drive_Parse(&frame, address, &reply))
+        {
+            uint8_t channel = reply.code == 0x35 ? 0 : reply.code == 0x36 ? 1 :
+                              reply.code == 0x3A ? 2 : reply.code == 0x33 ? 3 : 255;
+            if ((address <= 4 && channel < 3) || (address >= 5 && channel < 4))
+            {
+                uint8_t slot = address <= 4 ? (uint8_t)((address - 1U) * 3U + channel) :
+                    (uint8_t)(12U + (address - 5U) * 4U + channel);
+                hold_sample_tick[slot] = reply.tick;
+                hold_sample_valid[slot] = 1;
+            }
+        }
+        if (hold_watch && (frame.id >> 8) >= 5 && (frame.id >> 8) <= 6)
+        {
+            hold_rx_tick = frame.tick;
+            hold_rx_valid = 1;
+        }
         if (observer)
             observer(&frame);
         /* RX时必须已有当前事务真实TXOK证据；不比较RX与延迟执行的TX回调时间。
@@ -618,6 +649,11 @@ static void Complete(uint32_t now)
         return;
     if (state == CAN_SENT && reply_wait)
     {
+        if (hold_watch && reply_address >= 5 && reply_address <= 6)
+        {
+            hold_tx_tick = can_diag.tx_done_tick;
+            hold_tx_valid = 1;
+        }
         if (!reply_matched)
         {
             if ((uint32_t)(now - reply_start) < BUS_REPLY_TIMEOUT_MS)
@@ -678,16 +714,20 @@ static void Complete(uint32_t now)
     }
     else if (previous == JOB_SPEED)
     {
+        batch_sent_tick[batch_wheel] = can_diag.tx_done_tick;
         batch_wheel++;
         if (batch_wheel == 4)
         {
             batch = 0;
             for (i = 0; i < 4; i++)
+            {
                 bus_diag.sent_rpm[i] = batch_rpm[i];
+                bus_diag.sent_wheel_tick[i] = batch_sent_tick[i];
+            }
             bus_diag.sent_tick = now;
             bus_diag.speed_sent_sequence = batch_sequence;
             bus_diag.speed_span_ms = now - batch_tick;
-            prefer_query = BUS_QUERIES_PER_BATCH;
+            prefer_query = hold_watch ? 8U : BUS_QUERIES_PER_BATCH;
             bus_diag.speed_batches++;
         }
     }
@@ -801,12 +841,52 @@ void Bus_Poll(void)
     else if (bus_diag.active && (uint32_t)(now - query_tick) >= BUS_QUERY_INTERVAL_MS &&
              (prefer_query || !latest))
     {
-        i = (uint8_t)(query_index / 2U);
-        op = (query_index & 1U) ? 0x36 : 0x35;
-        count = Drive_Build(addresses[i], op, 0, 0, 0, 0, 0, 0, frames);
+        uint8_t address;
+        if (hold_watch)
+        {
+            /* 轮/轴交错，避免连续两笔机构查询违反旧驱动冷却间隔。 */
+            static const uint8_t slots[20] = {0,12,1,13,2,14,3,15,4,16,5,17,6,18,7,19,8,9,10,11};
+            static const uint8_t codes[4] = {0x35, 0x36, 0x3A, 0x33};
+            uint8_t slot = slots[hold_query_index];
+            uint32_t oldest = 0;
+            for (uint8_t n = 0; n < 20; n++)
+            {
+                uint8_t candidate = slots[(hold_query_index + n) % 20U];
+                uint32_t age = hold_sample_valid[candidate] ? now - hold_sample_tick[candidate] : UINT32_MAX;
+                /* 活动轮询延续旧四轮速度/位置优先级，机构八项同等优先。
+                 * 轮状态在使能/停车时由静态查询补齐，活动期仍低频观察。 */
+                if (candidate < 12 && candidate % 3U == 2 && age != UINT32_MAX)
+                    age /= 2U;
+                if (candidate >= 12 &&
+                    ((hold_tx_valid && (uint32_t)(now - hold_tx_tick) < 10U) ||
+                     (hold_rx_valid && (uint32_t)(now - hold_rx_tick) < 12U)))
+                    continue;
+                if (age >= oldest)
+                {
+                    oldest = age;
+                    slot = candidate;
+                }
+            }
+            i = slot < 12 ? slot / 3U : 0;
+            address = slot < 12 ? addresses[i] : (uint8_t)(5U + (slot - 12U) / 4U);
+            op = slot < 12 ? codes[slot % 3U] : codes[(slot - 12U) % 4U];
+            if (address >= 5 && ((hold_tx_valid && (uint32_t)(now - hold_tx_tick) < 10U) ||
+                                (hold_rx_valid && (uint32_t)(now - hold_rx_tick) < 12U)))
+                return;
+        }
+        else
+        {
+            i = (uint8_t)(query_index / 2U);
+            address = addresses[i];
+            op = (query_index & 1U) ? 0x36 : 0x35;
+        }
+        count = Drive_Build(address, op, 0, 0, 0, 0, 0, 0, frames);
         if (count && Submit(JOB_QUERY, i, frames, count))
         {
-            query_index = (uint8_t)((query_index + 1U) % 8U);
+            if (hold_watch)
+                hold_query_index = (uint8_t)((hold_query_index + 1U) % 20U);
+            else
+                query_index = (uint8_t)((query_index + 1U) % 8U);
             query_tick = now;
             if (prefer_query)
                 prefer_query--;

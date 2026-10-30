@@ -111,7 +111,7 @@ class Plant:
 
 class ClosedLoop:
     def __init__(self, library, kind='diagonal', *, config=None, stalled=False,
-                 ack=True, disturbance=True, base_ms=0, ideal=False, auto_start=True, calibration=None):
+                 ack=True, disturbance=True, base_ms=0, ideal=False, auto_start=True, calibration=None, send_delay_ms=10):
         self.calibration = calibration if calibration is not None else fixture()
         self.native = Odometry(library, self.calibration, base_ms)
         self.config = config if config is not None else settings(self.calibration)
@@ -123,6 +123,7 @@ class ClosedLoop:
         self.kind = kind
         self.base_ms = base_ms
         self.ack = ack
+        self.send_delay_ms = send_delay_ms
         self.disturbance = disturbance
         self.elapsed_ms = -10
         self.sequence = self.request = self.frames = 0
@@ -218,7 +219,7 @@ class ClosedLoop:
             self.plant.targets[:] = [0] * 4
         elif output['output_id'] != self.last_output:
             self.last_output = output['output_id']
-            self.pending.append((tick + 16, list(output['rpm']), output['id'], output['zero_id']))
+            self.pending.append((tick + 6 + self.send_delay_ms, list(output['rpm']), output['id'], self.tracker.token()))
         if self.started and self.pose['valid']:
             self.append(self.trace, self.pose)
             self.append(self.reference_trace, output['reference'])

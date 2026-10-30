@@ -55,7 +55,10 @@ static void Prepare(void)
     Frame_Put(data+4,1,4);Frame_Put(data+8,30000,4);Frame_Put(data+12,180000,4);Frame_Put(data+16,98000,4);data[20]=1;
     CHECK(Command(51,data,21)==0);CHECK(!writes&&!starts);
 }
-int main(int argc,char **argv)
+#ifndef PORT_MAIN
+#define PORT_MAIN main
+#endif
+int PORT_MAIN(int argc,char **argv)
 {
     unsigned which=argc>1?(unsigned)atoi(argv[1]):0,n;
     uint8_t data[96]={0},response[128];uint16_t size=0;BusFrame frames[2];
@@ -127,7 +130,7 @@ int main(int argc,char **argv)
                 memset(data,0,sizeof(data));Frame_Put(data+4,1,4);Frame_Put(data+8,1,4);
                 Frame_Put(data+12,15000,4);Frame_Put(data+16,31,4);
                 int32_t targets[5]={2000,2000,0,359000,98000};
-                for(n=0;n<5;n++){Frame_Put(data+20+n*4,(uint32_t)(which==46&&n==4?99000:targets[n]),4);Frame_Put(data+40+n*4,n<2?5:180000,4);}
+                for(n=0;n<5;n++){Frame_Put(data+20+n*4,(uint32_t)(which==46&&n==4?100001:targets[n]),4);Frame_Put(data+40+n*4,n<2?5:180000,4);}
                 uint32_t accepted=Command(63,data,60);
                 if(which==46||which==47){CHECK(accepted==(which==46?MECH_RANGE:MECH_MANUAL)&&!writes&&!starts&&!sends);return 0;}
                 CHECK(!accepted&&group.state==GROUP_RUNNING);

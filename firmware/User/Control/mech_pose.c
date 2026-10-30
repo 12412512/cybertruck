@@ -100,7 +100,7 @@ uint32_t Pose_Preview(const Pose *pose, const PoseGoal *goal, PoseStep steps[8],
     /* 实车先逐舵机验收首次PWM；姿态执行不隐式激活未输出的通道。 */
     if (!pose->servo->simulation && pose->servo->output_mask != 7)
         return SERVO_REFERENCE;
-    if (pose->servo->hold_possible && goal->target[4] != MECH_GRIP_MAX_MDEG && !goal->release_confirmed)
+    if (pose->servo->hold_possible && goal->target[4] < MECH_GRIP_HOLD_MDEG && !goal->release_confirmed)
         return SERVO_HOLD;
     state[0] = (int32_t)Mech_Position(guard, 0);
     state[1] = (int32_t)Mech_Position(guard, 1);

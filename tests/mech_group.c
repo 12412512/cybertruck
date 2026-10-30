@@ -5,7 +5,7 @@
 #include "mech_group.h"
 static Servo servo;
 static Group group;
-static GroupGoal request={1,1,12000,31,{10000,8000,30000,359000,60000},{5,5,120000,120000,120000}};
+static GroupGoal request={1,1,12000,31,{10000,8000,30000,359000,60000},{5,5,120000,120000,120000},{0,0},0};
 static unsigned overlap,pwm_while_axis,frames_sent,pwms;
 static int64_t plant[2],target[2];
 static int64_t Magnitude(int64_t value){return value<0?-value:value;}
@@ -52,11 +52,15 @@ static void Tick(void)
         pwms++;Group_Applied(&group,i,&output,1,now);
     }
 }
-int main(int argc,char **argv)
+#ifndef GROUP_MAIN
+#define GROUP_MAIN main
+#endif
+int GROUP_MAIN(int argc,char **argv)
 {
     unsigned which=argc>1?(unsigned)atoi(argv[1]):0;
     Setup();
-    if(which==1){request.target[4]=99000;CHECK(Group_Begin(&group,&request,now)==MECH_RANGE);CHECK(!Group_Take(&group,(BusFrame[2]){{0}},now)&&!pwms&&!frames_sent);return 0;}
+    if(which==1){request.target[4]=100001;CHECK(Group_Begin(&group,&request,now)==MECH_RANGE);CHECK(!Group_Take(&group,(BusFrame[2]){{0}},now)&&!pwms&&!frames_sent);return 0;}
+    if(which==8||which==9)request.target[4]=which==8?99000:100000;
     if(which==6){request.mask=4;request.target[2]=0;}
     CHECK(!Group_Begin(&group,&request,now));
     CHECK(!frames_sent&&!pwms);
@@ -70,7 +74,7 @@ int main(int argc,char **argv)
     CHECK(group.state==GROUP_DONE&&guard.zero_valid&&!guard.concurrent_axes);
     if(which==6){CHECK(!frames_sent&&pwms);return 0;}
     CHECK(frames_sent==2&&pwms&&overlap&&pwm_while_axis);
-    CHECK(servo.command_mdeg[0]==30000&&servo.command_mdeg[1]==359000&&servo.command_mdeg[2]==60000);
+    CHECK(servo.command_mdeg[0]==30000&&servo.command_mdeg[1]==359000&&servo.command_mdeg[2]==request.target[4]);
     CHECK(!Servo_Reference(&servo,2));
     for(unsigned n=0;n<6;n++)Tick();
     request.id=2;request.target[0]=request.target[1]=0;request.target[3]=0;

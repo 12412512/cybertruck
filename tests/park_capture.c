@@ -23,8 +23,8 @@ int main(int argc,char **argv)
     if(which==5)can_diag.errors=1;
     if(which==6){mech_active=0;w[0].speed.value=4;}
     Park_Capture(tick);
-    CHECK(Command(69,0,0,reply,&size,tick)==COMM_OK && size==120);
-    CHECK(Frame_Get(reply,4)==1 && Frame_Get(reply+4,4)==(which<6));
+    CHECK(Command(69,0,0,reply,&size,tick)==COMM_OK && size==124);
+    CHECK(Frame_Get(reply,4)==2 && Frame_Get(reply+4,4)==(which<6));
     if(which<6)
     {
         unsigned expected[]={4,2,1,8,16,32};
@@ -36,7 +36,7 @@ int main(int argc,char **argv)
         memcpy(first,reply,size);
         w[0].speed.value=100;can_diag.errors=5;executor.stop_confirmed=0;
         Park_Capture(tick+20);
-        CHECK(Command(69,0,0,reply,&size,tick+20)==COMM_OK && !memcmp(reply,first,size));
+        CHECK(Command(69,0,0,reply,&size,tick+20)==COMM_OK && !memcmp(reply,first,120));
         CHECK(Command(69,reply,1,first,&size,tick)==COMM_FORMAT);
     }
     else CHECK(!park_failure.captured);

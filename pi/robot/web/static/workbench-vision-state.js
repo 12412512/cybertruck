@@ -44,7 +44,10 @@ export const sourceName = result => ({
 export function liveAge(result, received, now, roundTrip) {
     if (result?.domain !== 'camera_live') return null;
     if (!Number.isFinite(result.age_ms) || result.age_ms < 0) return Infinity;
-    return result.age_ms + Math.max(0, now - received) + Math.max(0, roundTrip);
+    // 网关处理时间已经包含在age_ms里；仅补浏览器与网关间剩余传输时间。
+    const proxy = result.proxy_elapsed_ms;
+    const extra = Number.isFinite(proxy) && proxy >= 0 && proxy <= roundTrip ? roundTrip-proxy : roundTrip;
+    return result.age_ms + Math.max(0, now - received) + Math.max(0, extra);
 }
 export function cameraHealth(live, role) {
     const camera = live?.cameras?.[role];
@@ -54,6 +57,11 @@ export function cameraHealth(live, role) {
     };
     return {
         ok: true,
-        text: `已连接 · 帧龄 ${camera.age_ms}ms`
+        text: `已连接 · 帧龄 ${camera.age_ms}ms${Number.isFinite(camera.measured_fps)?` · 采集 ${camera.measured_fps} FPS`:''}`
     };
+}
+
+export function previewDelay(fps, elapsed) {
+    const limit = [6,12,20].includes(fps) ? fps : 12;
+    return Math.max(0, 1000/limit - Math.max(0, Number.isFinite(elapsed) ? elapsed : 0));
 }

@@ -1,4 +1,4 @@
-"""Extracted unchanged from the inspected ring_step1/ring_detector.py digit path.
+"""沿用旧数字模板和判定；预计算平移模板，以压缩位运算减少逐帧开销。
 Unknown below similarity .58 or margin .08; rotation templates cover 360 degrees.
 """
 from pathlib import Path
@@ -51,6 +51,9 @@ class DigitClassifier:
 
     def __init__(self, template_dir: Path):
         self.rotations: dict[int, list[np.ndarray]] = {}
+        self.packed = {}
+        self.areas = {}
+        self.bit_counts = np.array([value.bit_count() for value in range(256)], dtype=np.uint8)
         for number in (1, 2, 3):
             path = template_dir / f"templ_{number}.png"
             if not path.exists():
@@ -70,21 +73,26 @@ class DigitClassifier:
                 > 0
                 for angle in range(0, 360, 10)
             ]
+            # 与旧np.roll的环绕和平移顺序一致；只预计算，不更改模板或分数。
+            shifted = np.stack([
+                np.roll(rotation, shift=(dy, dx), axis=(0, 1)).reshape(-1)
+                for rotation in self.rotations[number]
+                for dx, dy in ((0, 0), (-2, 0), (2, 0), (0, -2), (0, 2))
+            ])
+            self.packed[number] = np.packbits(shifted, axis=1)
+            self.areas[number] = np.count_nonzero(shifted, axis=1)
 
     def score(self, digit: np.ndarray | None) -> dict[int, float]:
         if digit is None:
             return {number: 0.0 for number in (1, 2, 3)}
         target = cv2.resize(digit, (80, 80), interpolation=cv2.INTER_NEAREST) > 0
+        packed_target = np.packbits(target.reshape(-1))
+        target_area = np.count_nonzero(target)
         scores: dict[int, float] = {}
-        for number, rotations in self.rotations.items():
-            best = 0.0
-            for rotation in rotations:
-                for dx, dy in ((0, 0), (-2, 0), (2, 0), (0, -2), (0, 2)):
-                    shifted = np.roll(rotation, shift=(dy, dx), axis=(0, 1))
-                    overlap = np.count_nonzero(shifted & target)
-                    union = np.count_nonzero(shifted | target)
-                    best = max(best, overlap / max(1, union))
-            scores[number] = float(best)
+        for number, templates in self.packed.items():
+            overlap = self.bit_counts[np.bitwise_and(templates, packed_target)].sum(axis=1)
+            union = self.areas[number] + target_area - overlap
+            scores[number] = float(np.max(overlap / np.maximum(1, union)))
         return scores
 
     def predict_detail(self, digit: np.ndarray | None) -> tuple[str, float, float, dict[int, float]]:
