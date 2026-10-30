@@ -1,6 +1,7 @@
 """迁入观测、旧帧拒绝及Web隔离；不打开实物设备。"""
 
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -38,10 +39,12 @@ class VisionTests(unittest.TestCase):
         def legacy(channels, sample):
             lab = channels.transpose(1, 2, 0)
             return np.linalg.norm((lab-np.float32(sample['lab']))/np.float32(sample['scale']), axis=2)
-        files = json.loads((ROOT / 'output/vision/samples.json').read_text(encoding='utf-8'))
+        # 外置交接包显式提供测试素材，不复制旧运行目录或恢复保存状态。
+        samples_root = Path(os.environ.get('ROBOT_VISION_SAMPLE_ROOT', ROOT / 'output/vision'))
+        files = json.loads((samples_root / 'samples.json').read_text(encoding='utf-8'))
         frames = [np.random.default_rng(4).integers(0, 256, (720,1280,3), dtype=np.uint8)]
         for item in files:
-            path = ROOT / 'output/vision/samples' / item['file']
+            path = samples_root / 'samples' / item['file']
             self.assertTrue(path.exists())
             frames.append(cv2.imdecode(np.frombuffer(path.read_bytes(), dtype=np.uint8), cv2.IMREAD_COLOR))
         for frame in frames:
